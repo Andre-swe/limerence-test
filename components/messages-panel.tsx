@@ -77,19 +77,23 @@ function visibleMessages(messages: DisplayMessage[]) {
 }
 
 function channelLabel(message: MessageEntry) {
+  if (message.role === "user") {
+    return "You";
+  }
+
   if (message.channel === "heartbeat") {
-    return "arrival";
+    return "Arrival";
   }
 
   if (message.kind === "audio") {
-    return "voice note";
+    return "Voice note";
   }
 
   if (message.kind === "image") {
-    return "image";
+    return "Image";
   }
 
-  return "message";
+  return "Message";
 }
 
 function bodyIsJustImagePlaceholder(message: MessageEntry) {
@@ -304,133 +308,134 @@ export function MessagesPanel({
   }
 
   return (
-    <section className="soft-panel mx-auto max-w-3xl rounded-[36px] px-5 py-5 sm:px-6 sm:py-6">
+    <section className="soft-panel mx-auto flex max-w-3xl flex-col rounded-[36px] px-5 py-5 sm:px-6 sm:py-6">
       <div className="border-b border-[var(--line)] pb-4">
         <p className="eyebrow">Messages</p>
-        <h2 className="serif-title mt-2 text-4xl text-[var(--sage-deep)]">{personaName}</h2>
       </div>
 
-      {isLocked ? (
-        <div className="mt-5 rounded-[24px] border border-[rgba(199,161,101,0.22)] bg-[rgba(199,161,101,0.12)] px-4 py-4 text-sm leading-6 text-[var(--sage-deep)]">
-          This person is not available yet.
-        </div>
-      ) : (
-        <div className="mt-5 space-y-4">
-          <textarea
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            rows={3}
-            placeholder={`Message ${personaName}`}
-            className="w-full rounded-[26px] border border-[var(--line)] bg-[rgba(255,255,255,0.84)] px-5 py-4 text-sm outline-none"
-          />
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={isSending || text.trim().length === 0}
-              onClick={() => {
-                void submit({ text });
-              }}
-              className="inline-flex items-center gap-2 rounded-full bg-[var(--sage-deep)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {isSending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <SendHorizontal className="h-4 w-4" />
-              )}
-              Send
-            </button>
+      <div className="mt-5 flex min-h-[28rem] flex-col">
+        <div className="flex-1 space-y-3">
+          {visibleMessages(messages).map((message) => {
+            const images = imageAttachments(message);
+            const showBody = message.body.trim().length > 0 && !bodyIsJustImagePlaceholder(message);
 
-            <button
-              type="button"
-              onClick={() => voiceInputRef.current?.click()}
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] px-4 py-2.5 text-sm font-medium text-[var(--sage-deep)]"
-            >
-              <Upload className="h-4 w-4" />
-              Voice note
-            </button>
-
-            <button
-              type="button"
-              onClick={() => imageInputRef.current?.click()}
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] px-4 py-2.5 text-sm font-medium text-[var(--sage-deep)]"
-            >
-              <ImagePlus className="h-4 w-4" />
-              Image
-            </button>
-
-            <input
-              ref={voiceInputRef}
-              type="file"
-              accept="audio/*"
-              className="hidden"
-              onChange={async (event) => {
-                const file = event.target.files?.[0];
-                if (file) {
-                  await submit({ file, text });
-                  event.target.value = "";
-                }
-              }}
-            />
-
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={async (event) => {
-                const files = Array.from(event.target.files ?? []);
-                if (files.length > 0) {
-                  await submit({ images: files, text });
-                  event.target.value = "";
-                }
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 space-y-3">
-        {visibleMessages(messages).map((message) => {
-          const images = imageAttachments(message);
-          const showBody = message.body.trim().length > 0 && !bodyIsJustImagePlaceholder(message);
-
-          return (
-            <article
-              key={message.id}
-              className={`max-w-[88%] rounded-[24px] px-4 py-4 ${
-                message.role === "assistant"
-                  ? "mr-auto bg-[rgba(255,255,255,0.86)] text-[var(--sage-deep)]"
-                  : "ml-auto bg-[var(--sage-deep)] text-white"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-[11px] uppercase tracking-[0.18em] opacity-60">
-                  {message.role === "assistant" ? personaName : channelLabel(message)}
-                </p>
-                <p className="text-[11px] opacity-55">{formatDateTime(message.createdAt)}</p>
-              </div>
-
-              {showBody ? (
-                <p
-                  className={`mt-3 text-sm leading-7 ${
-                    message.optimistic && message.role === "assistant" ? "animate-pulse opacity-70" : ""
-                  }`}
-                >
-                  {message.body}
-                </p>
-              ) : null}
-              <AttachmentStrip attachments={images} />
-              <AudioStrip message={message} />
-
-              {message.role === "assistant" && !message.optimistic ? (
-                <div className="mt-4">
-                  <FeedbackButton personaId={personaId} messageId={message.id} />
+            return (
+              <article
+                key={message.id}
+                className={`max-w-[88%] rounded-[24px] px-4 py-4 ${
+                  message.role === "assistant"
+                    ? "mr-auto bg-[rgba(255,255,255,0.86)] text-[var(--sage-deep)]"
+                    : "ml-auto bg-[var(--sage-deep)] text-white"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-[11px] uppercase tracking-[0.18em] opacity-60">
+                    {message.role === "assistant" ? personaName : channelLabel(message)}
+                  </p>
+                  <p className="text-[11px] opacity-55">{formatDateTime(message.createdAt)}</p>
                 </div>
-              ) : null}
-            </article>
-          );
-        })}
+
+                {showBody ? (
+                  <p
+                    className={`mt-3 text-sm leading-7 ${
+                      message.optimistic && message.role === "assistant" ? "animate-pulse opacity-70" : ""
+                    }`}
+                  >
+                    {message.body}
+                  </p>
+                ) : null}
+                <AttachmentStrip attachments={images} />
+                <AudioStrip message={message} />
+
+                {message.role === "assistant" && !message.optimistic ? (
+                  <div className="mt-4">
+                    <FeedbackButton personaId={personaId} messageId={message.id} />
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+
+        {isLocked ? (
+          <div className="mt-5 rounded-[24px] border border-[rgba(199,161,101,0.22)] bg-[rgba(199,161,101,0.12)] px-4 py-4 text-sm leading-6 text-[var(--sage-deep)]">
+            This person is not available yet.
+          </div>
+        ) : (
+          <div className="mt-6 border-t border-[var(--line)] pt-5">
+            <textarea
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              rows={3}
+              placeholder={`Message ${personaName}`}
+              className="w-full rounded-[26px] border border-[var(--line)] bg-[rgba(255,255,255,0.84)] px-5 py-4 text-sm outline-none"
+            />
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={isSending || text.trim().length === 0}
+                onClick={() => {
+                  void submit({ text });
+                }}
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--sage-deep)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {isSending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <SendHorizontal className="h-4 w-4" />
+                )}
+                Send
+              </button>
+
+              <button
+                type="button"
+                onClick={() => voiceInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] px-4 py-2.5 text-sm font-medium text-[var(--sage-deep)]"
+              >
+                <Upload className="h-4 w-4" />
+                Voice note
+              </button>
+
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] px-4 py-2.5 text-sm font-medium text-[var(--sage-deep)]"
+              >
+                <ImagePlus className="h-4 w-4" />
+                Image
+              </button>
+
+              <input
+                ref={voiceInputRef}
+                type="file"
+                accept="audio/*"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    await submit({ file, text });
+                    event.target.value = "";
+                  }
+                }}
+              />
+
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={async (event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  if (files.length > 0) {
+                    await submit({ images: files, text });
+                    event.target.value = "";
+                  }
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

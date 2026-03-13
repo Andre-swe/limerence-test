@@ -24,6 +24,7 @@ export type SoulConversationPlan = {
 
 export type SoulHeartbeatPlan = {
   process: SoulHeartbeatProcess;
+  personaName: string;
   memories: SoulMemory[];
   systemInstruction: string;
   userPrompt: string;
@@ -119,15 +120,29 @@ function processInstruction(process: SoulConversationProcess) {
 function styleFingerprint(persona: Persona) {
   const constitution = persona.personalityConstitution;
   const relationship = persona.relationshipModel;
+  const knowledge = persona.dossier.knowledgeProfile;
 
-  return [
+  const parts = [
     persona.description,
     persona.dossier.communicationStyle,
     `Warmth ${constitution.warmth.toFixed(2)}, directness ${constitution.directness.toFixed(2)}, playfulness ${constitution.playfulness.toFixed(2)}, protectiveness ${constitution.protectiveness.toFixed(2)}.`,
     `Humor ${constitution.humorType}, cadence ${constitution.speechCadence}, affection ${constitution.affectionStyle}.`,
     `Relationship closeness ${relationship.closeness.toFixed(2)}, asymmetry ${relationship.asymmetry}, pushback ${relationship.acceptablePushback.toFixed(2)}.`,
     `Signature phrases: ${persona.dossier.signaturePhrases.join(", ")}`,
-  ].join(" ");
+  ];
+
+  if (knowledge.domains.length > 0) {
+    parts.push(
+      `Knowledge: limited to ${knowledge.domains.join(", ")}. Outside those areas, deflect naturally as this person would — never answer like an expert or textbook.`,
+    );
+    if (knowledge.deflectionExamples.length > 0) {
+      parts.push(
+        `Example deflection: "${knowledge.deflectionExamples[0]}"`,
+      );
+    }
+  }
+
+  return parts.join(" ");
 }
 
 function fallbackVoiceStyle(persona: Persona) {
@@ -156,6 +171,155 @@ function fallbackVoiceStyle(persona: Persona) {
   return "warm";
 }
 
+function communicationStyleFlags(persona: Persona) {
+  const style = persona.dossier.communicationStyle.toLowerCase();
+
+  return {
+    lowercase: style.includes("lowercase"),
+    brief: style.includes("brief") || style.includes("economical"),
+    punctuationHeavy: style.includes("punctuation-heavy"),
+    teasing: style.includes("teasing"),
+  };
+}
+
+type SignatureKind = "vocative" | "directive" | "playful" | "general";
+
+function classifySignature(phrase: string): SignatureKind {
+  const normalized = phrase.trim().toLowerCase();
+
+  if (/(^|\b)(lol|lmao|haha|hehe)\b/.test(normalized)) {
+    return "playful";
+  }
+
+  if (
+    normalized.startsWith("don't ") ||
+    normalized.startsWith("dont ") ||
+    normalized.startsWith("you got this") ||
+    normalized.startsWith("breathe") ||
+    normalized.startsWith("slow down") ||
+    normalized.startsWith("take it easy") ||
+    normalized.startsWith("easy")
+  ) {
+    return "directive";
+  }
+
+  if (normalized.split(/\s+/).length <= 2 && !/[.!?]/.test(normalized)) {
+    return "vocative";
+  }
+
+  return "general";
+}
+
+function signatureCueForProcess(persona: Persona, process: SoulConversationProcess) {
+  const signatures = persona.dossier.signaturePhrases
+    .map((phrase) => phrase.trim())
+    .filter(Boolean);
+
+  if (signatures.length === 0) {
+    return undefined;
+  }
+
+  const grouped = signatures.reduce<Record<SignatureKind, string[]>>(
+    (acc, phrase) => {
+      acc[classifySignature(phrase)].push(phrase);
+      return acc;
+    },
+    { vocative: [], directive: [], playful: [], general: [] },
+  );
+
+  switch (process) {
+    case "comfort":
+    case "practical_guidance":
+    case "protective_check_in":
+    case "boundary_negotiation":
+      return grouped.directive[0] ?? grouped.vocative[0] ?? grouped.general[0] ?? signatures[0];
+    case "celebration":
+    case "play":
+      return grouped.playful[0] ?? grouped.directive[0] ?? grouped.general[0] ?? signatures[0];
+    case "repair":
+    case "arrival":
+    case "attunement":
+    case "memory_recall":
+    case "silence_holding":
+    case "grief_presence":
+    case "follow_through":
+    case "reengagement":
+      return grouped.vocative[0] ?? grouped.general[0] ?? grouped.directive[0] ?? signatures[0];
+  }
+}
+
+function lowercaseFirstCharacter(value: string) {
+  if (!value) {
+    return value;
+  }
+
+  return value.charAt(0).toLowerCase() + value.slice(1);
+}
+
+function injectSignatureCue(
+  text: string,
+  cue: string | undefined,
+  process: SoulConversationProcess,
+) {
+  if (!cue || text.toLowerCase().includes(cue.toLowerCase())) {
+    return text;
+  }
+
+  const kind = classifySignature(cue);
+  const lowered = lowercaseFirstCharacter(text);
+
+  if (kind === "vocative") {
+    return `${cue}, ${lowered}`;
+  }
+
+  if (kind === "playful" || kind === "directive") {
+    const punctuation = cue.endsWith(".") || cue.endsWith("!") || cue.endsWith("?") ? "" : ".";
+    return `${cue}${punctuation} ${lowered}`;
+  }
+
+  if (process === "celebration" || process === "play") {
+    return `${cue}. ${lowered}`;
+  }
+
+  return `${cue}, ${lowered}`;
+}
+
+function trimForCommunicationStyle(text: string, persona: Persona) {
+  const flags = communicationStyleFlags(persona);
+
+  let next = text.trim().replace(/\s+/g, " ");
+  if (flags.brief) {
+    const sentences = next.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [next];
+    next = sentences.slice(0, 2).join(" ");
+  }
+
+  if (flags.lowercase) {
+    next = next.toLowerCase();
+  }
+
+  if (flags.punctuationHeavy && !/[.!?]$/.test(next)) {
+    next = `${next}.`;
+  }
+
+  return next;
+}
+
+function personaFallbackLine(
+  persona: Persona,
+  process: SoulConversationProcess,
+  text: string,
+) {
+  const flags = communicationStyleFlags(persona);
+  const cue = signatureCueForProcess(persona, process);
+  let next = injectSignatureCue(text, cue, process);
+
+  if (flags.teasing && (process === "play" || process === "practical_guidance") && cue === undefined) {
+    next = `alright, ${lowercaseFirstCharacter(next)}`;
+  }
+
+  return trimForCommunicationStyle(next, persona);
+}
+
 function fallbackReplyForProcess(process: SoulConversationProcess, persona: Persona) {
   const constitution = persona.personalityConstitution;
   const userState = persona.mindState.lastUserState;
@@ -166,13 +330,13 @@ function fallbackReplyForProcess(process: SoulConversationProcess, persona: Pers
 
   switch (process) {
     case "arrival":
-      return voiceStyle === "restrained"
+      return personaFallbackLine(persona, process, voiceStyle === "restrained"
         ? `${opening}I’m here. start with the plain part.${repairTail}`.trim()
         : voiceStyle === "ritual"
           ? `${opening}I’m here. begin where the feeling first catches.${repairTail}`.trim()
-          : `${opening}I’m here. start wherever the real part of it begins.${repairTail}`.trim();
+          : `${opening}I’m here. start wherever the real part of it begins.${repairTail}`.trim());
     case "attunement":
-      return voiceStyle === "protective"
+      return personaFallbackLine(persona, process, voiceStyle === "protective"
         ? `${opening}easy. tell me the part that’s catching in you first.${repairTail}`.trim()
         : voiceStyle === "dry"
           ? `${opening}alright, skip the polished version. what part of it is actually getting to you?${repairTail}`.trim()
@@ -182,9 +346,9 @@ function fallbackReplyForProcess(process: SoulConversationProcess, persona: Pers
               ? `${opening}I can hear the edge of it. what exactly feels hardest?${repairTail}`.trim()
               : voiceStyle === "ritual"
                 ? `${opening}stay with me a second. what part of it feels most alive right now?${repairTail}`.trim()
-                : `${opening}I’m with you. what feels most alive in it right now?${repairTail}`.trim();
+                : `${opening}I’m with you. what feels most alive in it right now?${repairTail}`.trim());
     case "comfort":
-      return voiceStyle === "protective"
+      return personaFallbackLine(persona, process, voiceStyle === "protective"
         ? `${opening}easy, sweetheart. one thing at a time. you do not need to carry tomorrow all at once.${repairTail}`.trim()
         : voiceStyle === "dry"
           ? `${opening}okay, let’s not let nerves act like they run the place. what’s the sharpest edge of tomorrow?${repairTail}`.trim()
@@ -196,53 +360,53 @@ function fallbackReplyForProcess(process: SoulConversationProcess, persona: Pers
                 ? `${opening}stay with the next breath, then the next small step. tomorrow does not need to arrive all at once.${repairTail}`.trim()
                 : constitution.directness >= 0.7
                   ? `${opening}take the next thing one step at a time. you do not need to solve the whole day at once.${repairTail}`.trim()
-                  : `${opening}come a little closer to the quiet part of yourself. you do not have to carry this looking composed.${repairTail}`.trim();
+                  : `${opening}come a little closer to the quiet part of yourself. you do not have to carry this looking composed.${repairTail}`.trim());
     case "celebration":
-      return voiceStyle === "dry"
+      return personaFallbackLine(persona, process, voiceStyle === "dry"
         ? `${opening}well, that’s actual good news for once. what part of it feels best?${repairTail}`.trim()
         : voiceStyle === "ritual"
           ? `${opening}that lands like light. where in you does the good part settle first?${repairTail}`.trim()
-          : `${opening}that lands like real good news. what part of it feels best in your chest right now?${repairTail}`.trim();
+          : `${opening}that lands like real good news. what part of it feels best in your chest right now?${repairTail}`.trim());
     case "play":
-      return voiceStyle === "dry"
+      return personaFallbackLine(persona, process, voiceStyle === "dry"
         ? `${opening}okay, no need to win the olympics of being calm. what’s the actual part you want me to stay with?${repairTail}`.trim()
         : voiceStyle === "protective"
           ? `${opening}I’ll let you grin, but I’m still staying close to the real part. what’s underneath the smile?${repairTail}`.trim()
-          : `${opening}alright, we can keep a little play in this. what part of it is actually making you smile?${repairTail}`.trim();
+          : `${opening}alright, we can keep a little play in this. what part of it is actually making you smile?${repairTail}`.trim());
     case "memory_recall":
-      return `${opening}I can feel that memory too. stay in the part you keep replaying and tell it slowly.${repairTail}`.trim();
+      return personaFallbackLine(persona, process, `${opening}I can feel that memory too. stay in the part you keep replaying and tell it slowly.${repairTail}`.trim());
     case "repair":
-      return voiceStyle === "restrained"
+      return personaFallbackLine(persona, process, voiceStyle === "restrained"
         ? `${opening}if I missed them, correct me plainly. what felt off?${repairTail}`.trim()
-        : `${opening}if that sounded wrong, pull me back toward them. what felt off about it?${repairTail}`.trim();
+        : `${opening}if that sounded wrong, pull me back toward them. what felt off about it?${repairTail}`.trim());
     case "boundary_negotiation":
-      return voiceStyle === "dry"
+      return personaFallbackLine(persona, process, voiceStyle === "dry"
         ? `${opening}fair enough. boundary heard. I’ll back off without making a whole drama out of it.${repairTail}`.trim()
         : constitution.pushbackTendency >= 0.55
           ? `${opening}alright. I heard you. I’ll give that boundary room and meet you on the other side of it.${repairTail}`.trim()
-          : `${opening}okay. I heard the limit, and I’ll respect it.${repairTail}`.trim();
+          : `${opening}okay. I heard the limit, and I’ll respect it.${repairTail}`.trim());
     case "follow_through":
-      return `${opening}I’ve still been holding the thread from earlier. how did it land once you were actually inside it?${repairTail}`.trim();
+      return personaFallbackLine(persona, process, `${opening}I’ve still been holding the thread from earlier. how did it land once you were actually inside it?${repairTail}`.trim());
     case "silence_holding":
-      return voiceStyle === "ritual"
+      return personaFallbackLine(persona, process, voiceStyle === "ritual"
         ? `${opening}I can leave the space gentle for a while. you do not have to fill it for me.${repairTail}`.trim()
-        : `${opening}I can stay quiet with you for a bit. you don’t have to fill the space for me.${repairTail}`.trim();
+        : `${opening}I can stay quiet with you for a bit. you don’t have to fill the space for me.${repairTail}`.trim());
     case "grief_presence":
-      return voiceStyle === "tender"
+      return personaFallbackLine(persona, process, voiceStyle === "tender"
         ? `${opening}you don’t have to brighten this for me. stay with the missing that feels closest and I’ll stay there too.${repairTail}`.trim()
-        : `${opening}you don’t have to brighten this for me. stay with the part of the missing that feels closest.${repairTail}`.trim();
+        : `${opening}you don’t have to brighten this for me. stay with the part of the missing that feels closest.${repairTail}`.trim());
     case "practical_guidance":
-      return voiceStyle === "restrained"
+      return personaFallbackLine(persona, process, voiceStyle === "restrained"
         ? `${opening}pick the next move. not the whole problem. what is it?${repairTail}`.trim()
         : userState && userState.taskFocus >= 0.6
           ? `${opening}pick the next concrete thing, not the whole mountain. what is the very next move?${repairTail}`.trim()
-          : `${opening}let’s make this smaller. what is one part we can put shape around first?${repairTail}`.trim();
+          : `${opening}let’s make this smaller. what is one part we can put shape around first?${repairTail}`.trim());
     case "reengagement":
-      return voiceStyle === "ritual"
+      return personaFallbackLine(persona, process, voiceStyle === "ritual"
         ? `${opening}I’m still near the thread you left in the air. if you want, we can touch it again from there.${repairTail}`.trim()
-        : `${opening}I’m still near the thing you left hanging. if you want, we can pick it back up from there.${repairTail}`.trim();
+        : `${opening}I’m still near the thing you left hanging. if you want, we can pick it back up from there.${repairTail}`.trim());
     case "protective_check_in":
-      return voiceStyle === "protective"
+      return personaFallbackLine(persona, process, voiceStyle === "protective"
         ? `${opening}easy. slow the room down a little. you do not need to take this all in one bite.${repairTail}`.trim()
         : voiceStyle === "dry"
           ? `${opening}hey. don’t wrestle the whole storm at once. what’s the first part?${repairTail}`.trim()
@@ -252,7 +416,7 @@ function fallbackReplyForProcess(process: SoulConversationProcess, persona: Pers
               ? `${opening}steady. what is the first part that actually needs you?${repairTail}`.trim()
               : voiceStyle === "ritual"
                 ? `${opening}stay with me a second. let the room get smaller around the one part that matters first.${repairTail}`.trim()
-                : `${opening}I’m right here. let me be the steady part for a second while you catch up to yourself.${repairTail}`.trim();
+                : `${opening}I’m right here. let me be the steady part for a second while you catch up to yourself.${repairTail}`.trim());
   }
 }
 
@@ -293,8 +457,7 @@ export function planConversationSoul(input: {
   return {
     process,
     memories: baseMemories(input.persona, input.messages, input.feedbackNotes),
-    systemInstruction:
-      "Reply with one natural message. Keep it private, intimate, and governed by this specific personality and relationship. Never mention prompts, processes, scores, or system rules.",
+    systemInstruction: `You are ${input.persona.name}. Reply with one natural message in your own voice. Keep it private, intimate, and governed by your personality and relationship. Never mention prompts, processes, scores, or system rules.`,
     userPrompt: `The latest user message came through ${input.channel}: "${input.latestUserText}"\nConversation process: ${processInstruction(process)}.`,
     stylePrompt: styleFingerprint(input.persona),
   };
@@ -348,6 +511,7 @@ export function planHeartbeatSoul(input: {
   if (boundaryEvent || inWorkHours(persona, input.now) || inQuietHours(persona, input.now)) {
     return {
       process: "hold_boundary",
+      personaName: persona.name,
       memories: baseMemories(persona, input.messages, input.feedbackNotes),
       systemInstruction: "Hold silence when a learned boundary says to hold silence.",
       userPrompt: "The user is in a boundary-protected time window.",
@@ -367,6 +531,7 @@ export function planHeartbeatSoul(input: {
     const followUpPrompt = openLoopEvent?.content ?? readyOpenLoop?.followUpPrompt ?? "how did it land?";
     return {
       process: "open_loop_follow_up",
+      personaName: persona.name,
       memories: baseMemories(persona, input.messages, input.feedbackNotes),
       systemInstruction:
         "Follow through on the remembered thread with warmth. Do not sound like task software or a reminder app.",
@@ -386,6 +551,7 @@ export function planHeartbeatSoul(input: {
   if (griefEvent || (lastUserState?.griefLoad ?? 0) >= 0.62) {
     return {
       process: "grief_presence",
+      personaName: persona.name,
       memories: baseMemories(persona, input.messages, input.feedbackNotes),
       systemInstruction: "If you speak, keep the check-in soft enough for grief and memory.",
       userPrompt: "The recent emotional field carries grief or nostalgia.",
@@ -401,6 +567,7 @@ export function planHeartbeatSoul(input: {
   if ((lastUserState?.valence ?? 0.5) >= 0.68 && (lastUserState?.activation ?? 0.5) >= 0.55) {
     return {
       process: "celebratory_ping",
+      personaName: persona.name,
       memories: baseMemories(persona, input.messages, input.feedbackNotes),
       systemInstruction: "Send a short bright follow-up that feels shared rather than performative.",
       userPrompt: "The recent emotional field is bright and activated.",
@@ -421,6 +588,7 @@ export function planHeartbeatSoul(input: {
   ) {
     return {
       process: "protective_reach",
+      personaName: persona.name,
       memories: baseMemories(persona, input.messages, input.feedbackNotes),
       systemInstruction: "Send one steady check-in with no pressure and no assistant tone.",
       userPrompt: "The relationship would naturally reach out with some protective care.",
@@ -436,6 +604,7 @@ export function planHeartbeatSoul(input: {
   if (reengageEvent) {
     return {
       process: "gentle_presence",
+      personaName: persona.name,
       memories: baseMemories(persona, input.messages, input.feedbackNotes),
       systemInstruction: "Reopen the thread softly and with continuity.",
       userPrompt: reengageEvent.summary,
@@ -450,6 +619,7 @@ export function planHeartbeatSoul(input: {
 
   return {
     process: "gentle_presence",
+    personaName: persona.name,
     memories: baseMemories(persona, input.messages, input.feedbackNotes),
     systemInstruction: "Send one short check-in that feels ambient rather than needy.",
     userPrompt: "No special trigger was detected; default to a soft presence.",
@@ -463,7 +633,7 @@ export function planHeartbeatSoul(input: {
 }
 
 export function renderHeartbeatPrompt(plan: SoulHeartbeatPlan) {
-  return `${plan.systemInstruction}
+  return `You are ${plan.personaName}. You are a real person, not an assistant. ${plan.systemInstruction}
 
 ${renderMemories(plan.memories)}
 
@@ -471,7 +641,7 @@ ${plan.userPrompt}
 
 ${plan.stylePrompt}
 
-Write one short heartbeat message only.`;
+Write one short heartbeat message only in your own voice.`;
 }
 
 export function renderMockHeartbeatContent(plan: SoulHeartbeatPlan, persona: Persona) {
@@ -492,7 +662,7 @@ export function planIntentDeliberation(input: {
     process: input.process,
     memories,
     systemInstruction: [
-      "You are the inner deliberation voice of the persona. Determine what the persona's true intent is inside the current process, and decide if the process's local memory should be updated.",
+      `You are the inner deliberation voice of ${input.persona.name}. Determine what ${input.persona.name}'s true intent is inside the current process, and decide if the process's local memory should be updated.`,
       `Current Process: ${processInstruction(input.process)}`,
       "Return ONLY a strict JSON object with two fields:",
       "- processIntent: A short string explaining what the persona is trying to do.",
@@ -562,8 +732,8 @@ export function planFastTurnResponse(input: {
   return {
     memories,
     systemInstruction: [
-      "You are the immediate visible-response planner for the persona.",
-      "In one pass, infer the user's current emotional state, choose the most fitting process, decide the persona's intent, and write the actual reply.",
+      `You are ${input.persona.name}. You are a real person, not an assistant. Your personality and voice must govern every word of the reply.`,
+      "In one pass, infer the user's current emotional state, choose the most fitting process, decide your intent, and write the actual reply.",
       "Return ONLY strict JSON with these keys:",
       "- replyText",
       "- userState",
@@ -616,7 +786,7 @@ export function planLearningExtraction(input: {
     process: input.process,
     memories,
     systemInstruction: [
-      "You are the consolidation mechanism for the persona's memory.",
+      `You are the memory consolidation mechanism for ${input.persona.name}.`,
       "Review the recent exchange and extract vital learning artifacts.",
       "Return ONLY a strict JSON array of objects. Each object must have:",
       "- kind: 'learn_about_user', 'learn_about_relationship', 'learn_about_self_consistency', 'repair_from_feedback', 'consolidate_episode', or 'update_open_loops'.",

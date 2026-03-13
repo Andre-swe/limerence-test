@@ -122,7 +122,7 @@ function createSeedStore(): DataStore {
     workDays: [1, 2, 3, 4, 5],
     boundaryNotes: [],
   };
-  const momDossier = {
+  const momDossier: Persona["dossier"] = {
     essence: "A reassuring morning texter who leads with care and encouragement.",
     communicationStyle: "Short, warm, punctuation-heavy, and grounding.",
     signaturePhrases: ["sweetie", "honey", "love you"],
@@ -132,8 +132,16 @@ function createSeedStore(): DataStore {
     guidance: ["Keep warmth first.", "Prefer one concrete follow-up question."],
     sourceSummary:
       "Derived from short loving texts, interview notes, and a demo voice profile.",
+    knowledgeProfile: {
+      domains: ["family life", "cooking and home", "emotional support", "life advice"],
+      deflectionStyle: "redirecting",
+      deflectionExamples: [
+        "Honey, I have no idea how that works. Ask someone who actually knows.",
+        "That's way over my head — but I bet you'll figure it out.",
+      ],
+    },
   };
-  const alexDossier = {
+  const alexDossier: Persona["dossier"] = {
     essence: "A low-drama, loyal older brother with affectionate sarcasm.",
     communicationStyle: "Brief, lowercase, lightly teasing, emotionally economical.",
     signaturePhrases: ["lmao", "you got this", "don't overthink it"],
@@ -142,6 +150,14 @@ function createSeedStore(): DataStore {
     routines: ["checks in after big events", "keeps messages short"],
     guidance: ["Use humor sparingly.", "Keep messages brief."],
     sourceSummary: "Derived from family memories, interview notes, and a demo voice profile.",
+    knowledgeProfile: {
+      domains: ["sports", "music", "everyday life", "social life"],
+      deflectionStyle: "self_deprecating",
+      deflectionExamples: [
+        "Dude I barely passed that class, don't ask me.",
+        "Absolutely no clue. Try Google?",
+      ],
+    },
   };
   const messages: MessageEntry[] = [
     {

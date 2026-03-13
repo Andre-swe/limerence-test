@@ -19,10 +19,11 @@ export function FeedbackButton({
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}
-        className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--sage-deep)]"
+        aria-label="Correct this reply"
+        title="Correct this reply"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--sage-deep)] transition hover:bg-[rgba(255,255,255,0.68)]"
       >
         <Flag className="h-3.5 w-3.5" />
-        They would not say that
       </button>
       {isOpen ? (
         <div className="mt-3 space-y-2 rounded-[18px] bg-[rgba(255,255,255,0.78)] p-3">

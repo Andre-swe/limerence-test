@@ -3,7 +3,7 @@
     {
       "id": "user-demo",
       "name": "Demo Workspace",
-      "createdAt": "2026-03-10T22:38:22.396Z"
+      "createdAt": "2026-03-10T23:21:52.182Z"
     }
   ],
   "personas": [
@@ -16,10 +16,10 @@
       "description": "Supportive, affectionate, lightly teasing, checks in around milestones and mornings.",
       "status": "active",
       "avatarUrl": "/uploads/demo-mom-avatar.png",
-      "createdAt": "2026-03-11T22:38:22.396Z",
-      "updatedAt": "2026-03-13T20:38:22.396Z",
-      "lastActiveAt": "2026-03-13T20:38:22.396Z",
-      "lastHeartbeatAt": "2026-03-13T16:38:22.396Z",
+      "createdAt": "2026-03-11T23:21:52.182Z",
+      "updatedAt": "2026-03-13T21:21:52.182Z",
+      "lastActiveAt": "2026-03-13T21:21:52.182Z",
+      "lastHeartbeatAt": "2026-03-13T17:21:52.182Z",
       "pastedText": "good luck today sweetie!! you're going to do amazing. call me after, okay? love you.",
       "screenshotSummaries": [
         "Frequent double exclamation marks, affectionate words, concise check-ins, signs off with love."
@@ -56,7 +56,7 @@
       },
       "consent": {
         "attestedRights": true,
-        "createdAt": "2026-03-11T22:38:22.396Z"
+        "createdAt": "2026-03-11T23:21:52.182Z"
       },
       "dossier": {
         "essence": "A reassuring morning texter who leads with care and encouragement.",
@@ -84,7 +84,20 @@
           "Keep warmth first.",
           "Prefer one concrete follow-up question."
         ],
-        "sourceSummary": "Derived from short loving texts, interview notes, and a demo voice profile."
+        "sourceSummary": "Derived from short loving texts, interview notes, and a demo voice profile.",
+        "knowledgeProfile": {
+          "domains": [
+            "family life",
+            "cooking and home",
+            "emotional support",
+            "life advice"
+          ],
+          "deflectionStyle": "redirecting",
+          "deflectionExamples": [
+            "Honey, I have no idea how that works. Ask someone who actually knows.",
+            "That's way over my head — but I bet you'll figure it out."
+          ]
+        }
       },
       "voiceSamples": [],
       "screenshots": [],
@@ -159,17 +172,17 @@
           "currentFocus": "Check back in after the interview once the moment has passed.",
           "emotionalWeather": "guarded warmth with some play",
           "lastUserNeed": "presence before agenda",
-          "updatedAt": "2026-03-13T22:38:22.396Z"
+          "updatedAt": "2026-03-13T23:21:52.182Z"
         },
         "relationshipMemories": [
           {
-            "id": "05f22ac0-11e2-46fc-9fd7-fb4fa0a9783d",
+            "id": "640f2d22-5352-4dcf-854c-875154bef08a",
             "kind": "milestone",
             "summary": "I have the interview in an hour and I'm nervous.",
             "sourceText": "I have the interview in an hour and I'm nervous.",
             "weight": 4,
-            "createdAt": "2026-03-13T20:08:22.396Z",
-            "lastReinforcedAt": "2026-03-13T20:08:22.396Z"
+            "createdAt": "2026-03-13T20:51:52.182Z",
+            "lastReinforcedAt": "2026-03-13T20:51:52.182Z"
           }
         ],
         "openLoops": [
@@ -187,9 +200,9 @@
             "sourceText": "I have the interview in an hour and I'm nervous.",
             "sourceMessageId": "msg-2",
             "dueHint": "after the interview",
-            "readyAt": "2026-03-13T22:08:22.396Z",
-            "createdAt": "2026-03-13T20:08:22.396Z",
-            "updatedAt": "2026-03-13T20:08:22.396Z"
+            "readyAt": "2026-03-13T22:51:52.182Z",
+            "createdAt": "2026-03-13T20:51:52.182Z",
+            "updatedAt": "2026-03-13T20:51:52.182Z"
           }
         ],
         "scheduledPerceptions": [
@@ -198,45 +211,45 @@
             "kind": "timer_elapsed",
             "summary": "Follow through on interview follow-through.",
             "content": "how did the interview go?",
-            "readyAt": "2026-03-13T22:08:22.396Z",
+            "readyAt": "2026-03-13T22:51:52.182Z",
             "urgency": "urgent",
             "source": "open_loop",
             "sourceId": "loop-msg-2-interview-follow-through",
             "status": "pending",
-            "createdAt": "2026-03-13T20:08:22.396Z",
-            "updatedAt": "2026-03-13T20:08:22.396Z"
+            "createdAt": "2026-03-13T20:51:52.182Z",
+            "updatedAt": "2026-03-13T20:51:52.182Z"
           },
           {
-            "id": "protective:35948166-4892-443b-b8c7-125046eea5c0",
+            "id": "protective:cbcb9326-b996-4782-b32d-4c67b5513b75",
             "kind": "heartbeat_tick",
             "summary": "Reach back with a steady protective check-in if no new turn arrives.",
             "content": "A steady, low-pressure reengagement may be welcome later.",
-            "readyAt": "2026-03-14T00:08:22.396Z",
+            "readyAt": "2026-03-14T00:51:52.182Z",
             "urgency": "ready",
             "source": "user_state",
-            "sourceId": "35948166-4892-443b-b8c7-125046eea5c0",
+            "sourceId": "cbcb9326-b996-4782-b32d-4c67b5513b75",
             "status": "pending",
-            "createdAt": "2026-03-13T20:38:22.396Z",
-            "updatedAt": "2026-03-13T20:38:22.396Z"
+            "createdAt": "2026-03-13T21:21:52.182Z",
+            "updatedAt": "2026-03-13T21:21:52.182Z"
           },
           {
             "id": "silence:msg-2",
             "kind": "heartbeat_tick",
             "summary": "If the thread falls quiet, reopen it gently rather than abruptly.",
             "content": "Reengagement should feel like continuity, not a cold open.",
-            "readyAt": "2026-03-14T04:08:22.396Z",
+            "readyAt": "2026-03-14T04:51:52.182Z",
             "urgency": "ambient",
             "source": "process",
             "sourceId": "msg-2",
             "status": "pending",
-            "createdAt": "2026-03-13T20:08:22.396Z",
-            "updatedAt": "2026-03-13T20:08:22.396Z"
+            "createdAt": "2026-03-13T20:51:52.182Z",
+            "updatedAt": "2026-03-13T20:51:52.182Z"
           }
         ],
         "pendingInternalEvents": [],
         "pendingShadowTurns": [],
         "lastUserState": {
-          "id": "35948166-4892-443b-b8c7-125046eea5c0",
+          "id": "cbcb9326-b996-4782-b32d-4c67b5513b75",
           "modality": "text",
           "topSignals": [],
           "valence": 0.444,
@@ -260,11 +273,11 @@
           "provenance": [
             "heuristic"
           ],
-          "createdAt": "2026-03-13T20:08:22.396Z"
+          "createdAt": "2026-03-13T20:51:52.182Z"
         },
         "recentUserStates": [
           {
-            "id": "35948166-4892-443b-b8c7-125046eea5c0",
+            "id": "cbcb9326-b996-4782-b32d-4c67b5513b75",
             "modality": "text",
             "topSignals": [],
             "valence": 0.444,
@@ -288,72 +301,72 @@
             "provenance": [
               "heuristic"
             ],
-            "createdAt": "2026-03-13T20:08:22.396Z"
+            "createdAt": "2026-03-13T20:51:52.182Z"
           }
         ],
         "liveSessionMetrics": {},
         "memoryRegions": {
           "constitutionMemory": [
             {
-              "id": "74755b4a-4593-497c-95cd-7bc50602233e",
+              "id": "89596e6c-c5ee-4aa5-9777-e62ce385c02b",
               "summary": "Warmth is high. Directness is plainspoken.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "666f053d-c4f4-4d19-8fd7-ca8042e6d30f",
+              "id": "1dbf3954-9e9f-48bd-a822-2eaae03b15ec",
               "summary": "Humor tends toward playful, with some play.",
               "weight": 3,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "5d8b83a8-cb75-44fe-aa07-f54a7ebf19f5",
+              "id": "aeb8420a-ba0c-4f1e-80da-66b28a091638",
               "summary": "Protectiveness is strong; affection tends protective.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             }
           ],
           "relationshipMemory": [
             {
-              "id": "05f22ac0-11e2-46fc-9fd7-fb4fa0a9783d",
+              "id": "640f2d22-5352-4dcf-854c-875154bef08a",
               "kind": "milestone",
               "summary": "I have the interview in an hour and I'm nervous.",
               "sourceText": "I have the interview in an hour and I'm nervous.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "lastReinforcedAt": "2026-03-13T20:08:22.396Z"
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "lastReinforcedAt": "2026-03-13T20:51:52.182Z"
             }
           ],
           "episodicMemory": [
             {
-              "id": "5fea17c2-afad-452a-bde5-ae510e4c25b2",
+              "id": "7c024fad-4342-493d-8fbd-743b02c119ad",
               "summary": "Mom (web): oh honey, nerves mean you care. breathe, keep your shoulders down, and answer like you already belong there.",
               "sourceText": "oh honey, nerves mean you care. breathe, keep your shoulders down, and answer like you already belong there.",
               "sourceMessageId": "msg-3",
               "weight": 3,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "6204fb91-f645-4d7d-b259-50dc2e85be44",
+              "id": "6a68d33f-b803-49b9-9412-a7da900888b9",
               "summary": "User (web): I have the interview in an hour and I'm nervous.",
               "sourceText": "I have the interview in an hour and I'm nervous.",
               "sourceMessageId": "msg-2",
               "weight": 3,
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "updatedAt": "2026-03-13T20:08:22.396Z"
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "updatedAt": "2026-03-13T20:51:52.182Z"
             },
             {
-              "id": "163196b7-c5d1-4831-b3c8-181c2f0dbe30",
+              "id": "757aa415-102a-4885-9c16-2e083668591a",
               "summary": "Mom (heartbeat): good morning sweetie. thinking about you today. how's the interview prep going?",
               "sourceText": "good morning sweetie. thinking about you today. how's the interview prep going?",
               "sourceMessageId": "msg-1",
               "weight": 3,
-              "createdAt": "2026-03-13T16:38:22.396Z",
-              "updatedAt": "2026-03-13T16:38:22.396Z"
+              "createdAt": "2026-03-13T17:21:52.182Z",
+              "updatedAt": "2026-03-13T17:21:52.182Z"
             }
           ],
           "boundaryMemory": [],
@@ -374,90 +387,90 @@
               "sourceText": "I have the interview in an hour and I'm nervous.",
               "sourceMessageId": "msg-2",
               "dueHint": "after the interview",
-              "readyAt": "2026-03-13T22:08:22.396Z",
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "updatedAt": "2026-03-13T20:08:22.396Z"
+              "readyAt": "2026-03-13T22:51:52.182Z",
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "updatedAt": "2026-03-13T20:51:52.182Z"
             }
           ],
           "learnedUserNotes": [
             {
-              "id": "ef78d8cb-385d-4042-b17a-083e572a3a84",
+              "id": "ec08030a-c50f-4eea-bc4c-737fed39f463",
               "summary": "User state note: Open and conversational, with no strong pressure yet.",
               "sourceText": "I have the interview in an hour and I'm nervous.",
               "weight": 3,
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "updatedAt": "2026-03-13T20:08:22.396Z"
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "updatedAt": "2026-03-13T20:51:52.182Z"
             }
           ],
           "learnedRelationshipNotes": [
             {
-              "id": "21adda55-df67-42e4-a319-261175e0312b",
+              "id": "00d7ce80-986f-4e97-856b-538909e2eee6",
               "summary": "Relationship note: I have the interview in an hour and I'm nervous.",
               "sourceText": "I have the interview in an hour and I'm nervous.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "updatedAt": "2026-03-13T20:08:22.396Z"
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "updatedAt": "2026-03-13T20:51:52.182Z"
             }
           ],
           "processMemory": [
             {
-              "id": "1c172639-aea9-4fce-a077-bc18f93aa881",
+              "id": "4ec3129b-77ff-4eab-8284-645728ddb8ea",
               "summary": "Closeness feels close with an caretaking dynamic.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "52aa4ed8-fd5a-44ad-bc31-c0cc1e849753",
+              "id": "d87c6826-83e4-40e4-97b9-49e93750c4da",
               "summary": "Repair expectation: If the voice lands wrong, repair quickly and return to the real person.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "d9f5cc42-2422-463e-b8ed-989852e32d63",
+              "id": "0f7c0ede-ea51-4f5c-a996-7404ca9f0f23",
               "summary": "Shared rituals: good-morning check-ins, follows up after stressful events",
               "weight": 3,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "3b594992-cd48-4495-b1d3-a2423d88db80",
+              "id": "906c2e5a-2154-4450-af74-a2d187d607de",
               "summary": "Active process arrival: Meet the user first, before trying to shape the scene.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "07ef2570-1a22-49f6-9cdb-54e1bac1d5a4",
+              "id": "53fb35ce-8f58-4151-ae3e-a6babb49b7a4",
               "summary": "Default drive: Arrive lightly and let contact become real before steering.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "d04b37f8-4617-45f8-94d0-af99f76c9f81",
-              "summary": "Follow through on interview follow-through. Ready at 2026-03-13T22:08:22.396Z.",
+              "id": "7aafd1dd-f957-4c7d-99c6-bf568858ba6a",
+              "summary": "Follow through on interview follow-through. Ready at 2026-03-13T22:51:52.182Z.",
               "sourceText": "how did the interview go?",
               "weight": 5,
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "updatedAt": "2026-03-13T20:08:22.396Z"
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "updatedAt": "2026-03-13T20:51:52.182Z"
             },
             {
-              "id": "34526ea0-c06b-4b99-a69f-d53146c08a38",
-              "summary": "Reach back with a steady protective check-in if no new turn arrives. Ready at 2026-03-14T00:08:22.396Z.",
+              "id": "718e1bc9-8af1-4a0b-9bfc-03173eaed065",
+              "summary": "Reach back with a steady protective check-in if no new turn arrives. Ready at 2026-03-14T00:51:52.182Z.",
               "sourceText": "A steady, low-pressure reengagement may be welcome later.",
               "weight": 4,
-              "createdAt": "2026-03-13T20:38:22.396Z",
-              "updatedAt": "2026-03-13T20:38:22.396Z"
+              "createdAt": "2026-03-13T21:21:52.182Z",
+              "updatedAt": "2026-03-13T21:21:52.182Z"
             },
             {
-              "id": "13c86333-9911-4967-a031-2d9c1d468675",
-              "summary": "If the thread falls quiet, reopen it gently rather than abruptly. Ready at 2026-03-14T04:08:22.396Z.",
+              "id": "627eb9ab-e75c-49e8-971b-cedbc297ac53",
+              "summary": "If the thread falls quiet, reopen it gently rather than abruptly. Ready at 2026-03-14T04:51:52.182Z.",
               "sourceText": "Reengagement should feel like continuity, not a cold open.",
               "weight": 3,
-              "createdAt": "2026-03-13T20:08:22.396Z",
-              "updatedAt": "2026-03-13T20:08:22.396Z"
+              "createdAt": "2026-03-13T20:51:52.182Z",
+              "updatedAt": "2026-03-13T20:51:52.182Z"
             }
           ]
         },
@@ -467,7 +480,7 @@
         "recentChangedClaims": [],
         "recentEvents": [],
         "traceHead": [],
-        "lastReflectionAt": "2026-03-13T20:38:22.396Z"
+        "lastReflectionAt": "2026-03-13T21:21:52.182Z"
       },
       "revision": 1
     },
@@ -479,8 +492,8 @@
       "source": "living",
       "description": "Dry humor, sports references, short responses, affectionate beneath the sarcasm.",
       "status": "active",
-      "createdAt": "2026-03-13T10:38:22.396Z",
-      "updatedAt": "2026-03-13T10:38:22.396Z",
+      "createdAt": "2026-03-13T11:21:52.182Z",
+      "updatedAt": "2026-03-13T11:21:52.182Z",
       "pastedText": "lmao. you got this. don't overthink it.",
       "screenshotSummaries": [
         "Uses clipped messages, lowercase, and quick sarcastic reassurance."
@@ -516,7 +529,7 @@
       },
       "consent": {
         "attestedRights": true,
-        "createdAt": "2026-03-13T10:38:22.396Z"
+        "createdAt": "2026-03-13T11:21:52.182Z"
       },
       "dossier": {
         "essence": "A low-drama, loyal older brother with affectionate sarcasm.",
@@ -544,7 +557,20 @@
           "Use humor sparingly.",
           "Keep messages brief."
         ],
-        "sourceSummary": "Derived from family memories, interview notes, and a demo voice profile."
+        "sourceSummary": "Derived from family memories, interview notes, and a demo voice profile.",
+        "knowledgeProfile": {
+          "domains": [
+            "sports",
+            "music",
+            "everyday life",
+            "social life"
+          ],
+          "deflectionStyle": "self_deprecating",
+          "deflectionExamples": [
+            "Dude I barely passed that class, don't ask me.",
+            "Absolutely no clue. Try Google?"
+          ]
+        }
       },
       "voiceSamples": [],
       "screenshots": [],
@@ -618,7 +644,7 @@
           "currentFocus": "A low-drama, loyal older brother with affectionate sarcasm.",
           "emotionalWeather": "quiet but available",
           "lastUserNeed": "presence before agenda",
-          "updatedAt": "2026-03-13T22:38:22.396Z"
+          "updatedAt": "2026-03-13T23:21:52.182Z"
         },
         "relationshipMemories": [],
         "openLoops": [],
@@ -630,25 +656,25 @@
         "memoryRegions": {
           "constitutionMemory": [
             {
-              "id": "8bdd906d-0e4c-4779-b9e2-3ec7a01dabf8",
+              "id": "65cada19-0fd1-4608-85e7-18d25cd23157",
               "summary": "Warmth is high. Directness is plainspoken.",
               "weight": 4,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             },
             {
-              "id": "a216c01a-55e7-458b-bde7-51f963ae28df",
+              "id": "33f80c69-ab0f-451e-87ee-ae640520f6d9",
               "summary": "Humor tends toward dry, with strong play.",
               "weight": 3,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             },
             {
-              "id": "5e8e9dd2-38b7-423e-aebb-70335b5f1876",
+              "id": "e8fef5cd-0d47-485c-8058-8bcea32fa579",
               "summary": "Protectiveness is present; affection tends playful.",
               "weight": 4,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             }
           ],
           "relationshipMemory": [],
@@ -661,39 +687,39 @@
           "learnedRelationshipNotes": [],
           "processMemory": [
             {
-              "id": "a607afcf-2e83-494e-ac71-58fb963d3f5d",
+              "id": "749c73c9-663d-45fb-b2a3-489bfe59543d",
               "summary": "Closeness feels close with an peer dynamic.",
               "weight": 4,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             },
             {
-              "id": "4ab7e6b8-0234-4587-a02a-64004f28c325",
+              "id": "e5377c5d-aeb5-44c1-9320-829ce1cf1e22",
               "summary": "Repair expectation: If the voice lands wrong, repair quickly and return to the real person.",
               "weight": 4,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             },
             {
-              "id": "97ec2941-4fa5-4a47-bf5c-d977619c653d",
+              "id": "d6066c2b-c27f-4dbd-9643-45fbed5ecb9c",
               "summary": "Shared rituals: checks in after big events, keeps messages short",
               "weight": 3,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             },
             {
-              "id": "104dad5a-d4c9-4495-a893-d73d57bd2bcf",
+              "id": "06f334a2-b8e4-46bd-ad22-abdb60d3d788",
               "summary": "Active process arrival: Meet the user first, before trying to shape the scene.",
               "weight": 4,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             },
             {
-              "id": "d7d7185e-19b8-4de0-b48a-326a5d37bf75",
+              "id": "9b626344-3e1f-4b3a-8bcd-e9b9a56c08b2",
               "summary": "Default drive: Arrive lightly and let contact become real before steering.",
               "weight": 4,
-              "createdAt": "2026-03-13T22:38:22.396Z",
-              "updatedAt": "2026-03-13T22:38:22.396Z"
+              "createdAt": "2026-03-13T23:21:52.182Z",
+              "updatedAt": "2026-03-13T23:21:52.182Z"
             }
           ]
         },
@@ -703,7 +729,7 @@
         "recentChangedClaims": [],
         "recentEvents": [],
         "traceHead": [],
-        "lastReflectionAt": "2026-03-13T22:38:22.396Z"
+        "lastReflectionAt": "2026-03-13T23:21:52.182Z"
       },
       "revision": 1
     }
@@ -717,7 +743,7 @@
       "channel": "heartbeat",
       "body": "good morning sweetie. thinking about you today. how's the interview prep going?",
       "audioStatus": "text_fallback",
-      "createdAt": "2026-03-13T16:38:22.396Z",
+      "createdAt": "2026-03-13T17:21:52.182Z",
       "replyMode": "text",
       "attachments": [],
       "delivery": {
@@ -734,7 +760,7 @@
       "channel": "web",
       "body": "I have the interview in an hour and I'm nervous.",
       "audioStatus": "unavailable",
-      "createdAt": "2026-03-13T20:08:22.396Z",
+      "createdAt": "2026-03-13T20:51:52.182Z",
       "attachments": [],
       "delivery": {
         "webInbox": true,
@@ -750,7 +776,7 @@
       "channel": "web",
       "body": "oh honey, nerves mean you care. breathe, keep your shoulders down, and answer like you already belong there.",
       "audioStatus": "text_fallback",
-      "createdAt": "2026-03-13T20:38:22.396Z",
+      "createdAt": "2026-03-13T21:21:52.182Z",
       "replyMode": "voice_note",
       "attachments": [],
       "delivery": {

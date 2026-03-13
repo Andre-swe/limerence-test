@@ -373,7 +373,7 @@ export const claimSourceSchema = z.object({
   observationId: z.string().optional(),
   sessionId: z.string().optional(),
   feedbackEventId: z.string().optional(),
-  sourceType: z.enum(["message", "observation", "session", "feedback", "inference"]),
+  sourceType: z.enum(["message", "observation", "session", "feedback", "inference", "bootstrap"]),
   excerpt: z.string().optional(),
   createdAt: z.string(),
 });
@@ -662,6 +662,14 @@ export const messageAttachmentSchema = z.object({
   visualSummary: z.string().optional(),
 });
 
+export const knowledgeProfileSchema = z.object({
+  domains: z.array(z.string()).default([]),
+  deflectionStyle: z
+    .enum(["honest", "self_deprecating", "redirecting", "bluffing", "protective"])
+    .default("honest"),
+  deflectionExamples: z.array(z.string()).default([]),
+});
+
 export const personaDossierSchema = z.object({
   essence: z.string(),
   communicationStyle: z.string(),
@@ -671,6 +679,11 @@ export const personaDossierSchema = z.object({
   routines: z.array(z.string()),
   guidance: z.array(z.string()),
   sourceSummary: z.string(),
+  knowledgeProfile: knowledgeProfileSchema.default({
+    domains: [],
+    deflectionStyle: "honest",
+    deflectionExamples: [],
+  }),
 });
 
 export const voiceProfileSchema = z.object({
@@ -811,6 +824,7 @@ export type ReplyMode = z.infer<typeof replyModeSchema>;
 export type HeartbeatPolicy = z.infer<typeof heartbeatPolicySchema>;
 export type StoredAsset = z.infer<typeof storedAssetSchema>;
 export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
+export type KnowledgeProfile = z.infer<typeof knowledgeProfileSchema>;
 export type PersonaDossier = z.infer<typeof personaDossierSchema>;
 export type VoiceProfile = z.infer<typeof voiceProfileSchema>;
 export type ConsentRecord = z.infer<typeof consentRecordSchema>;

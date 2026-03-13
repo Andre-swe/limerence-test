@@ -33,6 +33,7 @@ import {
 import {
   applyBoundaryClaimUpdate,
   applyFeedbackToMemoryClaims,
+  seedBootstrapClaims,
 } from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
 import {
@@ -2152,12 +2153,40 @@ export async function createPersonaFromForm(formData: FormData) {
     relationshipModel,
   } satisfies Omit<Persona, "mindState">;
 
+  // Seed bootstrap memories from source material so the persona feels like
+  // they already know the shape of the relationship. Synthetic personas
+  // (no pasted text, no interview answers, no screenshots) start blank and
+  // accumulate memories naturally through conversation.
+  const hasSourceMaterial =
+    pastedText.length > 0 ||
+    Object.values(interviewAnswers).some((answer) => answer.trim().length > 0) ||
+    screenshots.length > 0;
+
+  const baseMindState = createInitialMindState({
+    persona: personaBase,
+    messages: [],
+  });
+
+  const mindState = hasSourceMaterial
+    ? (() => {
+        const bootstrap = seedBootstrapClaims({
+          dossier,
+          interviewAnswers,
+          relationship,
+          description,
+          createdAt: now,
+        });
+        return {
+          ...baseMindState,
+          memoryClaims: bootstrap.claims,
+          claimSources: bootstrap.sources,
+        };
+      })()
+    : baseMindState;
+
   const persona: Persona = {
     ...personaBase,
-    mindState: createInitialMindState({
-      persona: personaBase,
-      messages: [],
-    }),
+    mindState,
   };
 
   await savePersona(persona);
@@ -2168,8 +2197,9 @@ export async function createPersonaFromForm(formData: FormData) {
       role: "assistant",
       kind: "preview",
       channel: "web",
-      body:
-        `I've assembled ${name}'s draft persona. Start talking normally, even if that includes boundaries like "don't text me while I'm at work."`,
+      body: hasSourceMaterial
+        ? `${name} is here, shaped from the material you shared. They already have a sense of who you are together. Start talking naturally.`
+        : `${name} is here. They're starting fresh — get to know each other, and they'll learn who you are through conversation.`,
       audioStatus: "text_fallback",
       replyMode: "text",
       delivery: {

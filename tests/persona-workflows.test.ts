@@ -366,6 +366,33 @@ describe("persona workflows", () => {
     expect(result.appended[1].role).toBe("assistant");
   });
 
+  it("shapes mock fallback replies with dossier phrases and communication style", async () => {
+    const momMessages = await listMessages("persona-mom");
+    const alexMessages = await listMessages("persona-alex");
+
+    const momPlan = planConversationSoul({
+      persona: (await getPersona("persona-mom"))!,
+      messages: momMessages,
+      feedbackNotes: [],
+      latestUserText: "I'm nervous.",
+      channel: "web",
+    });
+    const alexPlan = planConversationSoul({
+      persona: (await getPersona("persona-alex"))!,
+      messages: alexMessages,
+      feedbackNotes: [],
+      latestUserText: "I'm nervous.",
+      channel: "web",
+    });
+
+    const momReply = renderMockConversationReply(momPlan, (await getPersona("persona-mom"))!);
+    const alexReply = renderMockConversationReply(alexPlan, (await getPersona("persona-alex"))!);
+
+    expect(momReply.toLowerCase()).toMatch(/sweetie|honey|love you/);
+    expect(alexReply).toBe(alexReply.toLowerCase());
+    expect(alexReply.toLowerCase()).toMatch(/lmao|you got this|don't overthink it/);
+  });
+
   it("queues assistant reflection as a shadow turn instead of blocking the web reply", async () => {
     const previousInngestKey = process.env.INNGEST_EVENT_KEY;
     process.env.INNGEST_EVENT_KEY = "test-inngest-key";

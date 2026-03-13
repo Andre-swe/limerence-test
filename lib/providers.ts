@@ -198,6 +198,68 @@ export type LearningExtractionRequest = {
   replyText?: string;
 };
 
+function inferKnowledgeProfileFromRelationship(
+  relationship: string,
+  description: string,
+): PersonaDossier["knowledgeProfile"] {
+  const lower = `${relationship} ${description}`.toLowerCase();
+  const domains: string[] = [];
+  const deflectionExamples: string[] = [];
+  let deflectionStyle: PersonaDossier["knowledgeProfile"]["deflectionStyle"] = "honest";
+
+  if (/(mother|mom|father|dad|parent)/.test(lower)) {
+    domains.push("family life", "life advice", "cooking and home", "emotional support");
+    deflectionStyle = "redirecting";
+    deflectionExamples.push(
+      "Honey, I have no idea how that works. Ask someone who actually knows.",
+      "That's way over my head — but I bet you'll figure it out.",
+    );
+  } else if (/(brother|sister|sibling)/.test(lower)) {
+    domains.push("shared memories", "family dynamics", "everyday life");
+    deflectionStyle = "self_deprecating";
+    deflectionExamples.push(
+      "Dude I barely passed that class, don't ask me.",
+      "Absolutely no clue. Try Google?",
+    );
+  } else if (/(partner|wife|husband|lover|girlfriend|boyfriend)/.test(lower)) {
+    domains.push("shared life", "emotional dynamics", "daily routines", "relationship history");
+    deflectionStyle = "honest";
+    deflectionExamples.push(
+      "I really don't know enough about that to help.",
+      "That's not my area — but I'm here if you want to talk it through.",
+    );
+  } else if (/(friend|buddy|mate)/.test(lower)) {
+    domains.push("shared interests", "social life", "opinions and banter");
+    deflectionStyle = "self_deprecating";
+    deflectionExamples.push(
+      "Man I have literally no idea. That's above my pay grade.",
+      "Don't look at me for that one lol.",
+    );
+  }
+
+  if (/(nurse|doctor|medical|health)/.test(lower)) {
+    domains.push("health and wellness", "medical basics");
+  }
+  if (/(teacher|professor|education)/.test(lower)) {
+    domains.push("education", "learning strategies");
+  }
+  if (/(engineer|tech|developer|programmer)/.test(lower)) {
+    domains.push("technology", "problem solving");
+  }
+  if (/(cook|chef|bak)/.test(lower)) {
+    domains.push("cooking", "recipes", "food");
+  }
+  if (/(artist|music|paint|creative)/.test(lower)) {
+    domains.push("creative expression", "art and culture");
+  }
+
+  if (domains.length === 0) {
+    domains.push("everyday life", "emotional support", "personal opinions");
+  }
+
+  return { domains, deflectionStyle, deflectionExamples };
+}
+
 export interface ReasoningProvider {
   buildPersonaDossier(input: PersonaAssemblyInput): Promise<PersonaDossier>;
   extractTextFromScreenshot(input: { buffer: Buffer; fileName: string; mimeType: string }): Promise<string>;
@@ -599,6 +661,10 @@ class MockReasoningProvider implements ReasoningProvider {
         .filter(Boolean)
         .join(" ")
         .slice(0, 500),
+      knowledgeProfile: inferKnowledgeProfileFromRelationship(
+        input.relationship,
+        input.description,
+      ),
     };
   }
 
@@ -900,7 +966,7 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
     try {
       const response = await this.callResponses({
         model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
-        input: `Return strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary.\n\nName: ${input.name}\nRelationship: ${input.relationship}\nSource: ${input.source}\nDescription: ${input.description}\nPasted text: ${input.pastedText}\nInterview answers: ${JSON.stringify(input.interviewAnswers)}\nScreenshot summaries: ${JSON.stringify(input.screenshotSummaries)}`,
+        input: `Return strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary, knowledgeProfile.\n\nknowledgeProfile must be an object with: domains (array of 3-6 subject areas this person would realistically know about given their life), deflectionStyle (one of "honest", "self_deprecating", "redirecting", "bluffing", "protective"), deflectionExamples (2-3 short phrases this person would say when asked something they don't know).\n\nName: ${input.name}\nRelationship: ${input.relationship}\nSource: ${input.source}\nDescription: ${input.description}\nPasted text: ${input.pastedText}\nInterview answers: ${JSON.stringify(input.interviewAnswers)}\nScreenshot summaries: ${JSON.stringify(input.screenshotSummaries)}`,
       });
 
       return safeJsonParse(
@@ -1103,7 +1169,7 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         system_instruction: {
           parts: [
             {
-              text: "Return only strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary.",
+              text: "Return only strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary, knowledgeProfile. knowledgeProfile must be an object with: domains (array of 3-6 subject areas this person would realistically know about given their life), deflectionStyle (one of \"honest\", \"self_deprecating\", \"redirecting\", \"bluffing\", \"protective\"), deflectionExamples (2-3 short phrases this person would say when asked something they don't know).",
             },
           ],
         },
@@ -1519,7 +1585,7 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
     try {
       const response = await this.callMessages({
         system:
-          "Return only strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary.",
+          "Return only strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary, knowledgeProfile. knowledgeProfile must be an object with: domains (array of 3-6 subject areas this person would realistically know about given their life), deflectionStyle (one of \"honest\", \"self_deprecating\", \"redirecting\", \"bluffing\", \"protective\"), deflectionExamples (2-3 short phrases this person would say when asked something they don't know).",
         messages: [
           {
             role: "user",

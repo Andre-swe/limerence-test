@@ -882,10 +882,12 @@ function applyLearningArtifacts(
   });
 
   return {
-    learnedUserNotes: boundedArray(learnedUserNotes, 12),
-    learnedRelationshipNotes: boundedArray(learnedRelationshipNotes, 12),
-    episodicMemory: boundedArray(episodicMemory, 24),
-    repairMemory: boundedArray(repairMemory, 12),
+    // V1 regions are kept as stable bootstrap context but capped tighter
+    // now that V2 durable claims are the primary memory system.
+    learnedUserNotes: boundedArray(learnedUserNotes, 6),
+    learnedRelationshipNotes: boundedArray(learnedRelationshipNotes, 6),
+    episodicMemory: boundedArray(episodicMemory, 12),
+    repairMemory: boundedArray(repairMemory, 6),
     soulMemory,
     memoryClaims: memoryWrites.claims,
     claimSources: memoryWrites.claimSources,

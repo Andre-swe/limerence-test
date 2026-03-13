@@ -660,6 +660,42 @@ export function buildMemoryRetrievalPack(input: RetrievalInput) {
                 tags: tokenize(note.summary).slice(0, 5),
               }) satisfies MemoryClaim,
           ),
+          ...persona.mindState.memoryRegions.learnedUserNotes.map(
+            (note) =>
+              ({
+                id: note.id,
+                kind: "user_fact",
+                summary: note.summary,
+                detail: note.sourceText,
+                scope: "relationship",
+                status: "tentative",
+                confidence: 0.65,
+                importance: 0.62,
+                sourceIds: [note.sourceMessageId].filter(Boolean) as string[],
+                reinforcementCount: 1,
+                firstObservedAt: note.createdAt,
+                lastObservedAt: note.updatedAt,
+                tags: tokenize(note.summary).slice(0, 5),
+              }) satisfies MemoryClaim,
+          ),
+          ...persona.mindState.memoryRegions.repairMemory.map(
+            (note) =>
+              ({
+                id: note.id,
+                kind: "repair_note",
+                summary: note.summary,
+                detail: note.sourceText,
+                scope: "relationship",
+                status: "confirmed",
+                confidence: 0.88,
+                importance: 0.9,
+                sourceIds: [note.sourceMessageId].filter(Boolean) as string[],
+                reinforcementCount: 1,
+                firstObservedAt: note.createdAt,
+                lastObservedAt: note.updatedAt,
+                tags: ["repair", ...tokenize(note.summary).slice(0, 4)],
+              }) satisfies MemoryClaim,
+          ),
         ];
 
   const topicTokens = tokenize(
@@ -670,14 +706,24 @@ export function buildMemoryRetrievalPack(input: RetrievalInput) {
     ].join(" "),
   ).slice(0, 10);
 
-  const alwaysLoadedClaims = claims
-    .filter(
-      (claim) =>
-        claim.status === "confirmed" &&
-        ["relationship_note", "boundary", "ritual", "repair_note", "open_loop_fact"].includes(
-          claim.kind,
-        ),
-    )
+  const confirmedClaims = claims.filter(
+    (claim) =>
+      claim.status === "confirmed" &&
+      ["relationship_note", "boundary", "ritual", "repair_note", "open_loop_fact", "preference"].includes(
+        claim.kind,
+      ),
+  );
+  // When no confirmed claims exist yet (new persona with only bootstrap memories),
+  // promote tentative bootstrap claims so the persona has something to work with.
+  const alwaysLoadedPool =
+    confirmedClaims.length > 0
+      ? confirmedClaims
+      : claims.filter(
+          (claim) =>
+            claim.status === "tentative" &&
+            claim.tags.includes("bootstrap"),
+        );
+  const alwaysLoadedClaims = alwaysLoadedPool
     .sort((left, right) => {
       const leftScore = left.importance + left.confidence + claimRecencyScore(left, now);
       const rightScore = right.importance + right.confidence + claimRecencyScore(right, now);
@@ -686,7 +732,7 @@ export function buildMemoryRetrievalPack(input: RetrievalInput) {
     .slice(0, 8);
 
   const contextualClaims = claims
-    .filter((claim) => claim.status !== "contradicted")
+    .filter((claim) => claim.status !== "contradicted" && claim.status !== "stale")
     .map((claim) => ({
       claim,
       score:
@@ -753,6 +799,115 @@ export function buildMemoryRetrievalPack(input: RetrievalInput) {
     builtAt: new Date().toISOString(),
     perceptionId: input.perception?.id,
   } satisfies MemoryRetrievalPack;
+}
+
+// ---------------------------------------------------------------------------
+// Bootstrap claims — seed a new persona with tentative memories from source
+// material so their first conversation feels like reunion, not blank slate.
+// ---------------------------------------------------------------------------
+
+type BootstrapInput = {
+  dossier: Persona["dossier"];
+  interviewAnswers: Record<string, string>;
+  relationship: string;
+  description: string;
+  createdAt: string;
+};
+
+export function seedBootstrapClaims(input: BootstrapInput) {
+  let claims: MemoryClaim[] = [];
+  let sources: ClaimSource[] = [];
+
+  const seed = (candidate: ClaimCandidate) => {
+    const write = upsertClaim({ claims, sources, candidate });
+    claims = write.claims;
+    sources = write.sources;
+  };
+
+  // Relationship shape — from the description the creator gave
+  if (input.description.trim()) {
+    seed({
+      kind: "relationship_note",
+      summary: `Our relationship: ${truncate(input.description, 180)}`,
+      scope: "relationship",
+      status: "tentative",
+      confidence: 0.62,
+      importance: 0.78,
+      createdAt: input.createdAt,
+      sourceType: "bootstrap",
+      excerpt: input.description,
+      tags: ["bootstrap", "relationship"],
+    });
+  }
+
+  // Routines — from the dossier
+  for (const routine of input.dossier.routines.slice(0, 3)) {
+    seed({
+      kind: "ritual",
+      summary: routine,
+      scope: "relationship",
+      status: "tentative",
+      confidence: 0.58,
+      importance: 0.72,
+      createdAt: input.createdAt,
+      sourceType: "bootstrap",
+      excerpt: routine,
+      tags: ["bootstrap", "ritual"],
+    });
+  }
+
+  // Favorite topics — things we talk about
+  for (const topic of input.dossier.favoriteTopics.slice(0, 4)) {
+    seed({
+      kind: "relationship_note",
+      summary: `We often talk about ${topic}.`,
+      scope: "relationship",
+      status: "tentative",
+      confidence: 0.55,
+      importance: 0.6,
+      createdAt: input.createdAt,
+      sourceType: "bootstrap",
+      excerpt: topic,
+      tags: ["bootstrap", "topic"],
+    });
+  }
+
+  // Interview answers — direct statements about the person
+  for (const [question, answer] of Object.entries(input.interviewAnswers)) {
+    if (!answer.trim() || answer.length < 8) continue;
+    const kind = guessKindFromText(answer, "user_fact");
+    seed({
+      kind,
+      summary: truncate(answer, 200),
+      detail: question,
+      scope: "relationship",
+      status: "tentative",
+      confidence: 0.65,
+      importance: importanceForKind(kind) * 0.85,
+      createdAt: input.createdAt,
+      sourceType: "bootstrap",
+      excerpt: answer,
+      tags: ["bootstrap", "interview"],
+    });
+  }
+
+  // Emotional tendencies — how this person shows up
+  if (input.dossier.emotionalTendencies.length > 0) {
+    seed({
+      kind: "relationship_note",
+      summary: `Emotionally: ${input.dossier.emotionalTendencies.join(", ")}.`,
+      scope: "persona_self",
+      status: "tentative",
+      confidence: 0.6,
+      importance: 0.68,
+      createdAt: input.createdAt,
+      sourceType: "bootstrap",
+      excerpt: input.dossier.emotionalTendencies.join(", "),
+      tags: ["bootstrap", "personality"],
+    });
+  }
+
+  return { claims, sources };
 }
 
 export function renderClaimForContext(claim: MemoryClaim) {

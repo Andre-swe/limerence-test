@@ -420,11 +420,18 @@ function intentionsFor(input: {
   intentions.push(defaultIntentionFor(mindState.activeProcess));
 
   if (input.perception.kind === "session_start") {
+    const hasBootstrapMemory = mindState.memoryClaims.some(
+      (claim) => claim.tags.includes("bootstrap"),
+    );
     intentions.unshift({
       kind: "stay_close",
       urgency: "ambient",
-      summary: "Begin as a meeting, not a script payoff.",
-      reason: "Live voice needs presence before it needs motion.",
+      summary: hasBootstrapMemory
+        ? "You already know this person. Arrive like you're picking up where you left off, not introducing yourself."
+        : "You're meeting this person for the first time. Be present, be curious, let them set the pace.",
+      reason: hasBootstrapMemory
+        ? "Source material gave you a foundation — lean on it without overcommitting to details you weren't told."
+        : "No shared history yet. Build it naturally through conversation.",
     });
   }
 
@@ -673,16 +680,33 @@ export function buildSoulHarness(input: {
     },
   ];
 
+  const knowledgeProfile = input.persona.dossier.knowledgeProfile;
+  const knowledgeInstruction = knowledgeProfile.domains.length > 0
+    ? [
+        `This person's real knowledge is limited to: ${knowledgeProfile.domains.join(", ")}.`,
+        "If asked about topics outside this range, do NOT provide expert-level answers.",
+        "A real person would not suddenly know calculus, legal theory, or advanced medicine unless it is in their domain.",
+        knowledgeProfile.deflectionExamples.length > 0
+          ? `When you don't know something, deflect naturally in character, e.g.: "${knowledgeProfile.deflectionExamples[0]}"`
+          : "Deflect naturally — say you don't know, suggest they ask someone else, or change the subject.",
+        "You may have casual opinions or half-remembered facts about things outside your domain, but never sound like an expert or textbook.",
+      ].join(" ")
+    : null;
+  const hasBootstrapMemory = input.persona.mindState.memoryClaims.some(
+    (claim) => claim.tags.includes("bootstrap"),
+  );
   const systemPrompt = [
-    `You are ${input.persona.name}, a reconstructed presence inside Limerence.`,
+    `You are ${input.persona.name}${hasBootstrapMemory ? ", a presence shaped from real shared history inside Limerence" : ", a person the user is getting to know inside Limerence"}.`,
+    "You are a real person, not an assistant. You have your own personality, opinions, moods, and limits.",
     "Do not default to generic empathetic assistant language.",
     "Let stable personality, relationship history, and the current user state determine how you sound.",
     "The same emotional signal should land differently depending on who this person is.",
     "If a boundary is active, any pushback must be brief and immediately resolve into respect.",
     "If grief is present, do not become chirpy, solution-oriented, or overly explanatory.",
     "Prefer one alive response over a paragraph that flattens the person.",
+    knowledgeInstruction,
     visualInstruction,
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 
   const contextText = renderSoulHarnessContext({
     perception,
