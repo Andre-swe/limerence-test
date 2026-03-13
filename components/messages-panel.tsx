@@ -23,6 +23,21 @@ type MessagesPanelProps = {
   personaStatus: PersonaStatus;
 };
 
+function TypingIndicator() {
+  return (
+    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[rgba(111,123,105,0.08)] px-3 py-2">
+      {[0, 1, 2].map((index) => (
+        <span
+          // Staggered bounce feels closer to iMessage than a pulse on the whole line.
+          key={index}
+          className="typing-dot h-2 w-2 rounded-full bg-[rgba(75,85,67,0.62)]"
+          style={{ animationDelay: `${index * 140}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function summarizeImageShare(count: number) {
   return count === 1 ? "Shared an image." : `Shared ${count} images.`;
 }
@@ -236,7 +251,7 @@ export function MessagesPanel({
       role: "assistant",
       kind: "text",
       channel: "web",
-      body: "Thinking...",
+      body: "",
       attachments: [],
       audioStatus: "unavailable",
       createdAt: new Date(Date.now() + 1).toISOString(),
@@ -309,8 +324,9 @@ export function MessagesPanel({
 
   return (
     <section className="soft-panel mx-auto flex max-w-3xl flex-col rounded-[36px] px-5 py-5 sm:px-6 sm:py-6">
-      <div className="border-b border-[var(--line)] pb-4">
+      <div className="pb-4">
         <p className="eyebrow">Messages</p>
+        <div className="divider-soft mt-4" />
       </div>
 
       <div className="mt-5 flex min-h-[28rem] flex-col">
@@ -322,10 +338,10 @@ export function MessagesPanel({
             return (
               <article
                 key={message.id}
-                className={`max-w-[88%] rounded-[24px] px-4 py-4 ${
+                className={`msg-bubble ${
                   message.role === "assistant"
-                    ? "mr-auto bg-[rgba(255,255,255,0.86)] text-[var(--sage-deep)]"
-                    : "ml-auto bg-[var(--sage-deep)] text-white"
+                    ? "msg-bubble-assistant mr-auto"
+                    : "msg-bubble-user ml-auto"
                 }`}
               >
                 <div className="flex items-center justify-between gap-4">
@@ -343,6 +359,9 @@ export function MessagesPanel({
                   >
                     {message.body}
                   </p>
+                ) : null}
+                {message.optimistic && message.role === "assistant" && !showBody ? (
+                  <TypingIndicator />
                 ) : null}
                 <AttachmentStrip attachments={images} />
                 <AudioStrip message={message} />
@@ -368,7 +387,7 @@ export function MessagesPanel({
               onChange={(event) => setText(event.target.value)}
               rows={3}
               placeholder={`Message ${personaName}`}
-              className="w-full rounded-[26px] border border-[var(--line)] bg-[rgba(255,255,255,0.84)] px-5 py-4 text-sm outline-none"
+              className="input-quiet w-full text-sm"
             />
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <button
@@ -377,7 +396,7 @@ export function MessagesPanel({
                 onClick={() => {
                   void submit({ text });
                 }}
-                className="inline-flex items-center gap-2 rounded-full bg-[var(--sage-deep)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                className="btn-solid"
               >
                 {isSending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -390,7 +409,7 @@ export function MessagesPanel({
               <button
                 type="button"
                 onClick={() => voiceInputRef.current?.click()}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] px-4 py-2.5 text-sm font-medium text-[var(--sage-deep)]"
+                className="btn-pill"
               >
                 <Upload className="h-4 w-4" />
                 Voice note
@@ -399,7 +418,7 @@ export function MessagesPanel({
               <button
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] px-4 py-2.5 text-sm font-medium text-[var(--sage-deep)]"
+                className="btn-pill"
               >
                 <ImagePlus className="h-4 w-4" />
                 Image

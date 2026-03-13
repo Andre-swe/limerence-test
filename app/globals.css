@@ -189,6 +189,10 @@ select {
   border: 1px solid var(--line);
 }
 
+.typing-dot {
+  animation: typing-bob 1100ms ease-in-out infinite;
+}
+
 @keyframes orb-breathe {
   0%,
   100% {
@@ -203,4 +207,405 @@ select {
       inset 0 1px 24px rgba(255, 255, 255, 0.34),
       0 30px 70px rgba(63, 74, 66, 0.22);
   }
+}
+
+@keyframes typing-bob {
+  0%,
+  70%,
+  100% {
+    opacity: 0.32;
+    transform: translateY(0) scale(0.92);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Limerence — refined layer                                          */
+/* ------------------------------------------------------------------ */
+
+/* Global smoothness */
+*,
+*::before,
+*::after {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus — a quiet sage ring instead of browser chrome blue */
+:focus-visible {
+  outline: 2px solid rgba(110, 117, 98, 0.35);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(110, 117, 98, 0.28);
+  outline-offset: 0;
+}
+
+/* Scrollbar — thin, warm, disappears when idle */
+@supports selector(::-webkit-scrollbar) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(110, 117, 98, 0.18);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(110, 117, 98, 0.32);
+  }
+}
+
+/* Entrance — cards and panels surface gently */
+@keyframes surface {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.soft-panel,
+.paper-panel {
+  animation: surface 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger children on grid pages */
+.soft-panel:nth-child(2) { animation-delay: 60ms; }
+.soft-panel:nth-child(3) { animation-delay: 120ms; }
+.soft-panel:nth-child(4) { animation-delay: 180ms; }
+.soft-panel:nth-child(5) { animation-delay: 240ms; }
+
+/* Soft panel hover lift refinement */
+.soft-panel {
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 320ms ease;
+}
+
+.soft-panel:hover {
+  box-shadow: 0 12px 32px rgba(47, 57, 50, 0.08);
+  border-color: rgba(29, 38, 34, 0.1);
+}
+
+/* Button refinements — all buttons get a gentle transition */
+button {
+  transition:
+    background-color 200ms ease,
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease,
+    opacity 200ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Call control active depression */
+.call-control:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Call control — primary variant (the Talk button) */
+.call-control-primary {
+  background: var(--sage-deep);
+  color: white;
+  border-color: rgba(75, 85, 67, 0.18);
+}
+
+.call-control-primary:hover:not(:disabled) {
+  background: #3f4a36;
+  box-shadow: 0 4px 16px rgba(63, 74, 54, 0.18);
+}
+
+/* Message bubble base */
+.msg-bubble {
+  position: relative;
+  border-radius: 22px;
+  padding: 0.875rem 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  max-width: 88%;
+}
+
+/* Assistant bubble — warm parchment feel */
+.msg-bubble-assistant {
+  background: linear-gradient(
+    168deg,
+    rgba(251, 250, 244, 0.92),
+    rgba(245, 242, 232, 0.88)
+  );
+  border: 1px solid rgba(29, 38, 34, 0.06);
+  box-shadow: 0 1px 3px rgba(47, 57, 50, 0.04);
+  color: var(--sage-deep);
+  border-bottom-left-radius: 6px;
+}
+
+/* User bubble — sage tint, aligned right */
+.msg-bubble-user {
+  background: rgba(223, 228, 209, 0.52);
+  border: 1px solid rgba(110, 117, 98, 0.1);
+  color: var(--foreground);
+  border-bottom-right-radius: 6px;
+  margin-left: auto;
+}
+
+/* Message entrance */
+@keyframes msg-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.msg-bubble {
+  animation: msg-arrive 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Text input refinement */
+.input-quiet {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 0.875rem 1.25rem;
+  font-size: 0.9375rem;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background-color 200ms ease;
+}
+
+.input-quiet:focus {
+  border-color: rgba(110, 117, 98, 0.22);
+  box-shadow: 0 0 0 3px rgba(110, 117, 98, 0.06);
+  background: rgba(255, 255, 255, 0.92);
+  outline: none;
+}
+
+.input-quiet::placeholder {
+  color: rgba(29, 38, 34, 0.32);
+}
+
+/* Pill button — for secondary actions */
+.btn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--sage-deep);
+  cursor: pointer;
+}
+
+.btn-pill:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(29, 38, 34, 0.12);
+  box-shadow: 0 2px 8px rgba(47, 57, 50, 0.06);
+}
+
+/* Solid button — for primary actions */
+.btn-solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.125rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
+  background: var(--sage-deep);
+  color: white;
+  cursor: pointer;
+}
+
+.btn-solid:hover:not(:disabled) {
+  background: #3f4a36;
+  box-shadow: 0 4px 14px rgba(63, 74, 54, 0.16);
+}
+
+.btn-solid:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Gold accent button — for the primary CTA */
+.btn-gold {
+  background: var(--gold);
+  color: var(--sage-deep);
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 0.75rem 1.25rem;
+  cursor: pointer;
+}
+
+.btn-gold:hover:not(:disabled) {
+  background: #b0924e;
+  box-shadow: 0 4px 16px rgba(190, 160, 108, 0.24);
+}
+
+/* Divider — softer than a hard border */
+.divider-soft {
+  border: none;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(29, 38, 34, 0.07) 20%,
+    rgba(29, 38, 34, 0.07) 80%,
+    transparent
+  );
+  margin: 1.5rem 0;
+}
+
+/* Status dot — alive, pulsing gently */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sage);
+  animation: status-pulse 2.4s ease-in-out infinite;
+}
+
+.status-dot-active {
+  background: #7a9a5e;
+}
+
+/* Voice recording pulse */
+@keyframes rec-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(122, 63, 58, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(122, 63, 58, 0);
+  }
+}
+
+.rec-pulse {
+  animation: rec-pulse 1.6s ease-in-out infinite;
+}
+
+/* Page transition feel */
+main {
+  animation: surface 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Typography refinements */
+.serif-title {
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  font-weight: 500;
+}
+
+/* Card footer meta text */
+.meta-quiet {
+  font-size: 0.8125rem;
+  color: rgba(29, 38, 34, 0.44);
+  line-height: 1.5;
+}
+
+/* Subtle gold underline accent for links */
+.link-warm {
+  text-decoration: none;
+  background-image: linear-gradient(
+    rgba(190, 160, 108, 0.3),
+    rgba(190, 160, 108, 0.3)
+  );
+  background-size: 0% 1px;
+  background-position: left bottom;
+  background-repeat: no-repeat;
+  transition: background-size 300ms ease;
+}
+
+.link-warm:hover {
+  background-size: 100% 1px;
+}
+
+/* Orb listening state — subtle outer glow */
+@keyframes orb-listen {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 12px rgba(255, 255, 255, 0.22),
+      0 18px 36px rgba(75, 85, 67, 0.12),
+      0 0 0 0 rgba(164, 173, 124, 0);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 12px rgba(255, 255, 255, 0.22),
+      0 18px 36px rgba(75, 85, 67, 0.12),
+      0 0 0 18px rgba(164, 173, 124, 0.06);
+  }
+}
+
+.orb-listen {
+  animation: orb-listen 2.8s ease-in-out infinite;
+}
+
+/* Speaking state — slightly more alive */
+@keyframes orb-speak {
+  0%, 100% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.02);
+  }
+  50% {
+    transform: scale(0.985);
+  }
+  75% {
+    transform: scale(1.015);
+  }
+}
+
+.orb-speak {
+  animation: orb-speak 1.2s ease-in-out infinite;
+}
+
+/* Image attachment hover */
+.img-attachment {
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.45);
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.img-attachment:hover {
+  transform: scale(1.015);
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 3rem 1.5rem;
+  color: rgba(29, 38, 34, 0.4);
+  font-size: 0.9375rem;
 }
