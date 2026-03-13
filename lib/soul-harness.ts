@@ -3,6 +3,11 @@ import {
   createPersonalityConstitution,
   createRelationshipModel,
 } from "@/lib/mind-runtime";
+import {
+  buildMemoryRetrievalPack,
+  renderClaimForContext,
+  renderEpisodeForContext,
+} from "@/lib/memory-v2";
 import { getReadyScheduledPerceptions, getSoulProcessDefinition } from "@/lib/soul-kernel";
 import type {
   MessageEntry,
@@ -34,7 +39,8 @@ export type SoulMemoryRegion =
   | "episodes"
   | "process"
   | "internal_events"
-  | "trace";
+  | "trace"
+  | "durable_claims";
 
 export type SoulIntentionKind =
   | "stay_close"
@@ -496,6 +502,25 @@ export function buildSoulHarness(input: {
     new Date(perception.createdAt ?? new Date().toISOString()),
   );
   const processDefinition = getSoulProcessDefinition(mindState.activeProcess);
+  const retrievalPack =
+    mindState.lastRetrievalPack &&
+    mindState.lastRetrievalPack.perceptionId === perception.id
+      ? mindState.lastRetrievalPack
+      : buildMemoryRetrievalPack({
+          persona: {
+            ...input.persona,
+            personalityConstitution: personality,
+            relationshipModel: relationship,
+            mindState,
+          },
+          perception: {
+            id: perception.id,
+            sessionId: perception.sessionId,
+            kind: perception.kind,
+            channel: perception.channel,
+            content: perception.content,
+          },
+        });
   const constitutionSummary = [
     `warmth ${personality.warmth.toFixed(2)}`,
     `directness ${personality.directness.toFixed(2)}`,
@@ -512,6 +537,15 @@ export function buildSoulHarness(input: {
   ].join(", ");
   const visualContext = visualContextFor(perception);
   const visualInstruction = visualInstructionFor(visualContext, personality);
+  const alwaysLoadedClaims = retrievalPack.alwaysLoadedClaims
+    .slice(0, 6)
+    .map(renderClaimForContext);
+  const contextualClaims = retrievalPack.contextualClaims
+    .slice(0, 5)
+    .map(renderClaimForContext);
+  const contextualEpisodes = retrievalPack.contextualEpisodes
+    .slice(0, 3)
+    .map(renderEpisodeForContext);
   const memories: SoulMemory[] = [
     {
       region: "constitution",
@@ -563,6 +597,16 @@ export function buildSoulHarness(input: {
       role: "reflection" as const,
       content,
     })),
+    ...alwaysLoadedClaims.map((content) => ({
+      region: "durable_claims" as const,
+      role: "reflection" as const,
+      content,
+    })),
+    ...contextualClaims.map((content) => ({
+      region: "durable_claims" as const,
+      role: "reflection" as const,
+      content,
+    })),
     ...boundaryMemories.map((content) => ({
       region: "boundaries" as const,
       role: "reflection" as const,
@@ -598,6 +642,11 @@ export function buildSoulHarness(input: {
       role: "reflection" as const,
       content,
     })),
+    ...contextualEpisodes.map((content) => ({
+      region: "episodes" as const,
+      role: "reflection" as const,
+      content,
+    })),
     ...recentTrace.map((content) => ({
       region: "trace" as const,
       role: "reflection" as const,
@@ -617,6 +666,11 @@ export function buildSoulHarness(input: {
           },
         ]
       : []),
+    {
+      region: "working",
+      role: "reflection",
+      content: `Memory retrieval: ${retrievalPack.summary}`,
+    },
   ];
 
   const systemPrompt = [
@@ -738,6 +792,7 @@ export function renderSoulHarnessContext(snapshot: SoulHarnessSnapshot) {
     renderSection("LEARNED_RELATIONSHIP", sections.get("learned_relationship")),
     renderSection("WORKING", sections.get("working")),
     renderSection("USER_STATE", sections.get("user_state")),
+    renderSection("DURABLE_CLAIMS", sections.get("durable_claims")),
     renderSection("BOUNDARIES", sections.get("boundaries")),
     renderSection("RITUALS", sections.get("rituals")),
     renderSection("OPEN_LOOPS", sections.get("open_loops")),
@@ -841,6 +896,7 @@ const VOLATILE_REGIONS: SoulMemoryRegion[] = [
   "corrections",
   "trace",
   "intentions",
+  "durable_claims",
 ];
 
 /**
@@ -867,6 +923,7 @@ export function renderLiveContextOverlay(snapshot: SoulHarnessSnapshot) {
     `VISUAL_CONTEXT\n${visualContext?.summary ?? "No active live visual feed."}`,
     renderSection("USER_STATE", sections.get("user_state")),
     renderSection("WORKING", sections.get("working")),
+    renderSection("DURABLE_CLAIMS", sections.get("durable_claims")),
     renderSection("BOUNDARIES", sections.get("boundaries")),
     renderSection("OPEN_LOOPS", sections.get("open_loops")),
     renderSection("CORRECTIONS", sections.get("corrections")),

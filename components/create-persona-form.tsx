@@ -127,8 +127,8 @@ export function CreatePersonaForm() {
               Leave voice material now.
             </h2>
             <p className="mt-3 text-sm leading-7 text-[rgba(29,38,34,0.62)]">
-              Limerence will hold onto recordings and use a starting voice for now. Custom voice
-              shaping is still a mockup on this build.
+              Pick a starting voice and leave recordings if you have them. Voice shaping from your
+              source material is coming soon.
             </p>
           </div>
           <div className="rounded-[26px] border border-[rgba(103,112,100,0.12)] bg-[rgba(223,228,218,0.64)] px-4 py-3 text-sm leading-6 text-[var(--sage-deep)]">
@@ -170,8 +170,7 @@ export function CreatePersonaForm() {
             <div>
               <p className="text-sm font-medium text-[var(--sage-deep)]">Record inside Limerence</p>
               <p className="mt-1 text-xs leading-6 text-[rgba(29,38,34,0.54)]">
-                These recordings stay attached to the persona now, even though custom cloning is not
-                live yet.
+                Recordings stay attached to the persona for future voice shaping.
               </p>
             </div>
             <VoiceRecorder
@@ -405,10 +404,9 @@ export function CreatePersonaForm() {
           </div>
 
           <div className="rounded-[28px] bg-[rgba(63,74,66,0.96)] px-5 py-5 text-white md:max-w-sm">
-            <p className="eyebrow text-[rgba(255,255,255,0.68)]">Preview build</p>
             <p className="mt-3 text-sm leading-7 text-[rgba(255,255,255,0.82)]">
-              This creates the persona now, keeps any recordings with them, and starts from a
-              house voice while voice shaping remains a mockup.
+              This creates the persona and starts from the selected voice. Your recordings will be
+              used when voice shaping becomes available.
             </p>
             <button
               type="submit"

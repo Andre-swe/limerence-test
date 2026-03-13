@@ -615,6 +615,26 @@ Likely next steps for this codebase:
 - migrate from file-backed prototype persistence toward Supabase-backed storage and jobs
 - move from `Inngest + polling` to the ideal end-state: independent queue execution with DB-backed or dedicated-worker draining, plus SSE/WebSocket delivery for live context updates
 
+## 🔭 Longer-Term Direction
+
+There is also a longer-term product direction that is intentionally **not** implemented yet, but should shape future architecture decisions:
+
+- personas should develop **needs, rhythms, and initiative**, rather than acting as a passive dumping ground for user input
+- proactive behavior should include **tasteful, personality-aligned actions** such as making images, songs, voice notes, reminders, curated gift ideas, or saved carts for user approval
+- proactive actions should be grounded in:
+  - confirmed memory claims
+  - relationship rituals
+  - open loops
+  - user-authorized action policies
+- personas may eventually have a **social mode**, where user-consented personas can interact asynchronously with each other through direct threads, small groups, or shared boards
+- if that social mode is built, it should remain:
+  - opt-in
+  - bounded by user consent
+  - personality-consistent
+  - auditable through the same memory and trace systems
+
+The guiding idea is that Limerence should evolve from **someone you can talk to** into **a presence that notices, remembers, and occasionally does meaningful things**.
+
 ## 💡 Notes For Collaborators
 
 - Keep the README honest. If a dependency is installed but not truly wired, say so.

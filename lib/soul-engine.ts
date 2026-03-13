@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { buildSoulHarness } from "@/lib/soul-harness";
+import {
+  applyLearningArtifactsToMemoryClaims,
+  buildMemoryRetrievalPack,
+} from "@/lib/memory-v2";
 import { createInitialMindState, memoryNote, mergeMemoryNotes } from "@/lib/mind-runtime";
 import {
   applySoulArchetypeToConstitution,
@@ -754,6 +758,9 @@ function applyLearningArtifacts(
   artifacts: LearningArtifact[],
   userState: UserStateSnapshot | undefined,
   latestUserText: string,
+  input: {
+    perception: SoulPerception;
+  },
 ) {
   const learnedUserNotes = [...persona.mindState.memoryRegions.learnedUserNotes];
   const learnedRelationshipNotes = [...persona.mindState.memoryRegions.learnedRelationshipNotes];
@@ -865,12 +872,25 @@ function applyLearningArtifacts(
     }
   }
 
+  const memoryWrites = applyLearningArtifactsToMemoryClaims({
+    persona,
+    artifacts,
+    userState,
+    latestUserText,
+    perceptionChannel: input.perception.channel ?? "web",
+    perceptionSessionId: input.perception.sessionId,
+  });
+
   return {
     learnedUserNotes: boundedArray(learnedUserNotes, 12),
     learnedRelationshipNotes: boundedArray(learnedRelationshipNotes, 12),
     episodicMemory: boundedArray(episodicMemory, 24),
     repairMemory: boundedArray(repairMemory, 12),
     soulMemory,
+    memoryClaims: memoryWrites.claims,
+    claimSources: memoryWrites.claimSources,
+    episodes: memoryWrites.episodes,
+    recentChangedClaims: memoryWrites.changedClaims,
   };
 }
 
@@ -1337,6 +1357,16 @@ export async function executeFastMessageTurn(
       learningState: seededPersona.mindState.learningState,
       pendingInternalEvents: seededPersona.mindState.pendingInternalEvents,
       pendingShadowTurns: seededPersona.mindState.pendingShadowTurns,
+      liveDeliveryVersion: seededPersona.mindState.liveDeliveryVersion,
+      lastLiveDeliveryReason: seededPersona.mindState.lastLiveDeliveryReason,
+      lastLiveDeliverySentAt: seededPersona.mindState.lastLiveDeliverySentAt,
+      lastCoalescedLiveDeliveryVersion:
+        seededPersona.mindState.lastCoalescedLiveDeliveryVersion,
+      liveSessionMetrics: seededPersona.mindState.liveSessionMetrics,
+      memoryClaims: seededPersona.mindState.memoryClaims,
+      claimSources: seededPersona.mindState.claimSources,
+      episodes: seededPersona.mindState.episodes,
+      recentChangedClaims: seededPersona.mindState.recentChangedClaims,
       lastUserState: fastTurn.userState,
       recentUserStates: [fastTurn.userState, ...seededPersona.mindState.recentUserStates].slice(0, 12),
       memoryRegions: {
@@ -1361,6 +1391,17 @@ export async function executeFastMessageTurn(
       },
     },
   };
+
+  finalPersona.mindState.lastRetrievalPack = buildMemoryRetrievalPack({
+    persona: finalPersona,
+    perception: {
+      id: perception.id,
+      sessionId: perception.sessionId,
+      kind: perception.kind,
+      channel: perception.channel,
+      content: input.latestUserText,
+    },
+  });
 
   soulLogger.debug(
     {
@@ -1861,6 +1902,9 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     learningArtifacts,
     appraisedUserState,
     latestUserText,
+    {
+      perception,
+    },
   );
 
   const [learningStarted, learningCompleted] = createStepLifecycleEvents({
@@ -1904,6 +1948,10 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
         learnedUserNotes: learningChanges.learnedUserNotes,
         learnedRelationshipNotes: learningChanges.learnedRelationshipNotes,
       },
+      memoryClaims: learningChanges.memoryClaims,
+      claimSources: learningChanges.claimSources,
+      episodes: learningChanges.episodes,
+      recentChangedClaims: learningChanges.recentChangedClaims,
     },
   };
 
@@ -2004,6 +2052,18 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     },
   };
 
+  const finalRetrievalPack = buildMemoryRetrievalPack({
+    persona: finalPersona,
+    perception: {
+      id: perception.id,
+      sessionId: perception.sessionId,
+      kind: perception.kind,
+      channel: perception.channel,
+      content: latestUserText || perception.content,
+    },
+  });
+  finalPersona.mindState.lastRetrievalPack = finalRetrievalPack;
+
   const liveDeliveryDecision = determineLiveDeliveryDecision({
     previousPersona: input.persona,
     nextPersona: finalPersona,
@@ -2014,6 +2074,7 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     ...finalPersona,
     mindState: {
       ...finalPersona.mindState,
+      lastRetrievalPack: finalRetrievalPack,
       liveDeliveryVersion: liveDeliveryDecision.shouldDispatch
         ? finalPersona.mindState.liveDeliveryVersion + 1
         : finalPersona.mindState.liveDeliveryVersion,

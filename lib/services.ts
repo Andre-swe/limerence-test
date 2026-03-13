@@ -30,6 +30,10 @@ import {
   publishPersonaShadowTurns,
   publishSoulInternalEvents,
 } from "@/lib/inngest";
+import {
+  applyBoundaryClaimUpdate,
+  applyFeedbackToMemoryClaims,
+} from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
 import {
   applySoulArchetypeToConstitution,
@@ -448,7 +452,14 @@ function composePreferenceReply(persona: Persona, update: PreferenceUpdate) {
   }
 }
 
-async function applyPreferenceSignalIfNeeded(persona: Persona, userText: string) {
+async function applyPreferenceSignalIfNeeded(
+  persona: Persona,
+  userText: string,
+  options?: {
+    sourceMessageId?: string;
+    sessionId?: string;
+  },
+) {
   const preferenceUpdate = detectPreferenceUpdate(persona, userText);
 
   if (!preferenceUpdate) {
@@ -473,6 +484,30 @@ async function applyPreferenceSignalIfNeeded(persona: Persona, userText: string)
     updatedAt: new Date().toISOString(),
     heartbeatPolicy: preferenceUpdate.apply(current.heartbeatPolicy),
     preferenceSignals: [signal, ...current.preferenceSignals].slice(0, 8),
+    mindState: (() => {
+      const boundaryWrite = applyBoundaryClaimUpdate({
+        claims: current.mindState.memoryClaims,
+        claimSources: current.mindState.claimSources,
+        summary: preferenceUpdate.effectSummary,
+        detail: preferenceUpdate.interpretation,
+        createdAt: signal.createdAt,
+        sourceMessageId: options?.sourceMessageId,
+        sessionId: options?.sessionId,
+        sourceText: userText,
+      });
+
+      return {
+        ...current.mindState,
+        memoryClaims: boundaryWrite.claims,
+        claimSources: boundaryWrite.sources,
+        recentChangedClaims: [
+          boundaryWrite.result.claim,
+          ...current.mindState.recentChangedClaims.filter(
+            (claim) => claim.id !== boundaryWrite.result.claim.id,
+          ),
+        ].slice(0, 12),
+      };
+    })(),
   }));
 
   const contextualUpdate = [
@@ -2266,6 +2301,9 @@ export async function sendPersonaMessage(
   const { preferenceUpdate, persona: updatedPersona } = await applyPreferenceSignalIfNeeded(
     persona,
     originalText,
+    {
+      sourceMessageId: userMessage.id,
+    },
   );
   activePersona = updatedPersona;
 
@@ -2740,7 +2778,10 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   }
 
   if (!isAssistant) {
-    const learned = await applyPreferenceSignalIfNeeded(activePersona, body);
+    const learned = await applyPreferenceSignalIfNeeded(activePersona, body, {
+      sourceMessageId: message.id,
+      sessionId: parsed.sessionId,
+    });
     activePersona = learned.persona;
     if (learned.contextualUpdate) {
       contextualUpdates.push(learned.contextualUpdate);
@@ -3247,6 +3288,25 @@ export async function addPersonaFeedback(personaId: string, payload: unknown) {
       ...current.dossier,
       guidance: Array.from(new Set([...current.dossier.guidance, `Avoid: ${parsed.note}`])),
     },
+    mindState: (() => {
+      const correction = applyFeedbackToMemoryClaims({
+        claims: current.mindState.memoryClaims,
+        claimSources: current.mindState.claimSources,
+        feedback,
+      });
+
+      return {
+        ...current.mindState,
+        memoryClaims: correction.claims,
+        claimSources: correction.claimSources,
+        recentChangedClaims: [
+          ...correction.changedClaims,
+          ...current.mindState.recentChangedClaims.filter(
+            (claim) => !correction.changedClaims.some((changed) => changed.id === claim.id),
+          ),
+        ].slice(0, 12),
+      };
+    })(),
   }));
 
   return feedback;

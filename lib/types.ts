@@ -328,6 +328,93 @@ export const memoryRegionSnapshotSchema = z.object({
   processMemory: z.array(memoryNoteSchema).default([]),
 });
 
+export const memoryClaimKindSchema = z.enum([
+  "user_fact",
+  "preference",
+  "boundary",
+  "ritual",
+  "relationship_note",
+  "repair_note",
+  "milestone",
+  "open_loop_fact",
+]);
+
+export const memoryClaimScopeSchema = z
+  .enum(["relationship", "session", "persona_self", "global_user"])
+  .default("relationship");
+
+export const memoryClaimStatusSchema = z
+  .enum(["tentative", "confirmed", "contradicted", "stale"])
+  .default("tentative");
+
+export const memoryClaimSchema = z.object({
+  id: z.string(),
+  kind: memoryClaimKindSchema,
+  summary: z.string(),
+  detail: z.string().optional(),
+  scope: memoryClaimScopeSchema,
+  status: memoryClaimStatusSchema,
+  confidence: flexibleScoreSchema,
+  importance: flexibleScoreSchema,
+  sourceIds: z.array(z.string()).default([]),
+  reinforcementCount: z.number().int().min(1).default(1),
+  firstObservedAt: z.string(),
+  lastObservedAt: z.string(),
+  lastConfirmedAt: z.string().optional(),
+  lastUsedAt: z.string().optional(),
+  expiresAt: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+});
+
+export const claimSourceSchema = z.object({
+  id: z.string(),
+  claimId: z.string(),
+  messageId: z.string().optional(),
+  observationId: z.string().optional(),
+  sessionId: z.string().optional(),
+  feedbackEventId: z.string().optional(),
+  sourceType: z.enum(["message", "observation", "session", "feedback", "inference"]),
+  excerpt: z.string().optional(),
+  createdAt: z.string(),
+});
+
+export const episodeRecordSchema = z.object({
+  id: z.string(),
+  sessionId: z.string().optional(),
+  channel: channelSchema,
+  summary: z.string(),
+  participants: z.array(z.string()).default([]),
+  keyPhrases: z.array(z.string()).default([]),
+  affectiveArc: z.string(),
+  sourceMessageIds: z.array(z.string()).default([]),
+  sourceObservationIds: z.array(z.string()).default([]),
+  createdAt: z.string(),
+});
+
+export const memoryRetrievalPackSchema = z.object({
+  alwaysLoadedClaims: z.array(memoryClaimSchema).default([]),
+  contextualClaims: z.array(memoryClaimSchema).default([]),
+  contextualEpisodes: z.array(episodeRecordSchema).default([]),
+  summary: z.string().default(""),
+  builtAt: z.string(),
+  perceptionId: z.string().optional(),
+});
+
+export const claimConflictResolutionSchema = z.enum([
+  "created",
+  "reinforced",
+  "confirmed",
+  "contradicted",
+  "stale",
+  "skipped",
+]);
+
+export const claimWriteResultSchema = z.object({
+  claim: memoryClaimSchema,
+  resolution: claimConflictResolutionSchema,
+  changed: z.boolean().default(true),
+});
+
 export const processInstanceStateSchema = z.object({
   id: z.string(),
   process: soulProcessSchema,
@@ -509,6 +596,11 @@ export const soulStateSchema = z.object({
   recentUserStates: z.array(userStateSnapshotSchema).default([]),
   liveSessionMetrics: z.record(z.string(), liveSessionMetricsSchema).default({}),
   memoryRegions: memoryRegionSnapshotSchema,
+  memoryClaims: z.array(memoryClaimSchema).default([]),
+  claimSources: z.array(claimSourceSchema).default([]),
+  episodes: z.array(episodeRecordSchema).default([]),
+  recentChangedClaims: z.array(memoryClaimSchema).default([]),
+  lastRetrievalPack: memoryRetrievalPackSchema.optional(),
   recentEvents: z.array(soulEventSchema).default([]),
   traceHead: z.array(soulTraceEntrySchema).default([]),
   lastReflectionAt: z.string().optional(),
@@ -737,6 +829,15 @@ export type SoulPerception = z.infer<typeof soulPerceptionSchema>;
 export type ScheduledPerception = z.infer<typeof scheduledPerceptionSchema>;
 export type MemoryNote = z.infer<typeof memoryNoteSchema>;
 export type MemoryRegionSnapshot = z.infer<typeof memoryRegionSnapshotSchema>;
+export type MemoryClaimKind = z.infer<typeof memoryClaimKindSchema>;
+export type MemoryClaimScope = z.infer<typeof memoryClaimScopeSchema>;
+export type MemoryClaimStatus = z.infer<typeof memoryClaimStatusSchema>;
+export type MemoryClaim = z.infer<typeof memoryClaimSchema>;
+export type ClaimSource = z.infer<typeof claimSourceSchema>;
+export type EpisodeRecord = z.infer<typeof episodeRecordSchema>;
+export type MemoryRetrievalPack = z.infer<typeof memoryRetrievalPackSchema>;
+export type ClaimConflictResolution = z.infer<typeof claimConflictResolutionSchema>;
+export type ClaimWriteResult = z.infer<typeof claimWriteResultSchema>;
 export type ProcessInstanceState = z.infer<typeof processInstanceStateSchema>;
 export type SoulMemoryValue = z.infer<typeof soulMemoryValueSchema>;
 export type SoulMemoryMap = z.infer<typeof soulMemoryMapSchema>;

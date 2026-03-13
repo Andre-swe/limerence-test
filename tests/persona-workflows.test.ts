@@ -37,6 +37,7 @@ import {
   resetStoreForTests,
   updatePersona,
 } from "@/lib/store";
+import type { MemoryClaim } from "@/lib/types";
 
 function withoutReasoningProviders<T>(operation: () => Promise<T>) {
   const previous = {
@@ -215,6 +216,86 @@ describe("persona workflows", () => {
     expect(persona?.dossier.guidance.some((item) => item.includes("never called me honey"))).toBe(
       true,
     );
+  });
+
+  it("turns explicit boundary statements into confirmed durable claims immediately", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "please don't text me while i'm at work.",
+        channel: "web",
+      });
+
+      const persona = await getPersona("persona-mom");
+      const boundaryClaim = persona?.mindState.memoryClaims.find(
+        (claim) => claim.kind === "boundary",
+      );
+
+      expect(boundaryClaim).toBeTruthy();
+      expect(boundaryClaim?.status).toBe("confirmed");
+      expect(boundaryClaim?.confidence).toBeGreaterThanOrEqual(0.9);
+      expect(
+        persona?.mindState.recentChangedClaims.some((claim) => claim.id === boundaryClaim?.id),
+      ).toBe(true);
+      expect(
+        persona?.mindState.lastRetrievalPack?.alwaysLoadedClaims.some(
+          (claim) => claim.id === boundaryClaim?.id,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("marks contradicted memories and writes repair notes from feedback", async () => {
+    const messages = await listMessages("persona-mom");
+    const targetMessage = messages.find((message) => message.role === "assistant");
+    expect(targetMessage).toBeTruthy();
+
+    const now = new Date().toISOString();
+    const seededClaim: MemoryClaim = {
+      id: "claim-honey",
+      kind: "relationship_note",
+      summary: "She called you honey often.",
+      detail: "The relationship often used honey as a pet name.",
+      scope: "relationship",
+      status: "confirmed",
+      confidence: 0.88,
+      importance: 0.72,
+      sourceIds: [targetMessage!.id],
+      reinforcementCount: 1,
+      firstObservedAt: now,
+      lastObservedAt: now,
+      lastConfirmedAt: now,
+      lastUsedAt: undefined,
+      expiresAt: undefined,
+      tags: ["honey", "pet_name"],
+    };
+
+    await updatePersona("persona-mom", (current) => ({
+      ...current,
+      mindState: {
+        ...current.mindState,
+        memoryClaims: [seededClaim, ...current.mindState.memoryClaims],
+      },
+    }));
+
+    await addPersonaFeedback("persona-mom", {
+      messageId: targetMessage?.id,
+      note: "She never called me honey that often.",
+    });
+
+    const persona = await getPersona("persona-mom");
+    const contradictedClaim = persona?.mindState.memoryClaims.find(
+      (claim) => claim.id === seededClaim.id,
+    );
+    const repairClaim = persona?.mindState.memoryClaims.find(
+      (claim) => claim.kind === "repair_note" && claim.summary.toLowerCase().includes("honey"),
+    );
+
+    expect(contradictedClaim?.status).toBe("contradicted");
+    expect(contradictedClaim?.confidence).toBeLessThan(0.5);
+    expect(repairClaim?.status).toBe("confirmed");
+    expect(
+      persona?.mindState.recentChangedClaims.some((claim) => claim.id === repairClaim?.id),
+    ).toBe(true);
   });
 
   it("runs a heartbeat and appends an outbound message", async () => {
@@ -931,6 +1012,29 @@ describe("persona workflows", () => {
 
     expect(body.liveSessionMetrics["active-kept"]).toBeTruthy();
     expect(body.liveSessionMetrics["metrics-session-1"]?.endedAt).toBeTruthy();
+  });
+
+  it("exposes memory claims, provenance, and retrieval packs in the trace route", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "please don't text me while i'm at work.",
+        channel: "web",
+      });
+
+      const response = await getSoulTraceRoute(new Request("http://localhost"), {
+        params: Promise.resolve({ personaId: "persona-mom" }),
+      });
+      const body = await response.json();
+
+      expect(body.memoryClaims.some((claim: MemoryClaim) => claim.kind === "boundary")).toBe(true);
+      expect(body.claimSources.length).toBeGreaterThan(0);
+      expect(body.lastRetrievalPack.summary.length).toBeGreaterThan(0);
+      expect(
+        body.lastRetrievalPack.alwaysLoadedClaims.some(
+          (claim: MemoryClaim) => claim.kind === "boundary",
+        ),
+      ).toBe(true);
+    });
   });
 
   it("detects meaningful transitions using smoothed deltas instead of raw thresholds", () => {
