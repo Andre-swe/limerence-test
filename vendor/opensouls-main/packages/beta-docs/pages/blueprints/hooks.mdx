@@ -1,0 +1,32 @@
+# Soul Hooks
+
+The Soul Engine API provides stateful hooks that can generate side effects during `MentalProcess` execution and extend the Soul Engine's functionality. All of the hooks follow the pattern `use[Hook]` and can be imported from the `@opensouls/engine` package.
+
+```typescript filename="exampleProcess.ts" {1,5}
+import { MentalProcess, useProcessMemory } from "@opensouls/engine"
+
+const exampleProcess: MentalProcess = async ({ workingMemory }) => {
+  // example call to a hook which generates a local persistent memory container
+  const count = useProcessMemory(0)
+
+  // rest of the mental process
+  // ...
+  return workingMemory
+}
+
+export default exampleProcess
+```
+
+The Engine provides the following hooks:
+
+- [`useActions`](/blueprints/hooks/useActions)
+- [`useTTS`](/blueprints/hooks/useTTS)
+- [`usePerceptions`](/blueprints/hooks/usePerceptions)
+- [`useProcessMemory`](/blueprints/hooks/useProcessMemory)
+- [`useProcessManager`](/blueprints/hooks/useProcessManager)
+- [`useSoulMemory`](/blueprints/hooks/useSoulMemory)
+- [`useSoulStore`](/blueprints/hooks/useSoulStore)
+- [`useBlueprintStore`](/blueprints/hooks/useBlueprintStore)
+- [`useOrganizationStore`](/blueprints/hooks/useOrganizationStore)
+- [`useTool`](/blueprints/hooks/useTool)
+- 

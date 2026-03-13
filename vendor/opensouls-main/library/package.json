@@ -1,0 +1,29 @@
+{
+  "name": "@opensouls/community",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "library cognitive functions",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "scripts": {
+    "sync": "bun run ./scripts/sync.ts"
+  },
+  "author": "OpenSouls",
+  "license": "MIT",
+  "dependencies": {
+    "@opensouls/core": "workspace:*",
+    "@opensouls/engine": "workspace:*",
+    "@opensouls/pipeline": "workspace:*",
+    "gpt-tokenizer": "^2.1.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.3"
+  }
+}
