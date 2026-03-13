@@ -15,7 +15,6 @@ type RecordedSample = {
 
 export function CreatePersonaForm() {
   const router = useRouter();
-  const [source, setSource] = useState<"living" | "deceased">("living");
   const [presencePreset, setPresencePreset] = useState<"soft" | "steady" | "close">("steady");
   const [modePreset, setModePreset] = useState<"mixed" | "text" | "voice_note">("mixed");
   const [starterVoiceId, setStarterVoiceId] = useState<string>(houseVoicePresets[0]?.id ?? "");
@@ -96,18 +95,6 @@ export function CreatePersonaForm() {
               className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
               placeholder="Mother"
             />
-          </label>
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-[var(--sage-deep)]">Source</span>
-            <select
-              name="source"
-              value={source}
-              onChange={(event) => setSource(event.target.value as "living" | "deceased")}
-              className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
-            >
-              <option value="living">Living</option>
-              <option value="deceased">Deceased</option>
-            </select>
           </label>
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--sage-deep)]">Avatar</span>
@@ -414,19 +401,6 @@ export function CreatePersonaForm() {
                 <input name="attestedRights" type="checkbox" className="mt-1" required />
                 <span>I have the right to upload this voice and message material.</span>
               </label>
-              {source === "deceased" ? (
-                <label className="flex items-start gap-3">
-                  <input
-                    name="deceasedDisclosureAccepted"
-                    type="checkbox"
-                    className="mt-1"
-                    required
-                  />
-                  <span>
-                    I understand this recreation is synthetic and will remain in manual review before activation.
-                  </span>
-                </label>
-              ) : null}
             </div>
           </div>
 

@@ -77,7 +77,7 @@ export default function SettingsPage() {
             {
               icon: ShieldCheck,
               title: "Synthetic and private",
-              body: "Every conversation stays marked as an AI recreation. Public sharing is blocked in this prototype, and deceased-person personas remain behind manual review before activation.",
+              body: "Every conversation is clearly synthetic. Public sharing is blocked in this prototype, and persona material stays grounded in voice, memory, and relationship history.",
             },
           ].map(({ icon: Icon, title, body }) => (
             <section key={title} className="paper-panel rounded-[30px] px-6 py-6">

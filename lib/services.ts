@@ -39,7 +39,6 @@ import {
 import { soulLogger } from "@/lib/soul-logger";
 import { getHouseVoicePreset, houseVoicePresets } from "@/lib/voice-presets";
 import {
-  approvalRequestSchema,
   type ConversationChannel,
   type FeedbackEvent,
   type LiveSessionMode,
@@ -1953,13 +1952,12 @@ export async function createPersonaFromForm(formData: FormData) {
 
   const name = String(formData.get("name") ?? "").trim();
   const relationship = String(formData.get("relationship") ?? "").trim();
-  const source = String(formData.get("source") ?? "living") as PersonaSource;
+  const source: PersonaSource = "living";
   const description = String(formData.get("description") ?? "").trim();
   const pastedText = String(formData.get("pastedText") ?? "").trim();
   const existingVoiceId = String(formData.get("existingVoiceId") ?? "").trim();
   const starterVoiceId = String(formData.get("starterVoiceId") ?? "").trim();
   const attestedRights = formData.get("attestedRights") === "on";
-  const deceasedDisclosureAccepted = formData.get("deceasedDisclosureAccepted") === "on";
   const heartbeatIntervalHours = Number(formData.get("heartbeatIntervalHours") ?? 4);
   const preferredMode: Persona["heartbeatPolicy"]["preferredMode"] =
     String(formData.get("preferredMode") ?? "mixed") === "voice_note"
@@ -1967,7 +1965,7 @@ export async function createPersonaFromForm(formData: FormData) {
       : String(formData.get("preferredMode") ?? "mixed") === "text"
         ? "text"
         : "mixed";
-  const status: Persona["status"] = source === "deceased" ? "pending_review" : "active";
+  const status: Persona["status"] = "active";
 
   if (!name || !relationship || !description) {
     throw new Error("Name, relationship, and description are required.");
@@ -1975,10 +1973,6 @@ export async function createPersonaFromForm(formData: FormData) {
 
   if (!attestedRights) {
     throw new Error("Rights attestation is required.");
-  }
-
-  if (source === "deceased" && !deceasedDisclosureAccepted) {
-    throw new Error("The deceased-person disclosure must be accepted.");
   }
 
   const interviewAnswers = Object.fromEntries(
@@ -2088,8 +2082,6 @@ export async function createPersonaFromForm(formData: FormData) {
     voice,
     consent: {
       attestedRights,
-      deceasedDisclosureAccepted,
-      manualReviewRequired: source === "deceased",
       createdAt: now,
     },
     dossier,
@@ -2142,9 +2134,7 @@ export async function createPersonaFromForm(formData: FormData) {
       kind: "preview",
       channel: "web",
       body:
-        source === "deceased"
-          ? `I've assembled ${name}'s draft persona. It will stay in review until you approve the sensitive-use disclosures.`
-          : `I've assembled ${name}'s draft persona. Start talking normally, even if that includes boundaries like "don't text me while I'm at work."`,
+        `I've assembled ${name}'s draft persona. Start talking normally, even if that includes boundaries like "don't text me while I'm at work."`,
       audioStatus: "text_fallback",
       replyMode: "text",
       delivery: {
@@ -3260,24 +3250,6 @@ export async function addPersonaFeedback(personaId: string, payload: unknown) {
   }));
 
   return feedback;
-}
-
-export async function approvePersona(personaId: string, payload: unknown) {
-  const parsed = approvalRequestSchema.parse(payload);
-
-  if (!parsed.approved) {
-    throw new Error("Declining personas is not implemented in this prototype.");
-  }
-
-  return updatePersona(personaId, (persona) => ({
-    ...persona,
-    status: "active",
-    updatedAt: new Date().toISOString(),
-    consent: {
-      ...persona.consent,
-      approvedAt: new Date().toISOString(),
-    },
-  }));
 }
 
 export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision> {

@@ -312,7 +312,7 @@ export function MessagesPanel({
 
       {isLocked ? (
         <div className="mt-5 rounded-[24px] border border-[rgba(199,161,101,0.22)] bg-[rgba(199,161,101,0.12)] px-4 py-4 text-sm leading-6 text-[var(--sage-deep)]">
-          This person stays quiet until manual review is complete.
+          This person is not available yet.
         </div>
       ) : (
         <div className="mt-5 space-y-4">

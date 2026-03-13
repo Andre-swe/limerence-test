@@ -50,7 +50,7 @@ These are the folders that matter most:
   Next.js App Router pages and API routes.
 
 - [`components/`](/Users/syekel/Documents/limerance/components)  
-  UI surfaces for the call scene, messages scene, persona creation, review actions, and shared controls.
+  UI surfaces for the call scene, messages scene, persona creation, and shared controls.
 
 - [`lib/`](/Users/syekel/Documents/limerance/lib)  
   The product’s runtime core: orchestration, providers, Hume session setup, soul kernel, persistence, types, and helpers.
@@ -503,7 +503,7 @@ This is the main separation in the product:
   Async messages scene.
 
 - [`/review`](/Users/syekel/Documents/limerance/app/review/page.tsx)  
-  Manual review flow for pending deceased personas.
+  Legacy route that redirects back home.
 
 - [`/settings`](/Users/syekel/Documents/limerance/app/settings/page.tsx)  
   “How it works” and prototype notes.
@@ -512,9 +512,6 @@ This is the main separation in the product:
 
 - [`POST /api/personas`](/Users/syekel/Documents/limerance/app/api/personas/route.ts)  
   Create a persona from form data.
-
-- [`POST /api/personas/[personaId]/approval`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/approval/route.ts)  
-  Approve a persona for activation.
 
 - [`POST /api/personas/[personaId]/feedback`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/feedback/route.ts)  
   Save message-level feedback.
@@ -547,7 +544,6 @@ The test suite lives in [`tests/persona-workflows.test.ts`](/Users/syekel/Docume
 It currently covers:
 
 - persona creation
-- deceased-person review behavior
 - preference learning
 - heartbeat behavior
 - live transcript state updates

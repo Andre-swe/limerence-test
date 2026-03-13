@@ -926,9 +926,7 @@ export function createRelationshipModel(input: PersonaMindLike): RelationshipMod
         ? "peer"
         : /(partner|wife|husband|lover|ex)/.test(lowerRelationship)
           ? "romantic"
-          : input.source === "deceased"
-            ? "looked_up_to"
-            : "synthetic",
+          : "synthetic",
     sharedRituals: input.dossier.routines.slice(0, 4),
     frictionPatterns: input.preferenceSignals.slice(0, 3).map((signal) => signal.interpretation),
     favoriteModes: [...preferenceModes],
@@ -937,9 +935,7 @@ export function createRelationshipModel(input: PersonaMindLike): RelationshipMod
       : /(friend|partner|lover|ex)/.test(lowerRelationship)
         ? 0.38
         : 0.3,
-    repairExpectations: input.source === "deceased"
-      ? "If the voice lands wrong, repair gently and invite correction."
-      : "If the voice lands wrong, repair quickly and return to the real person.",
+    repairExpectations: "If the voice lands wrong, repair quickly and return to the real person.",
     baselineTone: /(sarcastic|teasing)/.test(input.description.toLowerCase())
       ? "guarded warmth with some play"
       : "quiet but available",

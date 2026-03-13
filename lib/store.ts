@@ -141,7 +141,7 @@ function createSeedStore(): DataStore {
     emotionalTendencies: ["guarded", "supportive", "observant"],
     routines: ["checks in after big events", "keeps messages short"],
     guidance: ["Use humor sparingly.", "Keep messages brief."],
-    sourceSummary: "Pending manual review because the persona source is deceased.",
+    sourceSummary: "Derived from family memories, interview notes, and a demo voice profile.",
   };
   const messages: MessageEntry[] = [
     {
@@ -221,7 +221,7 @@ function createSeedStore(): DataStore {
   const alexPersonalityConstitution = createPersonalityConstitution({
     name: "Alex Rivera",
     relationship: "Older brother",
-    source: "deceased",
+    source: "living",
     description:
       "Dry humor, sports references, short responses, affectionate beneath the sarcasm.",
     dossier: alexDossier,
@@ -231,7 +231,7 @@ function createSeedStore(): DataStore {
   const alexRelationshipModel = createRelationshipModel({
     name: "Alex Rivera",
     relationship: "Older brother",
-    source: "deceased",
+    source: "living",
     description:
       "Dry humor, sports references, short responses, affectionate beneath the sarcasm.",
     dossier: alexDossier,
@@ -258,7 +258,7 @@ function createSeedStore(): DataStore {
     persona: {
       name: "Alex Rivera",
       relationship: "Older brother",
-      source: "deceased",
+      source: "living",
       description:
         "Dry humor, sports references, short responses, affectionate beneath the sarcasm.",
       dossier: alexDossier,
@@ -308,8 +308,6 @@ function createSeedStore(): DataStore {
         voice: momVoice,
         consent: {
           attestedRights: true,
-          deceasedDisclosureAccepted: false,
-          manualReviewRequired: false,
           createdAt: iso(-48),
         },
         dossier: momDossier,
@@ -326,10 +324,10 @@ function createSeedStore(): DataStore {
         userId: "user-demo",
         name: "Alex Rivera",
         relationship: "Older brother",
-        source: "deceased",
+        source: "living",
         description:
           "Dry humor, sports references, short responses, affectionate beneath the sarcasm.",
-        status: "pending_review",
+        status: "active",
         avatarUrl: undefined,
         createdAt: iso(-12),
         updatedAt: iso(-12),
@@ -346,8 +344,6 @@ function createSeedStore(): DataStore {
         voice: alexVoice,
         consent: {
           attestedRights: true,
-          deceasedDisclosureAccepted: true,
-          manualReviewRequired: true,
           createdAt: iso(-12),
         },
         dossier: alexDossier,
@@ -384,6 +380,24 @@ function hydrateStore(rawStore: unknown): DataStore {
     ...rawParsed,
     messages: normalizedMessages,
     personas: (rawParsed.personas ?? []).map((persona) => {
+      const normalizedSource: Persona["source"] = "living";
+      const normalizedStatus: Persona["status"] =
+        persona.status === "draft" ? "draft" : "active";
+      const normalizedConsent: Persona["consent"] = {
+        attestedRights:
+          typeof persona.consent === "object" &&
+          persona.consent !== null &&
+          "attestedRights" in persona.consent
+            ? Boolean(persona.consent.attestedRights)
+            : true,
+        createdAt:
+          typeof persona.consent === "object" &&
+          persona.consent !== null &&
+          "createdAt" in persona.consent &&
+          typeof persona.consent.createdAt === "string"
+            ? persona.consent.createdAt
+            : new Date().toISOString(),
+      };
       const hasSoulState =
         typeof persona.mindState === "object" &&
         persona.mindState !== null &&
@@ -395,10 +409,7 @@ function hydrateStore(rawStore: unknown): DataStore {
         : createPersonalityConstitution({
           name: String(persona.name ?? "Persona"),
           relationship: String(persona.relationship ?? "Unknown"),
-          source:
-            persona.source === "deceased" || persona.source === "living"
-              ? persona.source
-              : "living",
+          source: normalizedSource,
           description: String(persona.description ?? ""),
           dossier: persona.dossier as Persona["dossier"],
           heartbeatPolicy: persona.heartbeatPolicy as Persona["heartbeatPolicy"],
@@ -410,10 +421,7 @@ function hydrateStore(rawStore: unknown): DataStore {
         : createRelationshipModel({
           name: String(persona.name ?? "Persona"),
           relationship: String(persona.relationship ?? "Unknown"),
-          source:
-            persona.source === "deceased" || persona.source === "living"
-              ? persona.source
-              : "living",
+          source: normalizedSource,
           description: String(persona.description ?? ""),
           dossier: persona.dossier as Persona["dossier"],
           heartbeatPolicy: persona.heartbeatPolicy as Persona["heartbeatPolicy"],
@@ -426,21 +434,26 @@ function hydrateStore(rawStore: unknown): DataStore {
         isHydratedPersonalityConstitution(persona.personalityConstitution) &&
         isHydratedRelationshipModel(persona.relationshipModel)
       ) {
-        return persona;
+        return {
+          ...persona,
+          source: normalizedSource,
+          status: normalizedStatus,
+          consent: normalizedConsent,
+        };
       }
 
       return {
         ...persona,
+        source: normalizedSource,
+        status: normalizedStatus,
+        consent: normalizedConsent,
         personalityConstitution,
         relationshipModel,
         mindState: createInitialMindState({
           persona: {
             name: String(persona.name ?? "Persona"),
             relationship: String(persona.relationship ?? "Unknown"),
-            source:
-              persona.source === "deceased" || persona.source === "living"
-                ? persona.source
-                : "living",
+            source: normalizedSource,
             description: String(persona.description ?? ""),
             dossier: persona.dossier as Persona["dossier"],
             heartbeatPolicy: persona.heartbeatPolicy as Persona["heartbeatPolicy"],
@@ -704,11 +717,6 @@ async function mutateStore<T>(
 export async function listPersonas() {
   const store = await readStore();
   return [...store.personas].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-}
-
-export async function listPendingReview() {
-  const store = await readStore();
-  return store.personas.filter((persona) => persona.status === "pending_review");
 }
 
 export async function getPersona(personaId: string) {

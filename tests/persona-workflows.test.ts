@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getSoulTraceRoute } from "@/app/api/personas/[personaId]/soul/trace/route";
 import { buildPersonaLivePrompt, createPersonaLiveSession } from "@/lib/hume-evi";
@@ -75,14 +77,12 @@ describe("persona workflows", () => {
     await resetStoreForTests();
   });
 
-  it("creates deceased personas in pending review", async () => {
+  it("creates personas as active without a review gate", async () => {
     const formData = new FormData();
     formData.append("name", "Nina");
     formData.append("relationship", "Aunt");
-    formData.append("source", "deceased");
     formData.append("description", "Playful and observant.");
     formData.append("attestedRights", "on");
-    formData.append("deceasedDisclosureAccepted", "on");
     formData.append("heartbeatIntervalHours", "4");
     formData.append("preferredMode", "mixed");
     formData.append(
@@ -91,10 +91,88 @@ describe("persona workflows", () => {
     );
 
     const persona = await createPersonaFromForm(formData);
-    expect(persona.status).toBe("pending_review");
+    expect(persona.status).toBe("active");
     expect(persona.voice.status).toBe("preview_only");
     expect(persona.voice.cloneState).toBe("pending_mockup");
     expect(persona.mindState.workingMemory.summary.length).toBeGreaterThan(0);
+  });
+
+  it("hydrates legacy deceased pending-review personas into active neutral personas", async () => {
+    const rawStorePath = path.join(process.cwd(), "data", "demo-store.json");
+    await writeFile(
+      rawStorePath,
+      JSON.stringify({
+        users: [{ id: "user-demo", name: "Demo Workspace", createdAt: new Date().toISOString() }],
+        personas: [
+          {
+            id: "persona-legacy",
+            userId: "user-demo",
+            name: "Legacy Persona",
+            relationship: "Parent",
+            source: "deceased",
+            description: "Warm and protective.",
+            status: "pending_review",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            pastedText: "",
+            screenshotSummaries: [],
+            interviewAnswers: {},
+            heartbeatPolicy: {
+              enabled: true,
+              intervalHours: 4,
+              maxOutboundPerDay: 3,
+              quietHoursStart: 22,
+              quietHoursEnd: 8,
+              preferredMode: "mixed",
+              workHoursEnabled: false,
+              workHoursStart: 9,
+              workHoursEnd: 17,
+              workDays: [1, 2, 3, 4, 5],
+              boundaryNotes: [],
+            },
+            voice: {
+              provider: "mock",
+              status: "preview_only",
+              cloneState: "none",
+              watermarkApplied: false,
+            },
+            consent: {
+              attestedRights: true,
+              deceasedDisclosureAccepted: true,
+              manualReviewRequired: true,
+              approvedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            },
+            dossier: {
+              essence: "Warm and protective.",
+              communicationStyle: "Gentle and calm.",
+              signaturePhrases: [],
+              favoriteTopics: [],
+              emotionalTendencies: [],
+              routines: [],
+              guidance: [],
+              sourceSummary: "Legacy source summary.",
+            },
+            voiceSamples: [],
+            screenshots: [],
+            preferenceSignals: [],
+          },
+        ],
+        messages: [],
+        perceptionObservations: [],
+        feedbackEvents: [],
+        processedTelegramUpdates: [],
+      }),
+      "utf8",
+    );
+
+    const persona = await getPersona("persona-legacy");
+    expect(persona?.source).toBe("living");
+    expect(persona?.status).toBe("active");
+    expect(persona?.consent).toEqual({
+      attestedRights: true,
+      createdAt: expect.any(String),
+    });
   });
 
   it("uses an existing voice id directly when one is provided", async () => {

@@ -574,10 +574,7 @@ class MockReasoningProvider implements ReasoningProvider {
       ),
     );
 
-    const routines =
-      input.source === "deceased"
-        ? ["gentle check-ins tied to memories", "follow-up after emotionally loaded events"]
-        : ["morning check-ins", "follow-up when the user mentions a milestone"];
+    const routines = ["morning check-ins", "follow-up when the user mentions a milestone"];
 
     return {
       essence: `${input.name} is reconstructed as a ${input.relationship.toLowerCase()} whose presence should feel ${input.description.toLowerCase()}.`,
@@ -586,10 +583,7 @@ class MockReasoningProvider implements ReasoningProvider {
         : "Warm, concise, and grounded in the user's memories.",
       signaturePhrases: signaturePhrases.length > 0 ? signaturePhrases : ["I'm here", "tell me more"],
       favoriteTopics: ["family updates", "daily routines", "important life moments"],
-      emotionalTendencies:
-        input.source === "deceased"
-          ? ["gentle", "reassuring", "memory-aware"]
-          : ["supportive", "observant", "emotionally present"],
+      emotionalTendencies: ["supportive", "observant", "emotionally present"],
       routines,
       guidance: [
         "Stay emotionally sensitive and avoid sounding transactional.",

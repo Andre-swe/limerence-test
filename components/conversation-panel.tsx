@@ -999,7 +999,7 @@ function ConversationPanelInner({
                 {isLocked ? "Quiet for now" : "Something shifted"}
               </p>
               <p className="text-sm leading-7 text-[rgba(29,38,34,0.58)]">
-                {isLocked ? "This recreation stays silent until review is complete." : callIssue}
+                {isLocked ? "This person is not available yet." : callIssue}
               </p>
             </div>
           ) : null}

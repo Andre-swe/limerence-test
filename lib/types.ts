@@ -8,8 +8,8 @@ export const interviewPrompts = [
   "What topics lit them up immediately?",
 ] as const;
 
-export const personaSourceSchema = z.enum(["living", "deceased"]);
-export const personaStatusSchema = z.enum(["draft", "pending_review", "active"]);
+export const personaSourceSchema = z.enum(["living"]);
+export const personaStatusSchema = z.enum(["draft", "active"]);
 export const channelSchema = z.enum(["web", "telegram", "heartbeat", "live"]);
 export const liveSessionModeSchema = z.enum(["voice", "screen", "camera"]);
 export const messageRoleSchema = z.enum(["user", "assistant", "system"]);
@@ -28,10 +28,6 @@ const flexibleScoreSchema = normalizedScoreSchema.default(0.5);
 export const feedbackRequestSchema = z.object({
   messageId: z.string().min(1),
   note: z.string().min(4).max(280),
-});
-
-export const approvalRequestSchema = z.object({
-  approved: z.boolean().default(true),
 });
 
 export const liveTranscriptRequestSchema = z.object({
@@ -596,9 +592,6 @@ export const voiceProfileSchema = z.object({
 
 export const consentRecordSchema = z.object({
   attestedRights: z.boolean(),
-  deceasedDisclosureAccepted: z.boolean(),
-  manualReviewRequired: z.boolean(),
-  approvedAt: z.string().optional(),
   createdAt: z.string(),
 });
 

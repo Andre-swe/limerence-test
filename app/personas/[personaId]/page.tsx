@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { ApprovePersonaButton } from "@/components/approve-persona-button";
 import { ConversationPanel } from "@/components/conversation-panel";
 import { LogoMark } from "@/components/logo-mark";
 import { getPersona } from "@/lib/store";
@@ -41,9 +40,6 @@ export default async function PersonaDetailPage({
             >
               Messages
             </Link>
-            {persona.status === "pending_review" ? (
-              <ApprovePersonaButton personaId={persona.id} />
-            ) : null}
           </div>
         </header>
 

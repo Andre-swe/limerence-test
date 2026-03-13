@@ -2,12 +2,12 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { LogoMark } from "@/components/logo-mark";
 import { PersonaCard } from "@/components/persona-card";
-import { listPendingReview, listPersonas } from "@/lib/store";
+import { listPersonas } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [personas, pending] = await Promise.all([listPersonas(), listPendingReview()]);
+  const personas = await listPersonas();
 
   return (
     <div className="app-shell min-h-screen px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-10">
@@ -21,11 +21,6 @@ export default async function Home() {
             <Link href="/settings" className="transition-colors hover:text-[var(--sage-deep)]">
               How it works
             </Link>
-            {pending.length > 0 ? (
-              <Link href="/review" className="transition-colors hover:text-[var(--sage-deep)]">
-                Review
-              </Link>
-            ) : null}
           </div>
         </header>
 
@@ -59,7 +54,7 @@ export default async function Home() {
         </section>
 
         <footer className="mx-auto mt-8 pb-4 text-center text-xs leading-6 text-[rgba(29,38,34,0.4)]">
-          AI recreation disclosure stays present inside every conversation.
+          Built from voice, memory, and relationship history.
         </footer>
       </main>
     </div>
