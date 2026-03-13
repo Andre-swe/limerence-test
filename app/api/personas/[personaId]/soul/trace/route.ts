@@ -17,6 +17,7 @@ export async function GET(
     activeProcess: persona.mindState.activeProcess,
     currentProcessInstanceId: persona.mindState.currentProcessInstanceId,
     learningState: persona.mindState.learningState,
+    liveSessionMetrics: persona.mindState.liveSessionMetrics,
     pendingInternalEvents: persona.mindState.pendingInternalEvents,
     pendingShadowTurns: persona.mindState.pendingShadowTurns,
     recentEvents: persona.mindState.recentEvents,

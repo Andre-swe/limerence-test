@@ -657,6 +657,9 @@ export function buildSoulHarness(input: {
         soul_trace_entries: mindState.traceHead.length,
         soul_visual_active: visualContext?.active ?? false,
         soul_visual_mode: visualContext?.mode ?? "none",
+        soul_context_version: Math.max(mindState.contextVersion, 1),
+        soul_live_delivery_version: Math.max(mindState.liveDeliveryVersion, 1),
+        soul_trace_version: Math.max(mindState.traceVersion, 1),
       },
       userStateSummary: mindState.lastUserState?.summary,
       currentDrive: mindState.currentDrive,
@@ -696,6 +699,9 @@ export function buildSoulHarness(input: {
         soul_trace_entries: mindState.traceHead.length,
         soul_visual_active: visualContext?.active ?? false,
         soul_visual_mode: visualContext?.mode ?? "none",
+        soul_context_version: Math.max(mindState.contextVersion, 1),
+        soul_live_delivery_version: Math.max(mindState.liveDeliveryVersion, 1),
+        soul_trace_version: Math.max(mindState.traceVersion, 1),
       },
       userStateSummary: mindState.lastUserState?.summary,
       currentDrive: mindState.currentDrive,
@@ -770,4 +776,103 @@ export function buildSoulSystemPrompt(snapshot: SoulHarnessSnapshot) {
     `User state summary: ${snapshot.userStateSummary}.`,
     "Never mention internal process names, scores, or memory regions.",
   ].join(" ");
+}
+
+// ---------------------------------------------------------------------------
+// Stable system prompt — enriched with durable memory for bootstrap.
+// ---------------------------------------------------------------------------
+// At session start, the system prompt is set with stable personality and
+// memory content that does not change during a call. The Hume API preserves
+// the system prompt across `sendSessionSettings` calls when omitted, so this
+// content persists for the entire session without resending.
+
+/** Stable memory regions that do not change mid-call. */
+const STABLE_REGIONS: SoulMemoryRegion[] = [
+  "constitution",
+  "relationship",
+  "learned_user",
+  "learned_relationship",
+  "rituals",
+  "episodes",
+];
+
+/**
+ * Build an enriched system prompt that includes stable personality and memory
+ * content. This is sent once at session bootstrap and kept by Hume for the
+ * duration of the call — it does not need to be resent on live updates.
+ */
+export function buildStableSystemPrompt(snapshot: SoulHarnessSnapshot) {
+  const base = buildSoulSystemPrompt(snapshot);
+
+  const stableMemories = snapshot.memories
+    .filter((m) => STABLE_REGIONS.includes(m.region))
+    .map((m) => m.content);
+
+  if (stableMemories.length === 0) return base;
+
+  return [
+    base,
+    "\n\nDurable context (stable for this session):",
+    ...stableMemories,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Live context overlay — volatile-only sections for mid-call delivery.
+// ---------------------------------------------------------------------------
+// Instead of rebuilding the full 15-section context text on every delivery,
+// the live overlay renders only the sections that can change mid-call:
+// process state, user state, perception, visual context, working memory,
+// boundaries, open loops, intentions, corrections, trace, internal events,
+// and scheduled events. Stable sections (constitution, relationship model,
+// learned notes, rituals, episodes) live in the system prompt and are not
+// duplicated here.
+
+/** Memory regions that can change during a live call. */
+const VOLATILE_REGIONS: SoulMemoryRegion[] = [
+  "working",
+  "user_state",
+  "drives",
+  "process",
+  "boundaries",
+  "open_loops",
+  "scheduled",
+  "internal_events",
+  "corrections",
+  "trace",
+  "intentions",
+];
+
+/**
+ * Render a compact context overlay containing only volatile soul state.
+ * Used for mid-call `sendSessionSettings` updates where the stable memory
+ * content is preserved in the system prompt from bootstrap.
+ */
+export function renderLiveContextOverlay(snapshot: SoulHarnessSnapshot) {
+  const sections = new Map<SoulMemoryRegion, string[]>();
+  const visualContext = visualContextFor(snapshot.perception);
+
+  for (const memory of snapshot.memories) {
+    if (!VOLATILE_REGIONS.includes(memory.region)) continue;
+    const current = sections.get(memory.region) ?? [];
+    current.push(memory.content);
+    sections.set(memory.region, current);
+  }
+
+  const renderSection = (name: string, values?: string[]) =>
+    values && values.length > 0 ? `${name}\n${values.join("\n")}` : undefined;
+
+  return [
+    `SOUL_STATE\nCurrent process: ${snapshot.activeProcess}\nCurrent drive: ${snapshot.currentDrive}\nDominant need: ${snapshot.dominantNeed}\nEmotional weather: ${snapshot.emotionalWeather}\nUser state: ${snapshot.userStateSummary}`,
+    `VISUAL_CONTEXT\n${visualContext?.summary ?? "No active live visual feed."}`,
+    renderSection("USER_STATE", sections.get("user_state")),
+    renderSection("WORKING", sections.get("working")),
+    renderSection("BOUNDARIES", sections.get("boundaries")),
+    renderSection("OPEN_LOOPS", sections.get("open_loops")),
+    renderSection("CORRECTIONS", sections.get("corrections")),
+    renderSection("INTENTIONS", sections.get("intentions")),
+    renderSection("TRACE", sections.get("trace")),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }

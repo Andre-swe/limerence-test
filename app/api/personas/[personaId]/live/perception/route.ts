@@ -29,7 +29,9 @@ export async function POST(
       timestamp,
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      sessionFrame: result.sessionFrame,
+    });
   } catch (error) {
     return NextResponse.json(
       {

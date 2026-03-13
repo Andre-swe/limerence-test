@@ -1,5 +1,5 @@
 import { fetchAccessToken } from "hume";
-import { buildSoulContext, buildSoulHarness, buildSoulSystemPrompt } from "@/lib/soul-harness";
+import { buildSoulHarness, buildSoulSystemPrompt, buildStableSystemPrompt } from "@/lib/soul-harness";
 import { listFeedback, listMessages } from "@/lib/store";
 import type { LiveSessionMode, MessageEntry, Persona, SoulSessionFrame } from "@/lib/types";
 
@@ -24,25 +24,6 @@ export type HumeLiveSession = {
 };
 
 const humeHostname = process.env.HUME_EVI_HOST?.trim() || "api.hume.ai";
-
-export function buildPersonaLiveContext(input: {
-  persona: Persona;
-  messages: MessageEntry[];
-  feedbackNotes: string[];
-  mode?: LiveSessionMode;
-}) {
-  return buildSoulContext({
-    persona: input.persona,
-    messages: input.messages,
-    feedbackNotes: input.feedbackNotes,
-    perception: {
-      kind: input.mode && input.mode !== "voice" ? "visual_session_start" : "session_start",
-      createdAt: new Date().toISOString(),
-      internal: true,
-      metadata: input.mode && input.mode !== "voice" ? { mode: input.mode } : undefined,
-    },
-  });
-}
 
 export function buildPersonaLivePrompt(input: {
   persona: Persona;
@@ -135,15 +116,11 @@ export async function createPersonaLiveSession(
         soulLiveDeliveryVersion: snapshot.sessionFrame.liveDeliveryVersion,
         soulTraceVersion: snapshot.sessionFrame.traceVersion,
       },
-      systemPrompt: buildSoulSystemPrompt(snapshot),
+      systemPrompt: buildStableSystemPrompt(snapshot),
       type: "session_settings",
       variables: {
         ...snapshot.sessionFrame.variables,
         live_mode: mode,
-        soul_process_instance: snapshot.sessionFrame.processInstanceId ?? "none",
-        soul_context_version: snapshot.sessionFrame.contextVersion,
-        soul_live_delivery_version: snapshot.sessionFrame.liveDeliveryVersion,
-        soul_trace_version: snapshot.sessionFrame.traceVersion,
       },
       voiceId: buildLiveVoiceId(persona),
     },

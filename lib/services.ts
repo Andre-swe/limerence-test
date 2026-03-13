@@ -30,7 +30,7 @@ import {
   publishPersonaShadowTurns,
   publishSoulInternalEvents,
 } from "@/lib/inngest";
-import { buildSoulHarness } from "@/lib/soul-harness";
+import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
 import {
   applySoulArchetypeToConstitution,
   applySoulArchetypeToRelationship,
@@ -46,6 +46,7 @@ import {
   feedbackRequestSchema,
   type HeartbeatPolicy,
   type HeartbeatDecision,
+  type LiveSessionMetrics,
   liveTranscriptRequestSchema,
   type LiveTranscriptRequest,
   type MessageAttachment,
@@ -80,6 +81,8 @@ type PreferenceUpdate = {
 };
 
 const localShadowExecutionQueues = new Map<string, Promise<void>>();
+const MIN_LIVE_DELIVERY_INTERVAL_MS = 4500;
+const MAX_COMPLETED_LIVE_SESSION_METRICS = 8;
 
 function resolveStartingVoiceId(starterVoiceId?: string) {
   return (
@@ -108,6 +111,155 @@ function scheduleLocalShadowExecution(personaId: string, jobId: string) {
     });
 
   localShadowExecutionQueues.set(personaId, next);
+}
+
+function incrementCountMap(
+  counts: Record<string, number>,
+  key: string | undefined,
+  amount = 1,
+) {
+  if (!key) {
+    return counts;
+  }
+
+  return {
+    ...counts,
+    [key]: (counts[key] ?? 0) + amount,
+  };
+}
+
+function isLiveSessionMode(value: unknown): value is LiveSessionMode {
+  return value === "voice" || value === "screen" || value === "camera";
+}
+
+function resolveMetricsMode(input: {
+  mode?: LiveSessionMode;
+  metadata?: Record<string, unknown>;
+}) {
+  if (input.mode) {
+    return input.mode;
+  }
+
+  const metadataMode = input.metadata?.mode;
+  if (isLiveSessionMode(metadataMode)) {
+    return metadataMode;
+  }
+
+  return "voice" satisfies LiveSessionMode;
+}
+
+function pruneLiveSessionMetrics(
+  metrics: Record<string, LiveSessionMetrics>,
+): Record<string, LiveSessionMetrics> {
+  const entries = Object.entries(metrics);
+  const active = entries.filter(([, metric]) => !metric.endedAt);
+  const completed = entries
+    .filter(([, metric]) => Boolean(metric.endedAt))
+    .sort((left, right) => {
+      const leftTimestamp = left[1].endedAt ?? left[1].startedAt;
+      const rightTimestamp = right[1].endedAt ?? right[1].startedAt;
+      return rightTimestamp.localeCompare(leftTimestamp);
+    })
+    .slice(0, MAX_COMPLETED_LIVE_SESSION_METRICS);
+
+  return Object.fromEntries([...active, ...completed]);
+}
+
+function createLiveSessionMetrics(input: {
+  sessionId: string;
+  mode: LiveSessionMode;
+  startedAt: string;
+}): LiveSessionMetrics {
+  return {
+    sessionId: input.sessionId,
+    mode: input.mode,
+    startedAt: input.startedAt,
+    deliveryRequestedCount: 0,
+    deliveryRequestedReasons: {},
+    deliveriesSent: 0,
+    sentReasons: {},
+    coalescedCount: 0,
+    coalescedReasons: {},
+    pollNoDeliveryCount: 0,
+    totalDeliveryIntervalMs: 0,
+    deliveryIntervalCount: 0,
+    averageDeliveryIntervalMs: 0,
+    shadowTurnsEnqueued: 0,
+    shadowTurnsSkipped: 0,
+    periodicSyncEnqueues: 0,
+  };
+}
+
+function updateLiveSessionMetricsCollection(
+  current: Record<string, LiveSessionMetrics>,
+  input: {
+    sessionId?: string;
+    mode?: LiveSessionMode;
+    at?: string;
+    updater: (metric: LiveSessionMetrics) => LiveSessionMetrics;
+  },
+) {
+  if (!input.sessionId) {
+    return current;
+  }
+
+  const at = input.at ?? new Date().toISOString();
+  const existing =
+    current[input.sessionId] ??
+    createLiveSessionMetrics({
+      sessionId: input.sessionId,
+      mode: input.mode ?? "voice",
+      startedAt: at,
+    });
+  const nextMetric = input.updater({
+    ...existing,
+    mode: input.mode ?? existing.mode,
+  });
+
+  return pruneLiveSessionMetrics({
+    ...current,
+    [input.sessionId]: nextMetric,
+  });
+}
+
+function updateMindStateLiveSessionMetrics(
+  mindState: Persona["mindState"],
+  input: {
+    sessionId?: string;
+    mode?: LiveSessionMode;
+    at?: string;
+    updater: (metric: LiveSessionMetrics) => LiveSessionMetrics;
+  },
+) {
+  return {
+    ...mindState,
+    liveSessionMetrics: updateLiveSessionMetricsCollection(
+      mindState.liveSessionMetrics,
+      input,
+    ),
+  };
+}
+
+function isCriticalLiveDeliveryReason(reason?: string) {
+  const normalized = reason?.trim().toLowerCase() ?? "";
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === "visual mode changed" ||
+    normalized.includes("boundary") ||
+    normalized.startsWith("process shifted") ||
+    normalized === "process instance changed" ||
+    normalized === "repair risk became urgent"
+  );
+}
+
+function currentLiveDeliveryMetricReason(persona: Persona) {
+  return (
+    persona.mindState.processState.live_delivery_metric_reason ??
+    persona.mindState.lastLiveDeliveryReason
+  );
 }
 
 function buildStartingVoiceProfile(input: {
@@ -449,6 +601,7 @@ function buildSessionFrame(input: {
   feedbackNotes: string[];
   perception: SoulPerception;
   contextDelta?: string;
+  liveOverlay?: boolean;
 }) {
   const snapshot = buildSoulHarness({
     persona: input.persona,
@@ -457,8 +610,16 @@ function buildSessionFrame(input: {
     perception: input.perception,
   });
 
+  // When liveOverlay is true, use the compact volatile-only context instead
+  // of the full 15-section context text. The stable personality/memory content
+  // is already in the systemPrompt from bootstrap and Hume preserves it.
+  const contextText = input.liveOverlay
+    ? renderLiveContextOverlay(snapshot)
+    : snapshot.sessionFrame.contextText;
+
   return {
     ...snapshot.sessionFrame,
+    contextText,
     contextVersion: currentContextVersion(input.persona),
     liveDeliveryVersion: currentLiveDeliveryVersion(input.persona),
     traceVersion: currentTraceVersion(input.persona),
@@ -494,26 +655,56 @@ async function commitTurnResultWithRevision(input: {
   lastActiveAt?: string;
   lastHeartbeatAt?: string;
   shadowJobId?: string;
+  liveSessionId?: string;
+  liveMode?: LiveSessionMode;
+  liveDeliveryMetricReason?: string;
 }) {
-  return replacePersonaIfRevision(input.personaId, input.baseRevision, (current) => ({
-    ...input.turnResult.persona,
-    updatedAt: input.updatedAt,
-    lastActiveAt: input.lastActiveAt ?? current.lastActiveAt,
-    lastHeartbeatAt: input.lastHeartbeatAt ?? current.lastHeartbeatAt,
-    mindState: {
+  return replacePersonaIfRevision(input.personaId, input.baseRevision, (current) => {
+    const didRequestLiveDelivery =
+      Boolean(input.liveSessionId) &&
+      input.turnResult.persona.mindState.liveDeliveryVersion > current.mindState.liveDeliveryVersion;
+
+    const nextMindState = {
       ...input.turnResult.persona.mindState,
       pendingShadowTurns: current.mindState.pendingShadowTurns.map((job) =>
         job.id === input.shadowJobId
           ? {
               ...job,
-              status: "completed",
+              status: "completed" as const,
               completedAt: input.updatedAt,
-              updatedAt: input.updatedAt,
             }
           : job,
       ),
-    },
-  }));
+      processState: {
+        ...input.turnResult.persona.mindState.processState,
+        ...(didRequestLiveDelivery && input.liveDeliveryMetricReason
+          ? { live_delivery_metric_reason: input.liveDeliveryMetricReason }
+          : {}),
+      },
+    };
+
+    return {
+      ...input.turnResult.persona,
+      updatedAt: input.updatedAt,
+      lastActiveAt: input.lastActiveAt ?? current.lastActiveAt,
+      lastHeartbeatAt: input.lastHeartbeatAt ?? current.lastHeartbeatAt,
+      mindState: didRequestLiveDelivery
+        ? updateMindStateLiveSessionMetrics(nextMindState, {
+            sessionId: input.liveSessionId,
+            mode: input.liveMode,
+            at: input.updatedAt,
+            updater: (metric) => ({
+              ...metric,
+              deliveryRequestedCount: metric.deliveryRequestedCount + 1,
+              deliveryRequestedReasons: incrementCountMap(
+                metric.deliveryRequestedReasons,
+                input.liveDeliveryMetricReason,
+              ),
+            }),
+          })
+        : nextMindState,
+    };
+  });
 }
 
 async function runVersionedSoulTurn(input: {
@@ -627,6 +818,17 @@ async function processClaimedShadowTurn(
   const { persona, job } = claimed;
   const providers = getProviders();
   const feedbackNotes = await listFeedback(personaId).then((entries) => entries.map((entry) => entry.note));
+  const perceptionMetadata =
+    job.perception.metadata && typeof job.perception.metadata === "object"
+      ? (job.perception.metadata as Record<string, unknown>)
+      : undefined;
+  const liveMode = resolveMetricsMode({
+    metadata: perceptionMetadata,
+  });
+  const shadowTriggerReason =
+    typeof perceptionMetadata?.shadowTriggerReason === "string"
+      ? perceptionMetadata.shadowTriggerReason
+      : undefined;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const executionPersona = attempt === 0 ? persona : await getPersona(personaId);
@@ -663,9 +865,36 @@ async function processClaimedShadowTurn(
       updatedAt,
       lastActiveAt: updatedAt,
       shadowJobId: job.id,
+      liveSessionId: sessionId,
+      liveMode,
+      liveDeliveryMetricReason:
+        shadowTriggerReason === "periodic_sync"
+          ? "periodic_sync"
+          : turnResult.sessionFrame.deliveryReason,
     });
 
     if (committed.matched) {
+      const didRequestLiveDelivery =
+        committed.persona.mindState.liveDeliveryVersion >
+        executionPersona.mindState.liveDeliveryVersion;
+
+      if (didRequestLiveDelivery) {
+        soulLogger.debug(
+          {
+            personaId,
+            sessionId,
+            mode: liveMode,
+            version: committed.persona.mindState.liveDeliveryVersion,
+            reason:
+              shadowTriggerReason === "periodic_sync"
+                ? "periodic_sync"
+                : turnResult.sessionFrame.deliveryReason,
+            event: "live_delivery_requested",
+          },
+          "Live delivery requested by shadow cognition",
+        );
+      }
+
       soulLogger.debug(
         {
           personaId,
@@ -749,19 +978,243 @@ async function applyFastLiveUserState(personaId: string, userState: UserStateSna
   });
 }
 
-async function bumpLiveDelivery(personaId: string, reason: string) {
-  return updatePersona(personaId, (persona) => ({
+async function bumpLiveDelivery(input: {
+  personaId: string;
+  reason: string;
+  sessionId?: string;
+  mode?: LiveSessionMode;
+  metricReason?: string;
+}) {
+  const updatedAt = new Date().toISOString();
+  const metricReason = input.metricReason ?? input.reason;
+  const persona = await updatePersona(input.personaId, (persona) => ({
     ...persona,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
+    mindState: updateMindStateLiveSessionMetrics(
+      {
+        ...persona.mindState,
+        liveDeliveryVersion: persona.mindState.liveDeliveryVersion + 1,
+        lastLiveDeliveryReason: input.reason,
+        processState: {
+          ...persona.mindState.processState,
+          last_live_delivery_reason: input.reason,
+          live_delivery_metric_reason: metricReason,
+          live_delivery_version: String(persona.mindState.liveDeliveryVersion + 1),
+        },
+      },
+      {
+        sessionId: input.sessionId,
+        mode: input.mode,
+        at: updatedAt,
+        updater: (metric) => ({
+          ...metric,
+          deliveryRequestedCount: metric.deliveryRequestedCount + 1,
+          deliveryRequestedReasons: incrementCountMap(
+            metric.deliveryRequestedReasons,
+            metricReason,
+          ),
+        }),
+      },
+    ),
+  }));
+
+  soulLogger.debug(
+    {
+      personaId: input.personaId,
+      sessionId: input.sessionId,
+      mode: input.mode,
+      version: persona.mindState.liveDeliveryVersion,
+      reason: metricReason,
+      event: "live_delivery_requested",
+    },
+    "Live delivery requested",
+  );
+
+  return persona;
+}
+
+async function tryUpdateLoadedPersona(
+  persona: Persona,
+  updater: (persona: Persona) => Persona,
+) {
+  const result = await replacePersonaIfRevision(persona.id, persona.revision, updater);
+  return result.persona;
+}
+
+async function recordLiveShadowTurnOutcome(input: {
+  persona: Persona;
+  sessionId?: string;
+  mode?: LiveSessionMode;
+  reason: string;
+  kind: "enqueued" | "skipped";
+  at: string;
+}) {
+  if (!input.sessionId) {
+    return input.persona;
+  }
+
+  return tryUpdateLoadedPersona(input.persona, (persona) => ({
+    ...persona,
+    mindState: updateMindStateLiveSessionMetrics(persona.mindState, {
+      sessionId: input.sessionId,
+      mode: input.mode,
+      at: input.at,
+      updater: (metric) => ({
+        ...metric,
+        shadowTurnsEnqueued:
+          metric.shadowTurnsEnqueued + (input.kind === "enqueued" ? 1 : 0),
+        shadowTurnsSkipped:
+          metric.shadowTurnsSkipped + (input.kind === "skipped" ? 1 : 0),
+        periodicSyncEnqueues:
+          metric.periodicSyncEnqueues +
+          (input.kind === "enqueued" && input.reason === "periodic_sync" ? 1 : 0),
+      }),
+    }),
+  }));
+}
+
+async function recordLivePollNoDelivery(input: {
+  persona: Persona;
+  sessionId?: string;
+  mode?: LiveSessionMode;
+  at: string;
+}) {
+  if (!input.sessionId || !input.persona.mindState.liveSessionMetrics[input.sessionId]) {
+    return input.persona;
+  }
+
+  return tryUpdateLoadedPersona(input.persona, (persona) => ({
+    ...persona,
+    mindState: updateMindStateLiveSessionMetrics(persona.mindState, {
+      sessionId: input.sessionId,
+      mode: input.mode,
+      at: input.at,
+      updater: (metric) => ({
+        ...metric,
+        pollNoDeliveryCount: metric.pollNoDeliveryCount + 1,
+      }),
+    }),
+  }));
+}
+
+async function recordLiveDeliveryCoalesced(input: {
+  persona: Persona;
+  sessionId?: string;
+  mode?: LiveSessionMode;
+  reason?: string;
+  at: string;
+}) {
+  if (!input.sessionId) {
+    return input.persona;
+  }
+
+  if (
+    input.persona.mindState.lastCoalescedLiveDeliveryVersion ===
+    input.persona.mindState.liveDeliveryVersion
+  ) {
+    return input.persona;
+  }
+
+  return tryUpdateLoadedPersona(input.persona, (persona) => ({
+    ...persona,
+    mindState: updateMindStateLiveSessionMetrics(
+      {
+        ...persona.mindState,
+        lastCoalescedLiveDeliveryVersion: persona.mindState.liveDeliveryVersion,
+      },
+      {
+        sessionId: input.sessionId,
+        mode: input.mode,
+        at: input.at,
+        updater: (metric) => ({
+          ...metric,
+          coalescedCount: metric.coalescedCount + 1,
+          coalescedReasons: incrementCountMap(metric.coalescedReasons, input.reason),
+        }),
+      },
+    ),
+  }));
+}
+
+async function recordLiveDeliverySent(input: {
+  persona: Persona;
+  sessionId?: string;
+  mode?: LiveSessionMode;
+  reason?: string;
+  at: string;
+}) {
+  if (!input.sessionId) {
+    return input.persona;
+  }
+
+  return tryUpdateLoadedPersona(input.persona, (persona) => {
+    const existingMetric = persona.mindState.liveSessionMetrics[input.sessionId!];
+    const intervalMs =
+      existingMetric?.lastDeliveredAt
+        ? Math.max(0, new Date(input.at).getTime() - new Date(existingMetric.lastDeliveredAt).getTime())
+        : 0;
+
+    return {
+      ...persona,
+      mindState: updateMindStateLiveSessionMetrics(
+        {
+          ...persona.mindState,
+          lastLiveDeliverySentAt: input.at,
+        },
+        {
+          sessionId: input.sessionId,
+          mode: input.mode,
+          at: input.at,
+          updater: (metric) => {
+            const deliveryIntervalCount = metric.deliveryIntervalCount + (intervalMs > 0 ? 1 : 0);
+            const totalDeliveryIntervalMs = metric.totalDeliveryIntervalMs + intervalMs;
+            return {
+              ...metric,
+              deliveriesSent: metric.deliveriesSent + 1,
+              sentReasons: incrementCountMap(metric.sentReasons, input.reason),
+              totalDeliveryIntervalMs,
+              deliveryIntervalCount,
+              averageDeliveryIntervalMs:
+                deliveryIntervalCount > 0
+                  ? totalDeliveryIntervalMs / deliveryIntervalCount
+                  : metric.averageDeliveryIntervalMs,
+              lastDeliveredAt: input.at,
+            };
+          },
+        },
+      ),
+    };
+  });
+}
+
+async function finalizeLiveSessionMetrics(input: {
+  personaId: string;
+  sessionId?: string;
+  mode?: LiveSessionMode;
+  endedAt: string;
+}) {
+  if (!input.sessionId) {
+    return;
+  }
+  const sessionId = input.sessionId;
+
+  await updatePersona(input.personaId, (persona) => ({
+    ...persona,
     mindState: {
       ...persona.mindState,
-      liveDeliveryVersion: persona.mindState.liveDeliveryVersion + 1,
-      lastLiveDeliveryReason: reason,
-      processState: {
-        ...persona.mindState.processState,
-        last_live_delivery_reason: reason,
-        live_delivery_version: String(persona.mindState.liveDeliveryVersion + 1),
-      },
+      liveSessionMetrics: persona.mindState.liveSessionMetrics[sessionId]
+        ? pruneLiveSessionMetrics(
+            updateLiveSessionMetricsCollection(persona.mindState.liveSessionMetrics, {
+              sessionId,
+              mode: input.mode,
+              at: input.endedAt,
+              updater: (metric) => ({
+                ...metric,
+                endedAt: input.endedAt,
+              }),
+            }),
+          )
+        : persona.mindState.liveSessionMetrics,
     },
   }));
 }
@@ -2114,10 +2567,64 @@ export async function getLiveContextUpdate(
   // memory sections; skipping it on non-delivery polls avoids wasted work.
   const delivering =
     persona.mindState.liveDeliveryVersion > (input.afterVersion ?? 0);
+  const at = new Date().toISOString();
+  const sessionMode = input.sessionId
+    ? persona.mindState.liveSessionMetrics[input.sessionId]?.mode
+    : undefined;
+  const deliveryReason = currentLiveDeliveryMetricReason(persona);
 
   if (!delivering) {
-    return {
+    const metricPersona = await recordLivePollNoDelivery({
       persona,
+      sessionId: input.sessionId,
+      mode: sessionMode,
+      at,
+    });
+
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: input.sessionId,
+        event: "live_context_poll_no_delivery",
+      },
+      "Live context poll had no pending delivery",
+    );
+
+    return {
+      persona: metricPersona,
+      sessionFrame: undefined,
+      pendingJobs,
+    };
+  }
+
+  const lastSentAt = persona.mindState.lastLiveDeliverySentAt;
+  const withinCooldown =
+    !isCriticalLiveDeliveryReason(deliveryReason) &&
+    Boolean(lastSentAt) &&
+    new Date(at).getTime() - new Date(lastSentAt!).getTime() < MIN_LIVE_DELIVERY_INTERVAL_MS;
+
+  if (withinCooldown) {
+    const metricPersona = await recordLiveDeliveryCoalesced({
+      persona,
+      sessionId: input.sessionId,
+      mode: sessionMode,
+      reason: deliveryReason,
+      at,
+    });
+
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: input.sessionId,
+        version: persona.mindState.liveDeliveryVersion,
+        reason: deliveryReason,
+        event: "live_context_delivery_coalesced",
+      },
+      "Live context delivery coalesced during cooldown",
+    );
+
+    return {
+      persona: metricPersona,
       sessionFrame: undefined,
       pendingJobs,
     };
@@ -2134,6 +2641,14 @@ export async function getLiveContextUpdate(
     messages,
     feedbackNotes,
     perception,
+    liveOverlay: true,
+  });
+  const metricPersona = await recordLiveDeliverySent({
+    persona,
+    sessionId: input.sessionId,
+    mode: sessionMode,
+    reason: deliveryReason,
+    at,
   });
 
   soulLogger.debug(
@@ -2141,14 +2656,15 @@ export async function getLiveContextUpdate(
       personaId,
       sessionId: input.sessionId,
       version: sessionFrame.liveDeliveryVersion,
-      reason: sessionFrame.deliveryReason,
+      reason: deliveryReason,
+      contextTextLength: sessionFrame.contextText.length,
       event: "live_context_delivery_sent",
     },
     "Live context delivery sent to Hume",
   );
 
   return {
-    persona,
+    persona: metricPersona,
     sessionFrame,
     pendingJobs,
   };
@@ -2237,10 +2753,12 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     activePersona = learned.persona;
     if (learned.contextualUpdate) {
       contextualUpdates.push(learned.contextualUpdate);
-      activePersona = await bumpLiveDelivery(
-        activePersona.id,
-        "boundary or preference changed during the live call",
-      );
+      activePersona = await bumpLiveDelivery({
+        personaId: activePersona.id,
+        reason: "boundary or preference changed during the live call",
+        sessionId: parsed.sessionId,
+        mode: parsed.liveMode ?? "voice",
+      });
     }
   }
 
@@ -2282,13 +2800,27 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   if (shadowDecision.enqueue) {
     const shadowTurn = buildPendingShadowTurn({
       persona: activePersona,
-      perception,
+      perception: {
+        ...perception,
+        metadata: {
+          ...(perception.metadata ?? {}),
+          shadowTriggerReason: shadowDecision.reason,
+        },
+      },
       sessionId: parsed.sessionId,
       providedUserState: inferredUserState,
     });
 
     activePersona = await enqueueShadowTurnForExecution(activePersona.id, shadowTurn, {
       backgroundFallback: false,
+    });
+    activePersona = await recordLiveShadowTurnOutcome({
+      persona: activePersona,
+      sessionId: parsed.sessionId,
+      mode: parsed.liveMode ?? "voice",
+      reason: shadowDecision.reason,
+      kind: "enqueued",
+      at: message.createdAt,
     });
 
     soulLogger.debug(
@@ -2301,6 +2833,15 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
       "Live shadow turn enqueued",
     );
   } else {
+    activePersona = await recordLiveShadowTurnOutcome({
+      persona: activePersona,
+      sessionId: parsed.sessionId,
+      mode: parsed.liveMode ?? "voice",
+      reason: shadowDecision.reason,
+      kind: "skipped",
+      at: message.createdAt,
+    });
+
     soulLogger.debug(
       {
         personaId,
@@ -2312,22 +2853,23 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     );
   }
 
-  const sessionFrame = buildSessionFrame({
-    persona: activePersona,
-    messages,
-    feedbackNotes,
-    perception,
-    contextDelta: hasContextualUpdate
-      ? contextualUpdates.join(" ")
-      : shadowDecision.enqueue
-        ? `Shadow cognition queued: ${shadowDecision.reason}.`
-        : "Turn observed; deferred to post-call consolidation.",
-  });
+  // Only build the expensive session frame when it will actually be returned
+  // to the client. Non-contextual turns skip the full harness rebuild.
+  const sessionFrame = hasContextualUpdate
+    ? buildSessionFrame({
+        persona: activePersona,
+        messages,
+        feedbackNotes,
+        perception,
+        contextDelta: contextualUpdates.join(" "),
+        liveOverlay: true,
+      })
+    : undefined;
 
   return {
     message,
     persona: activePersona,
-    sessionFrame: hasContextualUpdate ? sessionFrame : undefined,
+    sessionFrame,
     contextualUpdate: hasContextualUpdate ? contextualUpdates.join("\n\n") : undefined,
   };
 }
@@ -2444,12 +2986,26 @@ export async function observeLiveVisualPerception(
   if (visualDecision.escalate) {
     const shadowTurn = buildPendingShadowTurn({
       persona: fastPersona,
-      perception,
+      perception: {
+        ...perception,
+        metadata: {
+          ...(perception.metadata ?? {}),
+          shadowTriggerReason: visualDecision.reason,
+        },
+      },
       sessionId: payload.sessionId,
       providedUserState: observation.userState,
     });
     resultPersona = await enqueueShadowTurnForExecution(fastPersona.id, shadowTurn, {
       backgroundFallback: false,
+    });
+    resultPersona = await recordLiveShadowTurnOutcome({
+      persona: resultPersona,
+      sessionId: payload.sessionId,
+      mode: payload.mode,
+      reason: visualDecision.reason,
+      kind: "enqueued",
+      at: createdAt,
     });
 
     soulLogger.debug(
@@ -2462,6 +3018,15 @@ export async function observeLiveVisualPerception(
       "Visual observation escalated to shadow cognition",
     );
   } else {
+    resultPersona = await recordLiveShadowTurnOutcome({
+      persona: resultPersona,
+      sessionId: payload.sessionId,
+      mode: payload.mode,
+      reason: visualDecision.reason,
+      kind: "skipped",
+      at: createdAt,
+    });
+
     soulLogger.debug(
       {
         personaId,
@@ -2473,21 +3038,24 @@ export async function observeLiveVisualPerception(
     );
   }
 
-  const sessionFrame = buildSessionFrame({
-    persona: resultPersona,
-    messages,
-    feedbackNotes,
-    perception,
-    contextDelta: visualDecision.escalate
-      ? `Visual observation escalated (${visualDecision.reason}) from ${payload.mode}.`
-      : `Visual frame stored from ${payload.mode}; deferred to post-call consolidation.`,
-  });
+  // Only build the expensive session frame when the visual observation was
+  // escalated and will actually be delivered to the client.
+  const sessionFrame = visualDecision.escalate
+    ? buildSessionFrame({
+        persona: resultPersona,
+        messages,
+        feedbackNotes,
+        perception,
+        contextDelta: `Visual observation escalated (${visualDecision.reason}) from ${payload.mode}.`,
+        liveOverlay: true,
+      })
+    : undefined;
 
   return {
     observation,
     persona: resultPersona,
-    sessionFrame: visualDecision.escalate ? sessionFrame : undefined,
-    contextualUpdate: visualDecision.escalate ? sessionFrame.contextDelta : undefined,
+    sessionFrame,
+    contextualUpdate: sessionFrame?.contextDelta,
   };
 }
 
@@ -2647,6 +3215,13 @@ export async function finalizeLiveSession(
     },
     "Post-call consolidation enqueued",
   );
+
+  await finalizeLiveSessionMetrics({
+    personaId,
+    sessionId: payload.sessionId,
+    mode: payload.mode,
+    endedAt: createdAt,
+  });
 
   clearLiveSessionState(payload.sessionId);
 

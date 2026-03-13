@@ -18,7 +18,12 @@ export async function GET(
       afterVersion: Number.isFinite(afterVersion) ? afterVersion : 0,
     });
 
-    return NextResponse.json(result);
+    // Only return what the client needs — avoid sending the full persona
+    // (with all mind state, memories, etc.) on every 3-second poll.
+    return NextResponse.json({
+      sessionFrame: result.sessionFrame,
+      pendingJobs: result.pendingJobs,
+    });
   } catch (error) {
     return NextResponse.json(
       {

@@ -1506,6 +1506,8 @@ function buildStateFromMessages(input: {
     contextVersion: 1,
     liveDeliveryVersion: 1,
     lastLiveDeliveryReason: "session bootstrap",
+    lastLiveDeliverySentAt: undefined,
+    lastCoalescedLiveDeliveryVersion: undefined,
     traceVersion: 1,
     processState: {
       last_process: activeProcess,
@@ -1533,6 +1535,7 @@ function buildStateFromMessages(input: {
     pendingShadowTurns: [],
     lastUserState: latestUserState,
     recentUserStates,
+    liveSessionMetrics: {},
     memoryRegions: {
       constitutionMemory: constitutionNotes(constitution, timestamp),
       relationshipMemory: relationshipMemories,

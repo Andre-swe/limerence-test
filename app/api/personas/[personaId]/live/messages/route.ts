@@ -12,7 +12,10 @@ export async function POST(
     const payload = await request.json();
     const result = await appendLiveTranscriptTurn(personaId, payload);
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      contextualUpdate: result.contextualUpdate,
+      sessionFrame: result.sessionFrame,
+    });
   } catch (error) {
     return NextResponse.json(
       {

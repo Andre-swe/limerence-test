@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GET as getSoulTraceRoute } from "@/app/api/personas/[personaId]/soul/trace/route";
 import { buildPersonaLivePrompt, createPersonaLiveSession } from "@/lib/hume-evi";
 import {
   createInitialMindState,
@@ -6,7 +7,7 @@ import {
   inferHeuristicUserState,
 } from "@/lib/mind-runtime";
 import { getReadyScheduledPerceptions } from "@/lib/soul-kernel";
-import { buildSoulHarness, renderSoulHarnessContext } from "@/lib/soul-harness";
+import { buildSoulHarness, buildStableSystemPrompt, renderLiveContextOverlay, renderSoulHarnessContext } from "@/lib/soul-harness";
 import { planConversationSoul, renderMockConversationReply } from "@/lib/soul-runtime";
 import {
   addPersonaFeedback,
@@ -32,6 +33,7 @@ import {
   listMessages,
   listPerceptionObservations,
   resetStoreForTests,
+  updatePersona,
 } from "@/lib/store";
 
 function withoutReasoningProviders<T>(operation: () => Promise<T>) {
@@ -399,6 +401,178 @@ describe("persona workflows", () => {
     }
   });
 
+  it("coalesces clustered non-critical live deliveries and counts them once", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T15:00:00.000Z"));
+
+    const before = await getPersona("persona-mom");
+    await updatePersona("persona-mom", (persona) => ({
+      ...persona,
+      mindState: {
+        ...persona.mindState,
+        liveDeliveryVersion: before!.mindState.liveDeliveryVersion + 1,
+        lastLiveDeliveryReason: "periodic_sync",
+        lastLiveDeliverySentAt: "2026-03-13T15:00:00.000Z",
+        processState: {
+          ...persona.mindState.processState,
+          live_delivery_metric_reason: "periodic_sync",
+        },
+        liveSessionMetrics: {
+          ...persona.mindState.liveSessionMetrics,
+          "coalesce-1": {
+            sessionId: "coalesce-1",
+            mode: "voice",
+            startedAt: "2026-03-13T14:59:00.000Z",
+            deliveryRequestedCount: 1,
+            deliveryRequestedReasons: { periodic_sync: 1 },
+            deliveriesSent: 1,
+            sentReasons: { periodic_sync: 1 },
+            coalescedCount: 0,
+            coalescedReasons: {},
+            pollNoDeliveryCount: 0,
+            totalDeliveryIntervalMs: 0,
+            deliveryIntervalCount: 0,
+            averageDeliveryIntervalMs: 0,
+            lastDeliveredAt: "2026-03-13T15:00:00.000Z",
+            shadowTurnsEnqueued: 1,
+            shadowTurnsSkipped: 0,
+            periodicSyncEnqueues: 1,
+          },
+        },
+      },
+    }));
+
+    vi.setSystemTime(new Date("2026-03-13T15:00:01.000Z"));
+    const first = await getLiveContextUpdate("persona-mom", {
+      sessionId: "coalesce-1",
+      afterVersion: before!.mindState.liveDeliveryVersion,
+    });
+    expect(first.sessionFrame).toBeUndefined();
+
+    vi.setSystemTime(new Date("2026-03-13T15:00:02.000Z"));
+    const second = await getLiveContextUpdate("persona-mom", {
+      sessionId: "coalesce-1",
+      afterVersion: before!.mindState.liveDeliveryVersion,
+    });
+    expect(second.sessionFrame).toBeUndefined();
+
+    const persona = await getPersona("persona-mom");
+    const metrics = persona?.mindState.liveSessionMetrics["coalesce-1"];
+    expect(metrics?.coalescedCount).toBe(1);
+    expect(metrics?.coalescedReasons.periodic_sync).toBe(1);
+  });
+
+  it("bypasses coalescing for critical live delivery reasons", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T16:00:00.000Z"));
+
+    const before = await getPersona("persona-mom");
+    await updatePersona("persona-mom", (persona) => ({
+      ...persona,
+      mindState: {
+        ...persona.mindState,
+        liveDeliveryVersion: before!.mindState.liveDeliveryVersion + 1,
+        lastLiveDeliveryReason: "boundary memory changed",
+        lastLiveDeliverySentAt: "2026-03-13T16:00:00.000Z",
+        processState: {
+          ...persona.mindState.processState,
+          live_delivery_metric_reason: "boundary memory changed",
+        },
+        liveSessionMetrics: {
+          ...persona.mindState.liveSessionMetrics,
+          "critical-1": {
+            sessionId: "critical-1",
+            mode: "voice",
+            startedAt: "2026-03-13T15:59:00.000Z",
+            deliveryRequestedCount: 1,
+            deliveryRequestedReasons: { "boundary memory changed": 1 },
+            deliveriesSent: 0,
+            sentReasons: {},
+            coalescedCount: 0,
+            coalescedReasons: {},
+            pollNoDeliveryCount: 0,
+            totalDeliveryIntervalMs: 0,
+            deliveryIntervalCount: 0,
+            averageDeliveryIntervalMs: 0,
+            lastDeliveredAt: "2026-03-13T16:00:00.000Z",
+            shadowTurnsEnqueued: 1,
+            shadowTurnsSkipped: 0,
+            periodicSyncEnqueues: 0,
+          },
+        },
+      },
+    }));
+
+    vi.setSystemTime(new Date("2026-03-13T16:00:01.000Z"));
+    const context = await getLiveContextUpdate("persona-mom", {
+      sessionId: "critical-1",
+      afterVersion: before!.mindState.liveDeliveryVersion,
+    });
+
+    expect(context.sessionFrame?.deliveryReason).toBe("boundary memory changed");
+
+    const persona = await getPersona("persona-mom");
+    const metrics = persona?.mindState.liveSessionMetrics["critical-1"];
+    expect(metrics?.deliveriesSent).toBe(1);
+    expect(metrics?.sentReasons["boundary memory changed"]).toBe(1);
+    expect(metrics?.coalescedCount).toBe(0);
+  });
+
+  it("updates delivery interval metrics only when a live frame is actually sent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-13T17:00:00.000Z"));
+
+    const before = await getPersona("persona-mom");
+    await updatePersona("persona-mom", (persona) => ({
+      ...persona,
+      mindState: {
+        ...persona.mindState,
+        liveDeliveryVersion: before!.mindState.liveDeliveryVersion + 1,
+        lastLiveDeliveryReason: "ready internal events changed",
+        lastLiveDeliverySentAt: "2026-03-13T16:59:55.000Z",
+        processState: {
+          ...persona.mindState.processState,
+          live_delivery_metric_reason: "ready internal events changed",
+        },
+        liveSessionMetrics: {
+          ...persona.mindState.liveSessionMetrics,
+          "interval-1": {
+            sessionId: "interval-1",
+            mode: "voice",
+            startedAt: "2026-03-13T16:58:00.000Z",
+            deliveryRequestedCount: 1,
+            deliveryRequestedReasons: { "ready internal events changed": 1 },
+            deliveriesSent: 0,
+            sentReasons: {},
+            coalescedCount: 0,
+            coalescedReasons: {},
+            pollNoDeliveryCount: 0,
+            totalDeliveryIntervalMs: 0,
+            deliveryIntervalCount: 0,
+            averageDeliveryIntervalMs: 0,
+            lastDeliveredAt: "2026-03-13T16:59:55.000Z",
+            shadowTurnsEnqueued: 1,
+            shadowTurnsSkipped: 0,
+            periodicSyncEnqueues: 0,
+          },
+        },
+      },
+    }));
+
+    vi.setSystemTime(new Date("2026-03-13T17:00:00.000Z"));
+    const context = await getLiveContextUpdate("persona-mom", {
+      sessionId: "interval-1",
+      afterVersion: before!.mindState.liveDeliveryVersion,
+    });
+    expect(context.sessionFrame?.deliveryReason).toBe("ready internal events changed");
+
+    const persona = await getPersona("persona-mom");
+    const metrics = persona?.mindState.liveSessionMetrics["interval-1"];
+    expect(metrics?.deliveriesSent).toBe(1);
+    expect(metrics?.deliveryIntervalCount).toBe(1);
+    expect(metrics?.averageDeliveryIntervalMs).toBe(5000);
+  });
+
   it("executes queued shadow turns through the shared background executor", async () => {
     await withoutReasoningProviders(async () => {
       await appendLiveTranscriptTurn("persona-mom", {
@@ -594,6 +768,91 @@ describe("persona workflows", () => {
       expect(queuedJob?.perception.metadata?.sessionTurnCount).toBeGreaterThan(0);
       expect(queuedJob?.perception.metadata?.repairWarning).toBeDefined();
     });
+  });
+
+  it("finalizes and bounds live session metrics, and exposes them through the trace route", async () => {
+    const completedMetrics = Object.fromEntries(
+      Array.from({ length: 10 }, (_, index) => [
+        `completed-${index}`,
+        {
+          sessionId: `completed-${index}`,
+          mode: "voice" as const,
+          startedAt: `2026-03-12T0${index}:00:00.000Z`,
+          endedAt: `2026-03-12T1${index}:00:00.000Z`,
+          deliveryRequestedCount: 1,
+          deliveryRequestedReasons: { periodic_sync: 1 },
+          deliveriesSent: 1,
+          sentReasons: { periodic_sync: 1 },
+          coalescedCount: 0,
+          coalescedReasons: {},
+          pollNoDeliveryCount: 0,
+          totalDeliveryIntervalMs: 0,
+          deliveryIntervalCount: 0,
+          averageDeliveryIntervalMs: 0,
+          lastDeliveredAt: `2026-03-12T1${index}:00:00.000Z`,
+          shadowTurnsEnqueued: 1,
+          shadowTurnsSkipped: 0,
+          periodicSyncEnqueues: 1,
+        },
+      ]),
+    );
+
+    await updatePersona("persona-mom", (persona) => ({
+      ...persona,
+      mindState: {
+        ...persona.mindState,
+        liveSessionMetrics: {
+          ...completedMetrics,
+          "active-kept": {
+            sessionId: "active-kept",
+            mode: "voice",
+            startedAt: "2026-03-13T18:00:00.000Z",
+            deliveryRequestedCount: 0,
+            deliveryRequestedReasons: {},
+            deliveriesSent: 0,
+            sentReasons: {},
+            coalescedCount: 0,
+            coalescedReasons: {},
+            pollNoDeliveryCount: 0,
+            totalDeliveryIntervalMs: 0,
+            deliveryIntervalCount: 0,
+            averageDeliveryIntervalMs: 0,
+            shadowTurnsEnqueued: 0,
+            shadowTurnsSkipped: 0,
+            periodicSyncEnqueues: 0,
+          },
+        },
+      },
+    }));
+
+    await appendLiveTranscriptTurn("persona-mom", {
+      role: "user",
+      body: "call ended with one last thing.",
+      eventId: "evt-metrics-finalize-1",
+      sessionId: "metrics-session-1",
+    });
+
+    await finalizeLiveSession("persona-mom", {
+      sessionId: "metrics-session-1",
+      mode: "voice",
+      reason: "user_end",
+    });
+
+    const after = await getPersona("persona-mom");
+    const metrics = after?.mindState.liveSessionMetrics ?? {};
+    const completedCount = Object.values(metrics).filter((entry) => entry.endedAt).length;
+
+    expect(metrics["metrics-session-1"]?.endedAt).toBeTruthy();
+    expect(metrics["active-kept"]).toBeTruthy();
+    expect(completedCount).toBeLessThanOrEqual(8);
+
+    const response = await getSoulTraceRoute(new Request("http://localhost"), {
+      params: Promise.resolve({ personaId: "persona-mom" }),
+    });
+    const body = await response.json();
+
+    expect(body.liveSessionMetrics["active-kept"]).toBeTruthy();
+    expect(body.liveSessionMetrics["metrics-session-1"]?.endedAt).toBeTruthy();
   });
 
   it("detects meaningful transitions using smoothed deltas instead of raw thresholds", () => {
@@ -1122,6 +1381,46 @@ describe("persona workflows", () => {
     expect(context).toContain("SCHEDULED");
   });
 
+  it("produces a live overlay that is smaller than full context and excludes stable regions", async () => {
+    const persona = await getPersona("persona-mom");
+    const messages = await listMessages("persona-mom");
+
+    expect(persona).toBeTruthy();
+
+    const snapshot = buildSoulHarness({
+      persona: persona!,
+      messages,
+      feedbackNotes: ["She would never say that."],
+      perception: {
+        kind: "session_start",
+        createdAt: "2026-03-12T12:00:00.000Z",
+        internal: true,
+      },
+    });
+
+    const fullContext = renderSoulHarnessContext(snapshot);
+    const liveOverlay = renderLiveContextOverlay(snapshot);
+    const stablePrompt = buildStableSystemPrompt(snapshot);
+
+    // The overlay must be materially smaller than the full context
+    expect(liveOverlay.length).toBeLessThan(fullContext.length);
+
+    // The overlay should contain volatile sections
+    expect(liveOverlay).toContain("SOUL_STATE");
+    expect(liveOverlay).toContain("VISUAL_CONTEXT");
+
+    // The overlay must NOT contain stable sections that belong in the system prompt
+    expect(liveOverlay).not.toContain("CONSTITUTION");
+    expect(liveOverlay).not.toContain("LEARNED_USER");
+    expect(liveOverlay).not.toContain("LEARNED_RELATIONSHIP");
+    expect(liveOverlay).not.toContain("RITUALS");
+    expect(liveOverlay).not.toContain("EPISODES");
+
+    // The stable system prompt should carry durable context
+    expect(stablePrompt).toContain("Durable context");
+    expect(stablePrompt.length).toBeGreaterThan(snapshot.sessionFrame.systemPrompt.length);
+  });
+
   it("derives measurably different personality frames and replies across constitutions", async () => {
     const basePersona = await getPersona("persona-mom");
     expect(basePersona).toBeTruthy();
@@ -1279,8 +1578,14 @@ describe("persona workflows", () => {
 
       expect(session.sessionSettings.context?.text).toBe(session.soulFrame.contextText);
       expect(session.sessionSettings.systemPrompt).toContain("Current process");
+      expect(session.sessionSettings.systemPrompt).toContain("Durable context");
       expect(session.soulFrame.readyEvents.length).toBeGreaterThanOrEqual(0);
       expect(session.sessionSettings.metadata).toBeTruthy();
+
+      // Version variables must be present so mid-call updates keep them current
+      expect(session.sessionSettings.variables?.soul_context_version).toBeGreaterThanOrEqual(1);
+      expect(session.sessionSettings.variables?.soul_live_delivery_version).toBeGreaterThanOrEqual(1);
+      expect(session.sessionSettings.variables?.soul_trace_version).toBeGreaterThanOrEqual(1);
     } finally {
       if (previousAccessToken === undefined) {
         delete process.env.HUME_ACCESS_TOKEN;

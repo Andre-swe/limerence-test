@@ -464,6 +464,27 @@ export const learningStateSchema = z.object({
   artifacts: z.array(learningArtifactSchema).default([]),
 });
 
+export const liveSessionMetricsSchema = z.object({
+  sessionId: z.string(),
+  mode: liveSessionModeSchema.default("voice"),
+  startedAt: z.string(),
+  endedAt: z.string().optional(),
+  deliveryRequestedCount: z.number().int().min(0).default(0),
+  deliveryRequestedReasons: z.record(z.string(), z.number().int().min(0)).default({}),
+  deliveriesSent: z.number().int().min(0).default(0),
+  sentReasons: z.record(z.string(), z.number().int().min(0)).default({}),
+  coalescedCount: z.number().int().min(0).default(0),
+  coalescedReasons: z.record(z.string(), z.number().int().min(0)).default({}),
+  pollNoDeliveryCount: z.number().int().min(0).default(0),
+  totalDeliveryIntervalMs: z.number().min(0).default(0),
+  deliveryIntervalCount: z.number().int().min(0).default(0),
+  averageDeliveryIntervalMs: z.number().min(0).default(0),
+  lastDeliveredAt: z.string().optional(),
+  shadowTurnsEnqueued: z.number().int().min(0).default(0),
+  shadowTurnsSkipped: z.number().int().min(0).default(0),
+  periodicSyncEnqueues: z.number().int().min(0).default(0),
+});
+
 export const soulStateSchema = z.object({
   activeProcess: soulProcessSchema.default("arrival"),
   currentProcessInstanceId: z.string().optional(),
@@ -475,6 +496,8 @@ export const soulStateSchema = z.object({
   contextVersion: z.number().min(1).default(1),
   liveDeliveryVersion: z.number().min(1).default(1),
   lastLiveDeliveryReason: z.string().optional(),
+  lastLiveDeliverySentAt: z.string().optional(),
+  lastCoalescedLiveDeliveryVersion: z.number().min(1).optional(),
   traceVersion: z.number().min(1).default(1),
   processState: z.record(z.string(), z.string()).default({}),
   processInstances: z.record(z.string(), processInstanceStateSchema).default({}),
@@ -488,6 +511,7 @@ export const soulStateSchema = z.object({
   pendingShadowTurns: z.array(pendingShadowTurnSchema).default([]),
   lastUserState: userStateSnapshotSchema.optional(),
   recentUserStates: z.array(userStateSnapshotSchema).default([]),
+  liveSessionMetrics: z.record(z.string(), liveSessionMetricsSchema).default({}),
   memoryRegions: memoryRegionSnapshotSchema,
   recentEvents: z.array(soulEventSchema).default([]),
   traceHead: z.array(soulTraceEntrySchema).default([]),
@@ -730,6 +754,7 @@ export type InternalScheduledEvent = z.infer<typeof internalScheduledEventSchema
 export type PendingShadowTurn = z.infer<typeof pendingShadowTurnSchema>;
 export type SoulEvent = z.infer<typeof soulEventSchema>;
 export type SoulTraceEntry = z.infer<typeof soulTraceEntrySchema>;
+export type LiveSessionMetrics = z.infer<typeof liveSessionMetricsSchema>;
 export type SoulState = z.infer<typeof soulStateSchema>;
 export type MindState = SoulState;
 export type SoulProcessDefinition = z.infer<typeof soulProcessDefinitionSchema>;

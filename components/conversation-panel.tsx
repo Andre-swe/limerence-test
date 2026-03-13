@@ -536,12 +536,14 @@ function ConversationPanelInner({
       return;
     }
 
+    // Omit systemPrompt — Hume preserves the bootstrap systemPrompt when it
+    // is not included in a session settings update. Mid-call deliveries only
+    // send the compact volatile context overlay and updated variables.
     sendSessionSettings({
       context: {
         text: pendingSessionFrame.contextText,
         type: "persistent",
       },
-      systemPrompt: pendingSessionFrame.systemPrompt,
       variables: pendingSessionFrame.variables,
     });
     setSessionContextText(pendingSessionFrame.contextText);
