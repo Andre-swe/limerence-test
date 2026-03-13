@@ -1695,7 +1695,6 @@ export function getProviderStatus(): ProviderStatus {
         : "mock",
     transcription: process.env.DEEPGRAM_API_KEY ? "deepgram" : "mock",
     voice: process.env.HUME_API_KEY ? "hume" : "mock",
-    supabaseConfigured:
-      supabase.urlConfigured && supabase.anonKeyConfigured && supabase.serviceRoleConfigured,
+    supabaseConfigured: supabase.runtimeStoreConfigured,
   };
 }

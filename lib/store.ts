@@ -18,6 +18,7 @@ import {
   createPersonalityConstitution,
   createRelationshipModel,
 } from "@/lib/mind-runtime";
+import { getSupabaseAdminClient, getSupabaseRuntimeConfig } from "@/lib/supabase";
 import { houseVoicePresets } from "@/lib/voice-presets";
 import { slugify } from "@/lib/utils";
 
@@ -29,6 +30,13 @@ let pendingWrite = Promise.resolve();
 
 let cachedStore: DataStore | null = null;
 let cachedMtimeMs = 0;
+
+type StoreSnapshot = {
+  store: DataStore;
+  revision: number;
+};
+
+const remoteStoreRetryLimit = 6;
 
 const seededHouseVoiceMap = {
   "persona-mom": houseVoicePresets[0].id,
@@ -43,6 +51,14 @@ function isHydratedPersonalityConstitution(
 
 function isHydratedRelationshipModel(value: unknown): value is Persona["relationshipModel"] {
   return typeof value === "object" && value !== null && "closeness" in value && "baselineTone" in value;
+}
+
+function isSupabaseRuntimeStoreEnabled() {
+  return Boolean(getSupabaseRuntimeConfig());
+}
+
+function cloneStore(store: DataStore): DataStore {
+  return JSON.parse(JSON.stringify(store)) as DataStore;
 }
 
 function createSeedStore(): DataStore {
@@ -351,30 +367,8 @@ function createSeedStore(): DataStore {
   };
 }
 
-async function ensureStore() {
-  const directory = path.dirname(storeFile);
-  await mkdir(directory, { recursive: true });
-
-  if (!existsSync(storeFile)) {
-    await writeFile(storeFile, JSON.stringify(createSeedStore(), null, 2), "utf8");
-  }
-}
-
-async function readStore(): Promise<DataStore> {
-  await ensureStore();
-
-  // Return cached store if file hasn't changed since last read
-  try {
-    const mtimeMs = statSync(storeFile).mtimeMs;
-    if (cachedStore && mtimeMs === cachedMtimeMs) {
-      return cachedStore;
-    }
-  } catch {
-    // stat failed — fall through to full read
-  }
-
-  const raw = await readFile(storeFile, "utf8");
-  const rawParsed = JSON.parse(raw) as {
+function hydrateStore(rawStore: unknown): DataStore {
+  const rawParsed = rawStore as {
     personas?: Array<Record<string, unknown>>;
     messages?: Array<Record<string, unknown>>;
   };
@@ -463,10 +457,9 @@ async function readStore(): Promise<DataStore> {
     }),
   };
   const parsed = dataStoreSchema.parse(hydrated);
-  let changed = false;
   const humeConfigured = Boolean(process.env.HUME_API_KEY?.trim());
 
-  const migrated: DataStore = {
+  return {
     ...parsed,
     personas: parsed.personas.map((persona) => {
       const seededVoiceId =
@@ -482,7 +475,6 @@ async function readStore(): Promise<DataStore> {
           persona.voice.cloneState !== "none"
         )
       ) {
-        changed = true;
         return {
           ...persona,
           voice: {
@@ -498,23 +490,153 @@ async function readStore(): Promise<DataStore> {
       return persona;
     }),
   };
+}
 
-  if (changed) {
-    await writeStore(migrated);
+async function ensureRemoteStore() {
+  const config = getSupabaseRuntimeConfig();
+  const client = getSupabaseAdminClient();
+
+  if (!config || !client) {
+    throw new Error("Supabase runtime store is not configured.");
   }
 
-  // Populate the read cache
+  const seed = dataStoreSchema.parse(createSeedStore());
+  const { error } = await client
+    .from(config.table)
+    .upsert(
+      {
+        store_key: config.key,
+        revision: 1,
+        payload: seed,
+      },
+      {
+        onConflict: "store_key",
+        ignoreDuplicates: true,
+      },
+    );
+
+  if (error) {
+    throw new Error(`Unable to initialize Supabase runtime store: ${error.message}`);
+  }
+}
+
+async function readRemoteStore(): Promise<StoreSnapshot> {
+  const config = getSupabaseRuntimeConfig();
+  const client = getSupabaseAdminClient();
+
+  if (!config || !client) {
+    throw new Error("Supabase runtime store is not configured.");
+  }
+
+  await ensureRemoteStore();
+
+  const { data, error } = await client
+    .from(config.table)
+    .select("revision, payload")
+    .eq("store_key", config.key)
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Unable to read Supabase runtime store: ${error?.message ?? "missing row"}`);
+  }
+
+  return {
+    store: hydrateStore(data.payload),
+    revision: typeof data.revision === "number" ? data.revision : 1,
+  };
+}
+
+async function writeRemoteStore(
+  snapshot: StoreSnapshot,
+  expectedRevision: number,
+): Promise<StoreSnapshot | null> {
+  const config = getSupabaseRuntimeConfig();
+  const client = getSupabaseAdminClient();
+
+  if (!config || !client) {
+    throw new Error("Supabase runtime store is not configured.");
+  }
+
+  const payload = dataStoreSchema.parse(snapshot.store);
+  const { data, error } = await client
+    .from(config.table)
+    .update({
+      revision: expectedRevision + 1,
+      payload,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("store_key", config.key)
+    .eq("revision", expectedRevision)
+    .select("revision, payload")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Unable to write Supabase runtime store: ${error.message}`);
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return {
+    store: hydrateStore(data.payload),
+    revision: typeof data.revision === "number" ? data.revision : expectedRevision + 1,
+  };
+}
+
+async function ensureStore() {
+  const directory = path.dirname(storeFile);
+  await mkdir(directory, { recursive: true });
+
+  if (!existsSync(storeFile)) {
+    await writeFile(storeFile, JSON.stringify(createSeedStore(), null, 2), "utf8");
+  }
+}
+
+async function readFileStoreSnapshot(): Promise<StoreSnapshot> {
+  await ensureStore();
+
+  try {
+    const mtimeMs = statSync(storeFile).mtimeMs;
+    if (cachedStore && mtimeMs === cachedMtimeMs) {
+      return {
+        store: cachedStore,
+        revision: 0,
+      };
+    }
+  } catch {
+    // stat failed — fall through to full read
+  }
+
+  const raw = await readFile(storeFile, "utf8");
+  const hydrated = hydrateStore(JSON.parse(raw));
+
   try {
     cachedMtimeMs = statSync(storeFile).mtimeMs;
   } catch {
     cachedMtimeMs = 0;
   }
-  cachedStore = migrated;
+  cachedStore = hydrated;
 
-  return migrated;
+  return {
+    store: hydrated,
+    revision: 0,
+  };
 }
 
-async function writeStore(store: DataStore) {
+async function readStoreSnapshot(): Promise<StoreSnapshot> {
+  if (isSupabaseRuntimeStoreEnabled()) {
+    return readRemoteStore();
+  }
+
+  return readFileStoreSnapshot();
+}
+
+async function readStore(): Promise<DataStore> {
+  return (await readStoreSnapshot()).store;
+}
+
+async function writeFileStore(store: DataStore) {
   const validated = dataStoreSchema.parse(store);
   const nextContent = JSON.stringify(validated, null, 2);
   const tempFile = `${storeFile}.${process.pid}.${randomUUID()}.tmp`;
@@ -528,6 +650,11 @@ async function writeStore(store: DataStore) {
   } catch {
     cachedMtimeMs = 0;
   }
+
+  return {
+    store: validated,
+    revision: 0,
+  } satisfies StoreSnapshot;
 }
 
 async function withStoreLock<T>(operation: () => Promise<T>) {
@@ -547,9 +674,36 @@ async function withStoreLock<T>(operation: () => Promise<T>) {
   }
 }
 
+async function mutateStore<T>(
+  mutation: (store: DataStore) => Promise<T> | T,
+): Promise<T> {
+  if (!isSupabaseRuntimeStoreEnabled()) {
+    return withStoreLock(async () => {
+      const snapshot = await readFileStoreSnapshot();
+      const working = cloneStore(snapshot.store);
+      const result = await mutation(working);
+      await writeFileStore(working);
+      return result;
+    });
+  }
+
+  for (let attempt = 0; attempt < remoteStoreRetryLimit; attempt += 1) {
+    const snapshot = await readStoreSnapshot();
+    const working = cloneStore(snapshot.store);
+    const result = await mutation(working);
+    const committed = await writeRemoteStore({ store: working, revision: snapshot.revision }, snapshot.revision);
+
+    if (committed) {
+      return result;
+    }
+  }
+
+  throw new Error("Supabase runtime store write conflicted too many times.");
+}
+
 export async function listPersonas() {
   const store = await readStore();
-  return store.personas.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return [...store.personas].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 export async function listPendingReview() {
@@ -563,8 +717,7 @@ export async function getPersona(personaId: string) {
 }
 
 export async function savePersona(persona: Persona) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
     const index = store.personas.findIndex((entry) => entry.id === persona.id);
     const nextRevision = index === -1 ? persona.revision ?? 1 : store.personas[index].revision + 1;
     const parsedPersona = personaSchema.parse({
@@ -578,14 +731,12 @@ export async function savePersona(persona: Persona) {
       store.personas[index] = parsedPersona;
     }
 
-    await writeStore(store);
     return parsedPersona;
   });
 }
 
 export async function updatePersona(personaId: string, updater: (persona: Persona) => Persona) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
     const index = store.personas.findIndex((persona) => persona.id === personaId);
 
     if (index === -1) {
@@ -597,7 +748,6 @@ export async function updatePersona(personaId: string, updater: (persona: Person
       revision: store.personas[index].revision + 1,
     });
     store.personas[index] = updated;
-    await writeStore(store);
     return updated;
   });
 }
@@ -607,8 +757,40 @@ export async function replacePersonaIfRevision(
   expectedRevision: number,
   updater: (persona: Persona) => Persona,
 ) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  if (!isSupabaseRuntimeStoreEnabled()) {
+    return withStoreLock(async () => {
+      const store = (await readFileStoreSnapshot()).store;
+      const index = store.personas.findIndex((persona) => persona.id === personaId);
+
+      if (index === -1) {
+        throw new Error(`Persona ${personaId} was not found.`);
+      }
+
+      const current = store.personas[index];
+      if (current.revision !== expectedRevision) {
+        return {
+          matched: false as const,
+          persona: current,
+        };
+      }
+
+      const updated = personaSchema.parse({
+        ...updater(current),
+        revision: current.revision + 1,
+      });
+      store.personas[index] = updated;
+      await writeFileStore(store);
+
+      return {
+        matched: true as const,
+        persona: updated,
+      };
+    });
+  }
+
+  for (let attempt = 0; attempt < remoteStoreRetryLimit; attempt += 1) {
+    const snapshot = await readStoreSnapshot();
+    const store = cloneStore(snapshot.store);
     const index = store.personas.findIndex((persona) => persona.id === personaId);
 
     if (index === -1) {
@@ -628,13 +810,17 @@ export async function replacePersonaIfRevision(
       revision: current.revision + 1,
     });
     store.personas[index] = updated;
-    await writeStore(store);
+    const committed = await writeRemoteStore({ store, revision: snapshot.revision }, snapshot.revision);
 
-    return {
-      matched: true as const,
-      persona: updated,
-    };
-  });
+    if (committed) {
+      return {
+        matched: true as const,
+        persona: updated,
+      };
+    }
+  }
+
+  throw new Error(`Persona ${personaId} revision update conflicted too many times.`);
 }
 
 export async function enqueuePersonaShadowTurn(personaId: string, shadowTurn: PendingShadowTurn) {
@@ -652,8 +838,8 @@ export async function enqueuePersonaShadowTurn(personaId: string, shadowTurn: Pe
 }
 
 export async function claimPersonaShadowTurn(personaId: string, sessionId?: string) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  const claimJob = async (snapshot: StoreSnapshot) => {
+    const store = cloneStore(snapshot.store);
     const index = store.personas.findIndex((persona) => persona.id === personaId);
 
     if (index === -1) {
@@ -699,18 +885,57 @@ export async function claimPersonaShadowTurn(personaId: string, sessionId?: stri
     });
 
     store.personas[index] = updatedPersona;
-    await writeStore(store);
-
     return {
-      persona: updatedPersona,
-      job: claimedJob,
+      store,
+      updatedPersona,
+      claimedJob,
     };
-  });
+  };
+
+  if (!isSupabaseRuntimeStoreEnabled()) {
+    return withStoreLock(async () => {
+      const snapshot = await readFileStoreSnapshot();
+      const claimed = await claimJob(snapshot);
+
+      if (!claimed) {
+        return null;
+      }
+
+      await writeFileStore(claimed.store);
+      return {
+        persona: claimed.updatedPersona,
+        job: claimed.claimedJob,
+      };
+    });
+  }
+
+  for (let attempt = 0; attempt < remoteStoreRetryLimit; attempt += 1) {
+    const snapshot = await readStoreSnapshot();
+    const claimed = await claimJob(snapshot);
+
+    if (!claimed) {
+      return null;
+    }
+
+    const committed = await writeRemoteStore(
+      { store: claimed.store, revision: snapshot.revision },
+      snapshot.revision,
+    );
+
+    if (committed) {
+      return {
+        persona: claimed.updatedPersona,
+        job: claimed.claimedJob,
+      };
+    }
+  }
+
+  throw new Error(`Unable to claim shadow turn for persona ${personaId}.`);
 }
 
 export async function claimPersonaShadowTurnById(personaId: string, jobId: string) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  const claimJob = async (snapshot: StoreSnapshot) => {
+    const store = cloneStore(snapshot.store);
     const index = store.personas.findIndex((persona) => persona.id === personaId);
 
     if (index === -1) {
@@ -748,13 +973,52 @@ export async function claimPersonaShadowTurnById(personaId: string, jobId: strin
     });
 
     store.personas[index] = updatedPersona;
-    await writeStore(store);
-
     return {
-      persona: updatedPersona,
-      job: claimedJob,
+      store,
+      updatedPersona,
+      claimedJob,
     };
-  });
+  };
+
+  if (!isSupabaseRuntimeStoreEnabled()) {
+    return withStoreLock(async () => {
+      const snapshot = await readFileStoreSnapshot();
+      const claimed = await claimJob(snapshot);
+
+      if (!claimed) {
+        return null;
+      }
+
+      await writeFileStore(claimed.store);
+      return {
+        persona: claimed.updatedPersona,
+        job: claimed.claimedJob,
+      };
+    });
+  }
+
+  for (let attempt = 0; attempt < remoteStoreRetryLimit; attempt += 1) {
+    const snapshot = await readStoreSnapshot();
+    const claimed = await claimJob(snapshot);
+
+    if (!claimed) {
+      return null;
+    }
+
+    const committed = await writeRemoteStore(
+      { store: claimed.store, revision: snapshot.revision },
+      snapshot.revision,
+    );
+
+    if (committed) {
+      return {
+        persona: claimed.updatedPersona,
+        job: claimed.claimedJob,
+      };
+    }
+  }
+
+  throw new Error(`Unable to claim shadow turn ${jobId} for persona ${personaId}.`);
 }
 
 export async function updatePersonaShadowTurn(
@@ -782,13 +1046,11 @@ export async function listMessages(personaId: string) {
 }
 
 export async function appendMessages(messages: MessageEntry[]) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
     for (const message of messages) {
       store.messages.push(messageSchema.parse(message));
     }
 
-    await writeStore(store);
     return messages;
   });
 }
@@ -801,13 +1063,11 @@ export async function listPerceptionObservations(personaId: string) {
 }
 
 export async function appendPerceptionObservations(observations: PerceptionObservation[]) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
     for (const observation of observations) {
       store.perceptionObservations.push(observation);
     }
 
-    await writeStore(store);
     return observations;
   });
 }
@@ -816,8 +1076,7 @@ export async function updateMessage(
   messageId: string,
   updater: (message: MessageEntry) => MessageEntry,
 ) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
     const index = store.messages.findIndex((message) => message.id === messageId);
 
     if (index === -1) {
@@ -825,7 +1084,6 @@ export async function updateMessage(
     }
 
     store.messages[index] = updater(store.messages[index]);
-    await writeStore(store);
     return store.messages[index];
   });
 }
@@ -838,10 +1096,8 @@ export async function listFeedback(personaId: string) {
 }
 
 export async function appendFeedback(feedback: FeedbackEvent) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
     store.feedbackEvents.push(feedback);
-    await writeStore(store);
     return feedback;
   });
 }
@@ -852,12 +1108,10 @@ export async function hasProcessedTelegramUpdate(updateId: string) {
 }
 
 export async function markTelegramUpdateProcessed(updateId: string) {
-  return withStoreLock(async () => {
-    const store = await readStore();
+  return mutateStore(async (store) => {
 
     if (!store.processedTelegramUpdates.includes(updateId)) {
       store.processedTelegramUpdates.push(updateId);
-      await writeStore(store);
     }
   });
 }
@@ -890,6 +1144,42 @@ export async function savePublicFile(
   fileName: string,
   mimeType: string,
 ) {
+  const supabaseConfig = getSupabaseRuntimeConfig();
+  const supabase = getSupabaseAdminClient();
+
+  if (supabaseConfig && supabase) {
+    const slug = `${Date.now()}-${slugify(fileName || randomUUID())}`;
+    const extension = mimeType.includes("png")
+      ? ".png"
+      : mimeType.includes("jpeg")
+        ? ".jpg"
+        : mimeType.includes("webm")
+          ? ".webm"
+          : mimeType.includes("wav")
+            ? ".wav"
+            : mimeType.includes("mpeg")
+              ? ".mp3"
+              : path.extname(fileName || "") || ".bin";
+    const outputFileName = `${slug}${extension}`;
+    const objectPath = `uploads/${outputFileName}`;
+    const { error } = await supabase.storage
+      .from(supabaseConfig.bucket)
+      .upload(objectPath, buffer, {
+        contentType: mimeType,
+        upsert: false,
+      });
+
+    if (error) {
+      throw new Error(`Unable to upload file to Supabase Storage: ${error.message}`);
+    }
+
+    const { data } = supabase.storage.from(supabaseConfig.bucket).getPublicUrl(objectPath);
+    return {
+      fileName: outputFileName,
+      url: data.publicUrl,
+    };
+  }
+
   await mkdir(uploadsDir, { recursive: true });
   const slug = `${Date.now()}-${slugify(fileName || randomUUID())}`;
   const extension = mimeType.includes("png")
@@ -916,5 +1206,5 @@ export async function resetStoreForTests(store?: DataStore) {
   cachedStore = null;
   cachedMtimeMs = 0;
   await mkdir(path.dirname(storeFile), { recursive: true });
-  await writeStore(store ?? createSeedStore());
+  await writeFileStore(store ?? createSeedStore());
 }

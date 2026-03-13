@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:supabase": "tsx --env-file=.env.local scripts/check-supabase-runtime.ts",
+    "supabase:push": "supabase db push",
     "worker:heartbeat": "tsx worker/heartbeat.ts",
     "worker:telegram": "tsx worker/telegram.ts"
   },
@@ -41,6 +43,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jsdom": "^28.1.0",
+    "supabase": "^2.78.1",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",

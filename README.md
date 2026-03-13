@@ -106,18 +106,59 @@ npm run dev
 npm run build
 npm run lint
 npm run test
+npm run check:supabase
 npm run worker:heartbeat
 npm run worker:telegram
 ```
 
-### 5. Local demo data
+### 5. Runtime data
 
-The default development store is file-backed:
+Limerence now supports two persistence modes:
 
-- personas, messages, observations, and feedback live in [`data/demo-store.json`](/Users/syekel/Documents/limerance/data/demo-store.json)
-- uploads are written to [`public/uploads/`](/Users/syekel/Documents/limerance/public/uploads)
+- **Shared Supabase runtime**  
+  When `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured, the app uses a shared runtime-store row in Supabase plus Supabase Storage for uploaded files.
+- **Local file fallback**  
+  Without Supabase runtime configuration, personas, messages, observations, and feedback live in [`data/demo-store.json`](/Users/syekel/Documents/limerance/data/demo-store.json), and uploads are written to [`public/uploads/`](/Users/syekel/Documents/limerance/public/uploads).
 
-For tests, the seed store is reset programmatically through [`resetStoreForTests()`](/Users/syekel/Documents/limerance/lib/store.ts).
+For tests, the seed store is reset programmatically through [`resetStoreForTests()`](/Users/syekel/Documents/limerance/lib/store.ts), and the test environment stays on the local file store even if Supabase env vars exist locally.
+
+### 6. Shared Supabase setup
+
+If you want two developers to share the same personas, messages, soul state, and uploads:
+
+1. Create a Supabase project.
+2. Prefer the CLI path:
+
+```bash
+supabase login
+supabase link --project-ref YOUR_PROJECT_REF
+npm run supabase:push
+```
+
+If you do not want to use the CLI, run [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) in the Supabase SQL editor instead. The same schema also lives in the migration file at [`supabase/migrations/20260313150000_initial_runtime_store.sql`](/Users/syekel/Documents/limerance/supabase/migrations/20260313150000_initial_runtime_store.sql).
+3. Copy [`.env.example`](/Users/syekel/Documents/limerance/.env.example) to `.env.local`.
+4. Fill in at minimum:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (recommended to keep aligned with the project, even though the current runtime is server-driven)
+   - `SUPABASE_RUNTIME_STORE_KEY`
+5. Make sure both developers use the **same**:
+   - Supabase project
+   - `SUPABASE_RUNTIME_STORE_KEY`
+   - `SUPABASE_STORAGE_BUCKET` if you override the default
+6. Run:
+
+```bash
+npm run check:supabase
+```
+
+Expected result:
+- the bucket should exist
+- the runtime row may be missing before first app boot
+
+On first write, Limerence seeds the shared runtime row automatically.
+
+If `supabase` is installed but this shell says `command not found`, restart the terminal or make sure the CLI binary is on your `PATH` before running `npm run supabase:push`.
 
 ## 🔐 Environment Variables
 
@@ -176,15 +217,22 @@ If none are set, the app still works using the local mock reasoning path and the
 - `DEEPGRAM_API_KEY`  
   Enables Deepgram transcription for uploaded voice notes and audio files. Without it, transcription falls back to a mock text description.
 
-### 📦 Optional storage / Supabase
+### 📦 Shared storage / Supabase
 
-These are **not** required for the current file-backed prototype, but they reflect the intended production direction:
+These enable the shared runtime so multiple collaborators can point at the same personas, messages, observations, and uploaded media:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`  
+  Optional for the current server-driven runtime, but still useful to keep aligned with the project’s Supabase environment.
+- `SUPABASE_RUNTIME_STORE_TABLE`  
+  Optional override. Defaults to `runtime_store`.
+- `SUPABASE_RUNTIME_STORE_KEY`  
+  Optional shared workspace key. Defaults to `default`.
+- `SUPABASE_STORAGE_BUCKET`  
+  Optional override for the shared upload bucket. Defaults to `limerence-uploads`.
 
-The app currently checks whether these are configured, but local prototype persistence still runs through the file store in [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts).
+When the required server variables are present, [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts) switches from the local JSON store to the Supabase-backed runtime store and writes uploads to Supabase Storage.
 
 ### 📲 Optional Telegram
 
@@ -248,6 +296,9 @@ INNGEST_SIGNING_KEY=
 # Local prototype overrides
 PERSONA_STORE_FILE=
 PERSONA_UPLOAD_DIR=
+SUPABASE_RUNTIME_STORE_TABLE=
+SUPABASE_RUNTIME_STORE_KEY=
+SUPABASE_STORAGE_BUCKET=
 ```
 
 ## 🎙️ Voice + Live Session Architecture
@@ -323,7 +374,7 @@ The soul runtime lives primarily in:
   [`lib/soul-kernel.ts`](/Users/syekel/Documents/limerance/lib/soul-kernel.ts), [`lib/mind-runtime.ts`](/Users/syekel/Documents/limerance/lib/mind-runtime.ts), [`lib/soul-harness.ts`](/Users/syekel/Documents/limerance/lib/soul-harness.ts), and [`lib/soul-runtime.ts`](/Users/syekel/Documents/limerance/lib/soul-runtime.ts) decide what the persona is carrying and how it should respond.
 
 - **Persistence layer**  
-  [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts) persists local demo state to [`data/demo-store.json`](/Users/syekel/Documents/limerance/data/demo-store.json), while [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) describes the future production schema.
+  [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts) now uses a shared Supabase runtime store when configured and falls back to [`data/demo-store.json`](/Users/syekel/Documents/limerance/data/demo-store.json) locally. [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) includes the runtime store table and shared uploads bucket setup.
 
 ### What the soul tracks
 

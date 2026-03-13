@@ -27,6 +27,9 @@ export default function SettingsPage() {
     `URL configured: ${supabaseStatus.urlConfigured}`,
     `Anon key configured: ${supabaseStatus.anonKeyConfigured}`,
     `Service role configured: ${supabaseStatus.serviceRoleConfigured}`,
+    `Shared runtime store: ${supabaseStatus.runtimeStoreConfigured ? "enabled" : "local file fallback"}`,
+    `Runtime table: ${supabaseStatus.runtimeStoreTable}`,
+    `Upload bucket: ${supabaseStatus.storageBucket}`,
   ];
 
   return (
@@ -134,11 +137,11 @@ export default function SettingsPage() {
             ))}
           </div>
           <p className="mt-5 max-w-2xl text-sm leading-7 text-[rgba(29,38,34,0.6)]">
-            With `HUME_API_KEY`, `HUME_SECRET_KEY`, and a Hume voice or character id configured,
-            Limerence can run live calls through Hume EVI and use the same persona memory for async
-            playback. Recorded voice samples still stay attached to the persona, but self-serve
-            Hume clone creation is waiting on an API path, so the current product flow uses
-            starting house voices or pre-existing Hume voice ids.
+            With `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` configured, Limerence
+            can use a shared Supabase runtime store and Supabase Storage so multiple collaborators
+            see the same personas, messages, and uploads. With `HUME_API_KEY`,
+            `HUME_SECRET_KEY`, and a Hume voice or character id configured, live calls run through
+            Hume EVI and use the same shared persona memory for async playback.
           </p>
         </section>
       </main>
