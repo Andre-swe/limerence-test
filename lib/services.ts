@@ -771,19 +771,63 @@ async function bumpLiveDelivery(personaId: string, reason: string) {
 // ---------------------------------------------------------------------------
 // Instead of raw threshold crossings, we reduce the incoming heuristic user
 // state against the previous snapshot using exponential smoothing + momentum.
-// A transition is "meaningful" only when the smoothed delta exceeds a channel-
-// specific salience threshold — this filters noisy per-turn jitter while still
-// catching genuine emotional shifts promptly.
+// A transition is "meaningful" only when the alpha-scaled delta exceeds a
+// channel-specific salience threshold — this filters noisy per-turn jitter
+// while still catching genuine emotional shifts promptly.
+//
+// Direction awareness: some channels only matter when rising (frustration,
+// repairRisk, boundaryPressure) because the user calming down should not
+// trigger mid-call intervention. Others only matter when falling (valence).
+// Bidirectional channels (arousal, vulnerability, griefLoad) trigger on
+// any large movement.
+//
+// Composite patterns: multi-channel shifts that are more meaningful together
+// than individually (e.g. frustration + desireForSpace = withdrawal) use
+// lower thresholds since the combination carries stronger signal.
 
 type SmoothedDelta = {
   field: string;
   previous: number;
   next: number;
-  smoothed: number;
+  /** The signed alpha-scaled delta: alpha * (next - previous). */
+  signedDelta: number;
+  /** Absolute value of signedDelta, for threshold comparison. */
   delta: number;
 };
 
 const LIVE_STATE_ALPHA = 0.35; // EMA smoothing — lower = more inertia
+
+// ---------------------------------------------------------------------------
+// Prosody shift detection — directly compares raw Hume prosody scores
+// ---------------------------------------------------------------------------
+// In blended scalar scores, prosody contributes only ~30-50% of the weight.
+// For live voice calls, prosody is the primary signal and voice-quality shifts
+// (user's voice gets darker, more distressed, or suddenly flat) should trigger
+// transitions even when the text keywords haven't changed. These constants and
+// the helper below operate on the raw prosody scores, not the blended fields.
+
+const POSITIVE_PROSODY_KEYS = [
+  "joy", "love", "contentment", "satisfaction", "pride", "relief", "excitement", "amusement",
+];
+const NEGATIVE_PROSODY_KEYS = [
+  "sadness", "distress", "anxiety", "anger", "pain", "fear", "tiredness", "guilt",
+];
+/** Minimum drop in prosody valence to count as a meaningful voice-quality shift. */
+const PROSODY_SHIFT_THRESHOLD = 0.12;
+/** Lower threshold during high-sensitivity processes. */
+const PROSODY_SHIFT_SENSITIVE_THRESHOLD = 0.08;
+
+/**
+ * Compute a prosody-derived valence from raw Hume emotion scores.
+ * Range: roughly -0.5 to +0.5 (average positive minus average negative).
+ */
+export function computeProsodyValence(scores: Record<string, number>): number {
+  const avg = (keys: string[]) => {
+    const vals = keys.map((k) => scores[k] ?? 0);
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  };
+  return avg(POSITIVE_PROSODY_KEYS) - avg(NEGATIVE_PROSODY_KEYS);
+}
 
 /** Scalar fields on UserStateSnapshot that carry live-transition signal. */
 const REDUCIBLE_FIELDS: Array<keyof UserStateSnapshot> = [
@@ -824,21 +868,36 @@ export function reduceLiveUserState(
   return reduced;
 }
 
-/** Fields we track for live transition detection, with their salience bar. */
+/**
+ * Fields we track for live transition detection, with their salience bar.
+ *
+ * `alarmDirection` controls which direction of change counts as meaningful:
+ *   - "rising":  only trigger when the value increases (e.g. frustration spiking)
+ *   - "falling": only trigger when the value decreases (e.g. valence dropping)
+ *   - "either":  trigger on any large movement in either direction
+ *
+ * This eliminates false positives from improvements: a user calming down
+ * (frustration dropping) no longer triggers "frustration_became_salient".
+ */
 const TRANSITION_CHANNELS: Array<{
   field: keyof UserStateSnapshot;
   threshold: number;
   /** Lower threshold used during high-sensitivity processes. */
   sensitiveThreshold: number;
   reason: string;
+  alarmDirection: "rising" | "falling" | "either";
 }> = [
-  { field: "boundaryPressure", threshold: 0.12, sensitiveThreshold: 0.08, reason: "boundary_activated" },
-  { field: "repairRisk", threshold: 0.10, sensitiveThreshold: 0.06, reason: "repair_risk_crossed" },
-  { field: "frustration", threshold: 0.12, sensitiveThreshold: 0.08, reason: "frustration_became_salient" },
-  { field: "griefLoad", threshold: 0.12, sensitiveThreshold: 0.07, reason: "grief_intensified" },
-  { field: "vulnerability", threshold: 0.14, sensitiveThreshold: 0.09, reason: "vulnerability_surfaced" },
-  { field: "valence", threshold: 0.15, sensitiveThreshold: 0.10, reason: "valence_shifted" },
-  { field: "arousal", threshold: 0.15, sensitiveThreshold: 0.10, reason: "arousal_changed" },
+  { field: "boundaryPressure", threshold: 0.12, sensitiveThreshold: 0.08, reason: "boundary_activated", alarmDirection: "rising" },
+  { field: "repairRisk", threshold: 0.10, sensitiveThreshold: 0.06, reason: "repair_risk_crossed", alarmDirection: "rising" },
+  { field: "frustration", threshold: 0.12, sensitiveThreshold: 0.08, reason: "frustration_became_salient", alarmDirection: "rising" },
+  { field: "griefLoad", threshold: 0.12, sensitiveThreshold: 0.07, reason: "grief_intensified", alarmDirection: "either" },
+  { field: "vulnerability", threshold: 0.14, sensitiveThreshold: 0.09, reason: "vulnerability_surfaced", alarmDirection: "either" },
+  { field: "valence", threshold: 0.15, sensitiveThreshold: 0.10, reason: "valence_shifted", alarmDirection: "falling" },
+  { field: "arousal", threshold: 0.15, sensitiveThreshold: 0.10, reason: "arousal_changed", alarmDirection: "either" },
+  // desireForSpace doesn't trigger alone at normal thresholds but participates
+  // in composite patterns (withdrawal_pattern). The high standalone threshold
+  // ensures it only fires independently during extreme boundary situations.
+  { field: "desireForSpace", threshold: 0.18, sensitiveThreshold: 0.12, reason: "space_requested", alarmDirection: "rising" },
 ];
 
 /** Processes where we use lower thresholds to catch subtler shifts. */
@@ -856,8 +915,55 @@ export type LiveTransition = {
 };
 
 /**
+ * Composite transition patterns: multi-channel shifts that are more
+ * meaningful when they co-occur. These use lower effective thresholds
+ * because the combination carries stronger signal than any single channel.
+ */
+const COMPOSITE_PATTERNS: Array<{
+  channels: Array<{ field: keyof UserStateSnapshot; direction: "rising" | "falling" }>;
+  /** Each individual channel delta must exceed this fraction of its normal threshold. */
+  thresholdMultiplier: number;
+  reason: string;
+}> = [
+  {
+    // Frustration rising while wanting more space → withdrawal pattern
+    channels: [
+      { field: "frustration", direction: "rising" },
+      { field: "desireForSpace", direction: "rising" },
+    ],
+    thresholdMultiplier: 0.6,
+    reason: "withdrawal_pattern",
+  },
+  {
+    // Repair risk rising with frustration → escalating repair need
+    channels: [
+      { field: "repairRisk", direction: "rising" },
+      { field: "frustration", direction: "rising" },
+    ],
+    thresholdMultiplier: 0.6,
+    reason: "repair_escalation",
+  },
+  {
+    // Grief deepening with vulnerability → grief needs presence
+    channels: [
+      { field: "griefLoad", direction: "rising" },
+      { field: "vulnerability", direction: "rising" },
+    ],
+    thresholdMultiplier: 0.6,
+    reason: "grief_deepening",
+  },
+];
+
+/**
  * Detect whether the transition between two user state snapshots is
  * meaningful enough to warrant a mid-call shadow cognition turn.
+ *
+ * Direction-aware: channels have an `alarmDirection` that controls which
+ * direction of change counts. Frustration dropping (user calming down) is
+ * NOT treated as an alarm. Valence rising (mood improving) is NOT an alarm.
+ *
+ * Composite-aware: multi-channel patterns (e.g. frustration + desireForSpace
+ * rising together) trigger at lower individual thresholds.
  *
  * Process-aware: during high-sensitivity processes (repair, grief_presence,
  * boundary_negotiation, protective_check_in) salience thresholds are lowered
@@ -877,19 +983,87 @@ export function detectMeaningfulTransition(
   let topReason: string | undefined;
   let topDelta = 0;
 
+  // Per-channel signed delta map for composite pattern matching
+  const signedDeltaMap = new Map<string, number>();
+
   for (const channel of TRANSITION_CHANNELS) {
     const p = previous[channel.field] as number | undefined;
     const n = next[channel.field] as number | undefined;
     const pVal = p ?? 0.5;
     const nVal = n ?? 0.5;
-    const smoothed = pVal + LIVE_STATE_ALPHA * (nVal - pVal);
-    const delta = Math.abs(smoothed - pVal);
-    deltas.push({ field: channel.field, previous: pVal, next: nVal, smoothed, delta });
+
+    // The signed delta scaled by alpha — this is how much the smoothed
+    // state would move this turn. Positive = rising, negative = falling.
+    const signedDelta = LIVE_STATE_ALPHA * (nVal - pVal);
+    const delta = Math.abs(signedDelta);
+    deltas.push({ field: channel.field, previous: pVal, next: nVal, signedDelta, delta });
+    signedDeltaMap.set(channel.field, signedDelta);
 
     const bar = sensitive ? channel.sensitiveThreshold : channel.threshold;
-    if (delta >= bar && delta > topDelta) {
-      topDelta = delta;
-      topReason = channel.reason;
+    if (delta < bar || delta <= topDelta) continue;
+
+    // Direction filter: only trigger if the movement matches the alarm direction
+    const direction = channel.alarmDirection;
+    if (direction === "rising" && signedDelta <= 0) continue;
+    if (direction === "falling" && signedDelta >= 0) continue;
+
+    topDelta = delta;
+    topReason = channel.reason;
+  }
+
+  // Check composite patterns — these trigger at lower individual thresholds
+  // because co-occurring shifts carry stronger signal
+  if (!topReason) {
+    for (const pattern of COMPOSITE_PATTERNS) {
+      let allMatch = true;
+      let minDelta = Infinity;
+      for (const req of pattern.channels) {
+        const sd = signedDeltaMap.get(req.field) ?? 0;
+        const matchesDirection =
+          (req.direction === "rising" && sd > 0) ||
+          (req.direction === "falling" && sd < 0);
+        if (!matchesDirection) {
+          allMatch = false;
+          break;
+        }
+        // Find the normal threshold for this field
+        const ch = TRANSITION_CHANNELS.find((c) => c.field === req.field);
+        const bar = ch ? (sensitive ? ch.sensitiveThreshold : ch.threshold) : 0.12;
+        const needed = bar * pattern.thresholdMultiplier;
+        if (Math.abs(sd) < needed) {
+          allMatch = false;
+          break;
+        }
+        minDelta = Math.min(minDelta, Math.abs(sd));
+      }
+      if (allMatch && minDelta > topDelta) {
+        topDelta = minDelta;
+        topReason = pattern.reason;
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Prosody shift detection — operates on raw Hume prosody scores directly,
+  // bypassing the blended scalar fields. This catches voice-quality changes
+  // that are invisible to the scalar transition channels because prosody
+  // contribution is weighted down in the blended heuristic scores.
+  //
+  // We compute a prosody-derived valence (positive - negative emotion average)
+  // for each state and detect when it shifts significantly between turns.
+  // -----------------------------------------------------------------------
+  if (!topReason && previous.prosodyScores && next.prosodyScores) {
+    const prevProsodyValence = computeProsodyValence(previous.prosodyScores);
+    const nextProsodyValence = computeProsodyValence(next.prosodyScores);
+    const prosodyShift = nextProsodyValence - prevProsodyValence;
+    const prosodyThreshold = sensitive
+      ? PROSODY_SHIFT_SENSITIVE_THRESHOLD
+      : PROSODY_SHIFT_THRESHOLD;
+
+    // Only alarm on valence dropping (voice getting darker / more distressed)
+    if (prosodyShift < -prosodyThreshold) {
+      topReason = "prosody_shift";
+      topDelta = Math.abs(prosodyShift);
     }
   }
 
@@ -984,6 +1158,9 @@ function shouldEnqueueLiveShadowTurn(input: {
       activeProcess: persona.mindState.activeProcess,
     })
   ) {
+    if (input.sessionId) {
+      sessionLastTransitionTurn.set(input.sessionId, sessionUserTurns.length);
+    }
     return { enqueue: true, reason: "periodic_sync" };
   }
 
@@ -1920,18 +2097,6 @@ export async function getLiveContextUpdate(
     throw new Error("Persona not found.");
   }
 
-  const [messages, feedbackNotes, observations] = await Promise.all([
-    listMessages(personaId),
-    listFeedback(personaId).then((entries) => entries.map((entry) => entry.note)),
-    listPerceptionObservations(personaId),
-  ]);
-  const perception = resolveLivePerceptionForSession(input.sessionId, observations);
-  const sessionFrame = buildSessionFrame({
-    persona,
-    messages,
-    feedbackNotes,
-    perception,
-  });
   const pendingJobs = persona.mindState.pendingShadowTurns.filter((job) => {
     if (job.status === "completed" || job.status === "failed") {
       return false;
@@ -1944,23 +2109,47 @@ export async function getLiveContextUpdate(
     return job.sessionId === input.sessionId;
   }).length;
 
-  const delivering = sessionFrame.liveDeliveryVersion > (input.afterVersion ?? 0);
-  if (delivering) {
-    soulLogger.debug(
-      {
-        personaId,
-        sessionId: input.sessionId,
-        version: sessionFrame.liveDeliveryVersion,
-        reason: sessionFrame.deliveryReason,
-        event: "live_context_delivery_sent",
-      },
-      "Live context delivery sent to Hume",
-    );
+  // Only rebuild the full session frame when a delivery is actually pending.
+  // The expensive buildSessionFrame → buildSoulHarness call rebuilds all 15+
+  // memory sections; skipping it on non-delivery polls avoids wasted work.
+  const delivering =
+    persona.mindState.liveDeliveryVersion > (input.afterVersion ?? 0);
+
+  if (!delivering) {
+    return {
+      persona,
+      sessionFrame: undefined,
+      pendingJobs,
+    };
   }
+
+  const [messages, feedbackNotes, observations] = await Promise.all([
+    listMessages(personaId),
+    listFeedback(personaId).then((entries) => entries.map((entry) => entry.note)),
+    listPerceptionObservations(personaId),
+  ]);
+  const perception = resolveLivePerceptionForSession(input.sessionId, observations);
+  const sessionFrame = buildSessionFrame({
+    persona,
+    messages,
+    feedbackNotes,
+    perception,
+  });
+
+  soulLogger.debug(
+    {
+      personaId,
+      sessionId: input.sessionId,
+      version: sessionFrame.liveDeliveryVersion,
+      reason: sessionFrame.deliveryReason,
+      event: "live_context_delivery_sent",
+    },
+    "Live context delivery sent to Hume",
+  );
 
   return {
     persona,
-    sessionFrame: delivering ? sessionFrame : undefined,
+    sessionFrame,
     pendingJobs,
   };
 }

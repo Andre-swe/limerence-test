@@ -300,15 +300,16 @@ function determineLiveDeliveryDecision(input: {
     };
   }
 
-  if (
-    input.perception.kind === "screen_observation" ||
-    input.perception.kind === "camera_observation"
-  ) {
-    return {
-      shouldDispatch: true,
-      reason: "visual context updated",
-    };
-  }
+  // Visual observations are NOT automatically delivered. The observation was
+  // already escalated through compareVisualObservation (Gate 1) and processed
+  // by the soul engine. Only dispatch if the soul engine produced a meaningful
+  // state change checked above (process shift, boundary, user state threshold,
+  // etc.). If none of those fired, the visual update can wait for the next
+  // meaningful transition or consolidation. This prevents excessive context
+  // rebuilds during screen/camera sharing.
+  //
+  // Note: visual_session_start / visual_session_end are still always dispatched
+  // (handled earlier) because mode transitions are always worth delivering.
 
   return {
     shouldDispatch: false,

@@ -12,6 +12,7 @@ import {
   addPersonaFeedback,
   appendLiveTranscriptTurn,
   compareVisualObservation,
+  computeProsodyValence,
   createPersonaFromForm,
   detectMeaningfulTransition,
   executeQueuedShadowTurn,
@@ -625,7 +626,7 @@ describe("persona workflows", () => {
     const jitter = { ...base, id: "state-2", frustration: 0.35 };
     expect(detectMeaningfulTransition(base, jitter).meaningful).toBe(false);
 
-    // Large jump SHOULD trigger
+    // Large RISING frustration SHOULD trigger (alarmDirection = "rising")
     const spike = { ...base, id: "state-3", frustration: 0.7 };
     const result = detectMeaningfulTransition(base, spike);
     expect(result.meaningful).toBe(true);
@@ -636,10 +637,178 @@ describe("persona workflows", () => {
 
     // Process-sensitivity: during "repair", lower thresholds catch subtler shifts
     const subtleShift = { ...base, id: "state-4", repairRisk: 0.48 };
-    // Normal process: delta = |0.3 + 0.35*(0.48-0.3) - 0.3| = 0.063, threshold 0.10 → NOT triggered
+    // Normal process: delta = 0.35*(0.48-0.3) = 0.063, threshold 0.10 → NOT triggered
     expect(detectMeaningfulTransition(base, subtleShift, "attunement").meaningful).toBe(false);
     // Repair process: sensitiveThreshold 0.06 → triggered
     expect(detectMeaningfulTransition(base, subtleShift, "repair").meaningful).toBe(true);
+  });
+
+  it("filters transition direction — dropping frustration does not trigger alarm", () => {
+    const elevated: Parameters<typeof detectMeaningfulTransition>[0] = {
+      id: "state-high",
+      modality: "live_voice",
+      topSignals: [],
+      valence: 0.5,
+      arousal: 0.5,
+      activation: 0.5,
+      certainty: 0.5,
+      vulnerability: 0.5,
+      desireForCloseness: 0.5,
+      desireForSpace: 0.5,
+      repairRisk: 0.7,
+      boundaryPressure: 0.3,
+      taskFocus: 0.5,
+      griefLoad: 0.3,
+      playfulness: 0.5,
+      frustration: 0.7,
+      environmentPressure: 0.5,
+      situationalSignals: [],
+      summary: "frustrated",
+      confidence: 0.7,
+      provenance: ["heuristic"],
+      createdAt: new Date().toISOString(),
+    };
+
+    // User calming down: frustration 0.7 → 0.3 is a LARGE delta but FALLING
+    // frustration has alarmDirection="rising", so this should NOT trigger
+    const calming = { ...elevated, id: "state-calm", frustration: 0.3, repairRisk: 0.3 };
+    const result = detectMeaningfulTransition(elevated, calming);
+    expect(result.meaningful).toBe(false);
+
+    // Valence has alarmDirection="falling" — rising valence should NOT trigger
+    const brightening = { ...elevated, id: "state-bright", valence: 0.9, frustration: 0.7, repairRisk: 0.7 };
+    expect(detectMeaningfulTransition(elevated, brightening).meaningful).toBe(false);
+
+    // But valence DROPPING should trigger (needs delta > 0.15: 0.35*0.5=0.175)
+    const darkening = { ...elevated, id: "state-dark", valence: 0.0, frustration: 0.7, repairRisk: 0.7 };
+    const darkResult = detectMeaningfulTransition(elevated, darkening);
+    expect(darkResult.meaningful).toBe(true);
+    expect(darkResult.reason).toBe("valence_shifted");
+
+    // Bidirectional channels (griefLoad) trigger in EITHER direction
+    // Need delta > 0.12: start at 0.7, drop to 0.2 → 0.35*0.5 = 0.175
+    const griefHigh = { ...elevated, griefLoad: 0.7, frustration: 0.7, repairRisk: 0.7 };
+    const griefDrop = { ...griefHigh, id: "state-grief-drop", griefLoad: 0.2 };
+    const griefResult = detectMeaningfulTransition(griefHigh, griefDrop);
+    expect(griefResult.meaningful).toBe(true);
+    expect(griefResult.reason).toBe("grief_intensified");
+  });
+
+  it("detects composite transition patterns at lower thresholds", () => {
+    const base: Parameters<typeof detectMeaningfulTransition>[0] = {
+      id: "state-1",
+      modality: "live_voice",
+      topSignals: [],
+      valence: 0.5,
+      arousal: 0.5,
+      activation: 0.5,
+      certainty: 0.5,
+      vulnerability: 0.3,
+      desireForCloseness: 0.5,
+      desireForSpace: 0.3,
+      repairRisk: 0.3,
+      boundaryPressure: 0.3,
+      taskFocus: 0.5,
+      griefLoad: 0.3,
+      playfulness: 0.5,
+      frustration: 0.3,
+      environmentPressure: 0.5,
+      situationalSignals: [],
+      summary: "calm",
+      confidence: 0.7,
+      provenance: ["heuristic"],
+      createdAt: new Date().toISOString(),
+    };
+
+    // Withdrawal pattern: frustration + desireForSpace both rising modestly
+    // Each alone would be below threshold (0.12), but together at 60% threshold they trigger
+    // frustration delta: 0.35 * (0.55 - 0.3) = 0.0875, needs >= 0.12 * 0.6 = 0.072 ✓
+    // desireForSpace delta: 0.35 * (0.55 - 0.3) = 0.0875, needs >= 0.18 * 0.6 = 0.108 → too low!
+    // Need a bigger shift for desireForSpace (threshold 0.18)
+    // desireForSpace delta needs: 0.35 * x >= 0.108 → x >= 0.309
+    const withdrawal = {
+      ...base,
+      id: "state-withdrawal",
+      frustration: 0.55, // delta = 0.0875 > 0.072 ✓
+      desireForSpace: 0.62, // delta = 0.35*0.32 = 0.112 > 0.108 ✓
+    };
+
+    // Neither channel alone triggers its standalone threshold
+    // frustration: 0.0875 < 0.12 standalone
+    // desireForSpace: 0.112 < 0.18 standalone
+    const result = detectMeaningfulTransition(base, withdrawal);
+    expect(result.meaningful).toBe(true);
+    expect(result.reason).toBe("withdrawal_pattern");
+
+    // But if only one channel rises, the composite doesn't trigger
+    const justFrustration = { ...base, id: "state-just-frust", frustration: 0.55 };
+    expect(detectMeaningfulTransition(base, justFrustration).meaningful).toBe(false);
+  });
+
+  it("detects prosody shift when voice quality changes even if scalar scores don't", () => {
+    const base: Parameters<typeof detectMeaningfulTransition>[0] = {
+      id: "state-1",
+      modality: "live_voice",
+      topSignals: [],
+      valence: 0.5,
+      arousal: 0.5,
+      activation: 0.5,
+      certainty: 0.5,
+      vulnerability: 0.5,
+      desireForCloseness: 0.5,
+      desireForSpace: 0.5,
+      repairRisk: 0.3,
+      boundaryPressure: 0.3,
+      taskFocus: 0.5,
+      griefLoad: 0.3,
+      playfulness: 0.5,
+      frustration: 0.3,
+      environmentPressure: 0.5,
+      situationalSignals: [],
+      summary: "calm voice",
+      confidence: 0.7,
+      provenance: ["heuristic", "hume_prosody"],
+      createdAt: new Date().toISOString(),
+      prosodyScores: { joy: 0.4, contentment: 0.3, sadness: 0.05, anxiety: 0.05 },
+    };
+
+    // Voice gets darker — positive prosody drops, negative rises
+    // But scalar fields stay the same (simulating text-keyword-driven scores)
+    const darkVoice = {
+      ...base,
+      id: "state-dark-voice",
+      prosodyScores: { joy: 0.05, contentment: 0.05, sadness: 0.35, anxiety: 0.3 },
+    };
+
+    // Verify prosody valence shifted significantly
+    const prevValence = computeProsodyValence(base.prosodyScores!);
+    const nextValence = computeProsodyValence(darkVoice.prosodyScores!);
+    expect(prevValence).toBeGreaterThan(0); // positive baseline
+    expect(nextValence).toBeLessThan(0); // negative now
+    expect(prevValence - nextValence).toBeGreaterThan(0.12); // exceeds threshold
+
+    // The transition detector should catch this via prosody shift
+    const result = detectMeaningfulTransition(base, darkVoice);
+    expect(result.meaningful).toBe(true);
+    expect(result.reason).toBe("prosody_shift");
+
+    // Voice brightening (negative → positive) should NOT trigger alarm
+    // because prosody_shift only alarms on falling valence
+    const brightVoice = {
+      ...base,
+      id: "state-bright",
+      prosodyScores: { joy: 0.05, contentment: 0.05, sadness: 0.35, anxiety: 0.3 },
+    };
+    const brighterVoice = {
+      ...brightVoice,
+      id: "state-brighter",
+      prosodyScores: { joy: 0.5, contentment: 0.4, sadness: 0.02, anxiety: 0.02 },
+    };
+    expect(detectMeaningfulTransition(brightVoice, brighterVoice).reason).not.toBe("prosody_shift");
+
+    // No prosody scores → prosody shift detection is skipped
+    const noProsody = { ...base, id: "state-no-prosody", prosodyScores: undefined };
+    expect(detectMeaningfulTransition(base, noProsody).reason).not.toBe("prosody_shift");
   });
 
   it("smooths user state via reduceLiveUserState instead of storing raw heuristic", () => {
