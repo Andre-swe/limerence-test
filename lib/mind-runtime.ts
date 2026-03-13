@@ -13,7 +13,7 @@ import type {
   UserStateSnapshot,
 } from "@/lib/types";
 import { getSoulProcessDefinition, scheduleSoulPerceptions } from "@/lib/soul-kernel";
-import { truncate } from "@/lib/utils";
+import { addHours, truncate } from "@/lib/utils";
 
 type PersonaMindLike = Pick<
   Persona,
@@ -106,12 +106,6 @@ function average(values: number[]) {
 
 function toDate(value: string) {
   return new Date(value);
-}
-
-function addHours(iso: string, hours: number) {
-  const date = toDate(iso);
-  date.setHours(date.getHours() + hours);
-  return date.toISOString();
 }
 
 function setHourWithFallback(iso: string, hour: number) {

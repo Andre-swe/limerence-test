@@ -43,6 +43,81 @@ import { soulLogger } from "@/lib/soul-logger";
 import { safeJsonParse, slugify } from "@/lib/utils";
 import { getSupabaseStatus } from "@/lib/supabase";
 
+// ---------------------------------------------------------------------------
+// Provider timeout — prevents a slow upstream from stalling the app.
+// ---------------------------------------------------------------------------
+const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
+const TRANSCRIPTION_TIMEOUT_MS = 20_000;
+
+class ProviderTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`Request timed out after ${timeoutMs}ms`);
+    this.name = "ProviderTimeoutError";
+  }
+}
+
+function isAbortError(error: unknown) {
+  return (
+    error instanceof ProviderTimeoutError ||
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function fetchWithTimeout(
+  url: string | URL,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<Response> {
+  const ms = init?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
+  const controller = new AbortController();
+  const externalSignal = init?.signal;
+  let abortedByTimeout = false;
+  const timer = setTimeout(() => {
+    abortedByTimeout = true;
+    controller.abort(new ProviderTimeoutError(ms));
+  }, ms);
+  const onAbort = () => controller.abort(externalSignal?.reason);
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      onAbort();
+    } else {
+      externalSignal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  const merged: RequestInit = { ...init, signal: controller.signal };
+  return fetch(url, merged)
+    .catch((error) => {
+      if (abortedByTimeout && isAbortError(error)) {
+        throw new ProviderTimeoutError(ms);
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", onAbort);
+      }
+    });
+}
+
+function logProviderFailure(provider: string, method: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  const isTimeout = error instanceof ProviderTimeoutError;
+  soulLogger.warn(
+    {
+      provider,
+      method,
+      error: message,
+      timeout: isTimeout,
+      event: "provider_failure",
+    },
+    `Provider ${provider}.${method} failed${isTimeout ? " (timeout)" : ""}, falling back to mock`,
+  );
+}
+
 type ReplyRequest = {
   persona: Persona;
   messages: MessageEntry[];
@@ -683,7 +758,7 @@ class HumeVoiceProvider extends MockVoiceProvider {
   }
 
   private async fetchJson<T>(path: string, init: RequestInit) {
-    const response = await fetch(`${this.baseUrl}${path}`, init);
+    const response = await fetchWithTimeout(`${this.baseUrl}${path}`, init);
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
@@ -694,7 +769,7 @@ class HumeVoiceProvider extends MockVoiceProvider {
   }
 
   private async fetchBinary(path: string, init: RequestInit) {
-    const response = await fetch(`${this.baseUrl}${path}`, init);
+    const response = await fetchWithTimeout(`${this.baseUrl}${path}`, init);
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
@@ -811,7 +886,7 @@ class HumeVoiceProvider extends MockVoiceProvider {
 
 class OpenAIReasoningProvider extends MockReasoningProvider {
   private async callResponses(body: Record<string, unknown>) {
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetchWithTimeout("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -982,7 +1057,7 @@ class GeminiReasoningProvider extends MockReasoningProvider {
   private model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
 
   private async callGenerateContent(body: Record<string, unknown>) {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
       {
         method: "POST",
@@ -1114,7 +1189,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return parseFastTurnResult(this.extractText(response), fallback, "gemini");
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "respondToUserTurn", error);
       return fallback;
     }
   }
@@ -1140,7 +1216,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return parseIntentResult(this.extractText(response), fallback, "gemini");
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "deliberateIntent", error);
       return fallback;
     }
   }
@@ -1166,7 +1243,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return normalizeLearningArtifacts(this.extractText(response), fallback, "gemini");
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "extractLearningArtifacts", error);
       return fallback;
     }
   }
@@ -1188,7 +1266,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return this.extractText(response) || renderMockConversationReply(plan, input.persona);
-    } catch {
+    } catch (error) {
+      logProviderFailure("reasoning", "generateReply", error);
       return renderMockConversationReply(plan, input.persona);
     }
   }
@@ -1315,7 +1394,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return candidate.success ? candidate.data : fallback;
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "inferUserState", error);
       return fallback;
     }
   }
@@ -1400,7 +1480,7 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
   private model = process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-20250514";
 
   private async callMessages(body: Record<string, unknown>) {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "anthropic-version": "2023-06-01",
@@ -1593,7 +1673,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
       });
 
       return this.extractText(response) || renderMockConversationReply(plan, input.persona);
-    } catch {
+    } catch (error) {
+      logProviderFailure("reasoning", "generateReply", error);
       return renderMockConversationReply(plan, input.persona);
     }
   }
@@ -1637,7 +1718,7 @@ class DeepgramTranscriptionProvider extends MockTranscriptionProvider {
   override async transcribeAudio(input: { buffer: Buffer; fileName: string; mimeType: string }) {
     try {
       const audioBytes = Uint8Array.from(input.buffer);
-      const response = await fetch("https://api.deepgram.com/v1/listen?model=nova-3", {
+      const response = await fetchWithTimeout("https://api.deepgram.com/v1/listen?model=nova-3", {
         method: "POST",
         headers: {
           Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
@@ -1646,6 +1727,7 @@ class DeepgramTranscriptionProvider extends MockTranscriptionProvider {
         body: new Blob([audioBytes], {
           type: input.mimeType || "audio/webm",
         }),
+        timeoutMs: TRANSCRIPTION_TIMEOUT_MS,
       });
 
       if (!response.ok) {
@@ -1660,7 +1742,8 @@ class DeepgramTranscriptionProvider extends MockTranscriptionProvider {
         payload.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ||
         super.transcribeAudio(input)
       );
-    } catch {
+    } catch (error) {
+      logProviderFailure("deepgram", "transcribeAudio", error);
       return super.transcribeAudio(input);
     }
   }

@@ -43,6 +43,12 @@ export function formatRelative(value?: string) {
   return formatDistanceToNow(new Date(value), { addSuffix: true });
 }
 
+export function addHours(iso: string, hours: number) {
+  const date = new Date(iso);
+  date.setHours(date.getHours() + hours);
+  return date.toISOString();
+}
+
 export function safeJsonParse<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;

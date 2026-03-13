@@ -83,6 +83,7 @@ type PreferenceUpdate = {
 const localShadowExecutionQueues = new Map<string, Promise<void>>();
 const MIN_LIVE_DELIVERY_INTERVAL_MS = 4500;
 const MAX_COMPLETED_LIVE_SESSION_METRICS = 8;
+const TELEGRAM_DELIVERY_TIMEOUT_MS = 15_000;
 
 function resolveStartingVoiceId(starterVoiceId?: string) {
   return (
@@ -3415,6 +3416,9 @@ async function sendTelegramText(chatId: number, text: string) {
     return false;
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TELEGRAM_DELIVERY_TIMEOUT_MS);
+
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: {
@@ -3424,7 +3428,8 @@ async function sendTelegramText(chatId: number, text: string) {
       chat_id: chatId,
       text,
     }),
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
 
   return response.ok;
 }

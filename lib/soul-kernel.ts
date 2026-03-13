@@ -10,6 +10,7 @@ import type {
   SoulProcessDefinition,
   UserStateSnapshot,
 } from "@/lib/types";
+import { addHours } from "@/lib/utils";
 
 function defineProcess(
   definition: Omit<
@@ -186,11 +187,6 @@ const processDefinitions = {
   }),
 } satisfies Record<MindProcess, SoulProcessDefinition>;
 
-function addHours(iso: string, hours: number) {
-  const date = new Date(iso);
-  date.setHours(date.getHours() + hours);
-  return date.toISOString();
-}
 
 function dedupeScheduledPerceptions(perceptions: ScheduledPerception[]) {
   const seen = new Set<string>();
