@@ -663,6 +663,8 @@ export function buildSoulHarness(input: {
       processInstanceId: mindState.currentProcessInstanceId,
       traceVersion: Math.max(mindState.traceVersion, 1),
       contextVersion: Math.max(mindState.contextVersion, 1),
+      liveDeliveryVersion: Math.max(mindState.liveDeliveryVersion, 1),
+      deliveryReason: mindState.lastLiveDeliveryReason,
       readyEvents: readyEvents.map((event) => event.summary),
     },
   });
@@ -700,6 +702,8 @@ export function buildSoulHarness(input: {
       processInstanceId: mindState.currentProcessInstanceId,
       traceVersion: Math.max(mindState.traceVersion, 1),
       contextVersion: Math.max(mindState.contextVersion, 1),
+      liveDeliveryVersion: Math.max(mindState.liveDeliveryVersion, 1),
+      deliveryReason: mindState.lastLiveDeliveryReason,
       readyEvents: readyEvents.map((event) => event.summary),
     },
   } satisfies SoulHarnessSnapshot;

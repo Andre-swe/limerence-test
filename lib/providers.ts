@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  fastTurnResultSchema,
   type HeartbeatDecision,
   intentResultSchema,
   learningArtifactPayloadSchema,
+  type FastTurnResult,
   type LiveSessionMode,
   type MessageEntry,
   type MindProcess,
@@ -24,17 +26,19 @@ import { savePublicFile } from "@/lib/store";
 import { getHouseVoicePreset } from "@/lib/voice-presets";
 import {
   planConversationSoul,
+  planFastTurnResponse,
   planHeartbeatSoul,
   planIntentDeliberation,
   planLearningExtraction,
   renderConversationPrompt,
+  renderFastTurnPrompt,
   renderHeartbeatPrompt,
   renderMockConversationReply,
   renderMockHeartbeatContent,
   renderIntentPrompt,
   renderLearningPrompt,
 } from "@/lib/soul-runtime";
-import { inferHeuristicUserState } from "@/lib/mind-runtime";
+import { createInitialMindState, inferHeuristicUserState } from "@/lib/mind-runtime";
 import { soulLogger } from "@/lib/soul-logger";
 import { safeJsonParse, slugify } from "@/lib/utils";
 import { getSupabaseStatus } from "@/lib/supabase";
@@ -70,6 +74,23 @@ type UserStateRequest = {
   }>;
 };
 
+type FastTurnRequest = {
+  persona: Persona;
+  messages: MessageEntry[];
+  latestUserText: string;
+  feedbackNotes: string[];
+  channel: "web" | "telegram";
+  createdAt?: string;
+  visualContext?: Array<{
+    summary: string;
+    situationalSignals: string[];
+    environmentPressure: number;
+    taskContext?: string;
+    attentionTarget?: string;
+  }>;
+  boundaryTriggered?: boolean;
+};
+
 type VisualPerceptionRequest = {
   persona: Persona;
   messages: MessageEntry[];
@@ -99,6 +120,7 @@ export type LearningExtractionRequest = {
   process: MindProcess;
   perception: SoulPerception;
   feedbackNotes: string[];
+  replyText?: string;
 };
 
 export interface ReasoningProvider {
@@ -106,6 +128,7 @@ export interface ReasoningProvider {
   extractTextFromScreenshot(input: { buffer: Buffer; fileName: string; mimeType: string }): Promise<string>;
   observeVisualContext(input: VisualPerceptionRequest): Promise<VisualPerceptionResult>;
   inferUserState(input: UserStateRequest): Promise<UserStateSnapshot>;
+  respondToUserTurn(input: FastTurnRequest): Promise<FastTurnResult>;
   deliberateIntent(input: IntentRequest): Promise<IntentResult>;
   extractLearningArtifacts(input: LearningExtractionRequest): Promise<LearningArtifact[]>;
   generateReply(input: ReplyRequest): Promise<string>;
@@ -256,6 +279,46 @@ function fallbackIntentResult(input: IntentRequest): IntentResult {
   };
 }
 
+function fallbackFastTurnResult(input: FastTurnRequest): FastTurnResult {
+  const userState = inferHeuristicUserState({
+    text: input.latestUserText,
+    channel: input.channel,
+    createdAt: input.createdAt,
+    visualContext: input.visualContext,
+  });
+  const fallbackMindState = createInitialMindState({
+    persona: input.persona,
+    messages: input.messages,
+    latestUserState: userState,
+    boundaryTriggered: input.boundaryTriggered,
+  });
+  const personaForReply: Persona = {
+    ...input.persona,
+    mindState: {
+      ...input.persona.mindState,
+      activeProcess: fallbackMindState.activeProcess,
+      currentDrive: fallbackMindState.currentDrive,
+    },
+  };
+  const plan = planConversationSoul({
+    persona: personaForReply,
+    messages: input.messages,
+    feedbackNotes: input.feedbackNotes,
+    latestUserText: input.latestUserText,
+    channel: input.channel,
+  });
+
+  return {
+    replyText: renderMockConversationReply(plan, personaForReply),
+    userState,
+    process: fallbackMindState.activeProcess,
+    processIntent: `Move through ${fallbackMindState.activeProcess} with emotional accuracy.`,
+    currentDrive: fallbackMindState.currentDrive,
+    updatedLocalMemory: {},
+    relationshipDelta: undefined,
+  };
+}
+
 function parseIntentResult(
   rawText: string,
   fallback: IntentResult,
@@ -289,6 +352,80 @@ function parseIntentResult(
         issues: candidate.error.issues.map((issue) => issue.message),
       },
       "Intent result failed validation; using fallback",
+    );
+    return fallback;
+  }
+
+  return candidate.data;
+}
+
+function parseFastTurnResult(
+  rawText: string,
+  fallback: FastTurnResult,
+  provider: string,
+): FastTurnResult {
+  const parsed = safeJsonParse<unknown>(rawText, fallback);
+  if (typeof parsed !== "object" || parsed === null) {
+    soulLogger.warn({ provider }, "Fast turn result was not an object; using fallback");
+    return fallback;
+  }
+
+  const parsedRecord = parsed as Record<string, unknown>;
+  const parsedUserState =
+    typeof parsedRecord.userState === "object" && parsedRecord.userState !== null
+      ? (parsedRecord.userState as Record<string, unknown>)
+      : {};
+
+  const userStateCandidate = userStateSnapshotSchema.safeParse({
+    ...fallback.userState,
+    ...parsedUserState,
+    id: fallback.userState.id,
+    modality: fallback.userState.modality,
+    createdAt: fallback.userState.createdAt,
+    prosodyScores: fallback.userState.prosodyScores,
+    provenance:
+      provider === "gemini"
+        ? ["gemini"]
+        : Array.isArray(parsedUserState.provenance) &&
+            parsedUserState.provenance.every((value) => typeof value === "string")
+          ? parsedUserState.provenance
+          : fallback.userState.provenance,
+  });
+
+  const candidate = fastTurnResultSchema.safeParse({
+    replyText:
+      typeof parsedRecord.replyText === "string" && parsedRecord.replyText.trim().length > 0
+        ? parsedRecord.replyText.trim()
+        : fallback.replyText,
+    userState: userStateCandidate.success ? userStateCandidate.data : fallback.userState,
+    process: parsedRecord.process,
+    processIntent:
+      typeof parsedRecord.processIntent === "string" && parsedRecord.processIntent.trim().length > 0
+        ? parsedRecord.processIntent.trim()
+        : fallback.processIntent,
+    currentDrive:
+      typeof parsedRecord.currentDrive === "string" && parsedRecord.currentDrive.trim().length > 0
+        ? parsedRecord.currentDrive.trim()
+        : fallback.currentDrive,
+    updatedLocalMemory: sanitizeLocalMemory(
+      parsedRecord.updatedLocalMemory,
+      fallback.updatedLocalMemory,
+      { provider },
+    ),
+    relationshipDelta:
+      typeof parsedRecord.relationshipDelta === "string" &&
+      parsedRecord.relationshipDelta.trim().length > 0
+        ? parsedRecord.relationshipDelta.trim()
+        : fallback.relationshipDelta,
+  });
+
+  if (!candidate.success) {
+    soulLogger.warn(
+      {
+        provider,
+        issues: candidate.error.issues.map((issue) => issue.message),
+      },
+      "Fast turn result failed validation; using fallback",
     );
     return fallback;
   }
@@ -413,6 +550,10 @@ class MockReasoningProvider implements ReasoningProvider {
       prosodyScores: input.prosodyScores,
       visualContext: input.visualContext,
     });
+  }
+
+  async respondToUserTurn(input: FastTurnRequest) {
+    return fallbackFastTurnResult(input);
   }
 
   async observeVisualContext(input: VisualPerceptionRequest) {
@@ -733,6 +874,22 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
     }
   }
 
+  override async respondToUserTurn(input: FastTurnRequest) {
+    const plan = planFastTurnResponse(input);
+    const fallback = fallbackFastTurnResult(input);
+
+    try {
+      const response = await this.callResponses({
+        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
+        input: renderFastTurnPrompt(plan),
+      });
+
+      return parseFastTurnResult(response.output_text ?? "", fallback, "openai");
+    } catch {
+      return fallback;
+    }
+  }
+
   override async deliberateIntent(input: IntentRequest) {
     const plan = planIntentDeliberation(input);
     const fallback = fallbackIntentResult(input);
@@ -932,6 +1089,33 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       return this.extractText(response) || super.extractTextFromScreenshot(input);
     } catch {
       return super.extractTextFromScreenshot(input);
+    }
+  }
+
+  override async respondToUserTurn(input: FastTurnRequest) {
+    const plan = planFastTurnResponse(input);
+    const fallback = fallbackFastTurnResult(input);
+
+    try {
+      const response = await this.callGenerateContent({
+        generationConfig: {
+          responseMimeType: "application/json",
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: renderFastTurnPrompt(plan),
+              },
+            ],
+          },
+        ],
+      });
+
+      return parseFastTurnResult(this.extractText(response), fallback, "gemini");
+    } catch {
+      return fallback;
     }
   }
 
@@ -1317,6 +1501,31 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
       return this.extractText(response) || super.extractTextFromScreenshot(input);
     } catch {
       return super.extractTextFromScreenshot(input);
+    }
+  }
+
+  override async respondToUserTurn(input: FastTurnRequest) {
+    const plan = planFastTurnResponse(input);
+    const fallback = fallbackFastTurnResult(input);
+
+    try {
+      const response = await this.callMessages({
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: renderFastTurnPrompt(plan),
+              },
+            ],
+          },
+        ],
+      });
+
+      return parseFastTurnResult(this.extractText(response), fallback, "anthropic");
+    } catch {
+      return fallback;
     }
   }
 

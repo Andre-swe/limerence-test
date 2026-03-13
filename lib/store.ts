@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -494,7 +494,10 @@ async function readStore(): Promise<DataStore> {
 
 async function writeStore(store: DataStore) {
   const validated = dataStoreSchema.parse(store);
-  await writeFile(storeFile, JSON.stringify(validated, null, 2), "utf8");
+  const nextContent = JSON.stringify(validated, null, 2);
+  const tempFile = `${storeFile}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(tempFile, nextContent, "utf8");
+  await rename(tempFile, storeFile);
 }
 
 async function withStoreLock<T>(operation: () => Promise<T>) {

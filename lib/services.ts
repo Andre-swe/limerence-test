@@ -23,8 +23,8 @@ import {
   updatePersona,
   updatePersonaShadowTurn,
 } from "@/lib/store";
-import { getProviders } from "@/lib/providers";
-import { executeSoulTurn } from "@/lib/soul-engine";
+import { getProviders, getProviderStatus } from "@/lib/providers";
+import { executeFastMessageTurn, executeSoulTurn } from "@/lib/soul-engine";
 import {
   isInngestExecutionEnabled,
   publishPersonaShadowTurns,
@@ -79,12 +79,35 @@ type PreferenceUpdate = {
   apply: (policy: HeartbeatPolicy) => HeartbeatPolicy;
 };
 
+const localShadowExecutionQueues = new Map<string, Promise<void>>();
+
 function resolveStartingVoiceId(starterVoiceId?: string) {
   return (
     getHouseVoicePreset(starterVoiceId)?.id ??
     houseVoicePresets[0]?.id ??
     undefined
   );
+}
+
+function scheduleLocalShadowExecution(personaId: string, jobId: string) {
+  const previous = localShadowExecutionQueues.get(personaId) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      await executeQueuedShadowTurn(personaId, jobId);
+    })
+    .catch((error) => {
+      soulLogger.warn(
+        {
+          personaId,
+          jobId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "Falling back to local background shadow execution",
+      );
+    });
+
+  localShadowExecutionQueues.set(personaId, next);
 }
 
 function buildStartingVoiceProfile(input: {
@@ -412,6 +435,10 @@ function currentContextVersion(persona: Persona) {
   return persona.mindState.contextVersion;
 }
 
+function currentLiveDeliveryVersion(persona: Persona) {
+  return persona.mindState.liveDeliveryVersion;
+}
+
 function currentTraceVersion(persona: Persona) {
   return persona.mindState.traceVersion;
 }
@@ -433,7 +460,9 @@ function buildSessionFrame(input: {
   return {
     ...snapshot.sessionFrame,
     contextVersion: currentContextVersion(input.persona),
+    liveDeliveryVersion: currentLiveDeliveryVersion(input.persona),
     traceVersion: currentTraceVersion(input.persona),
+    deliveryReason: input.persona.mindState.lastLiveDeliveryReason,
     contextDelta: input.contextDelta,
   } satisfies SoulSessionFrame;
 }
@@ -525,7 +554,7 @@ async function runVersionedSoulTurn(input: {
       };
     }
 
-    soulLogger.warn(
+    soulLogger.debug(
       {
         personaId: input.personaId,
         expectedRevision: persona.revision,
@@ -537,6 +566,55 @@ async function runVersionedSoulTurn(input: {
   }
 
   throw new Error("Unable to commit soul turn after revision retries.");
+}
+
+async function runVersionedFastMessageTurn(input: {
+  personaId: string;
+  basePersona?: Persona;
+  build: (persona: Persona) => Promise<Omit<Parameters<typeof executeFastMessageTurn>[0], "persona">>;
+  updatedAt?: string;
+  lastActiveAt?: string;
+}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const persona =
+      attempt === 0 && input.basePersona ? input.basePersona : await getPersona(input.personaId);
+
+    if (!persona) {
+      throw new Error("Persona not found.");
+    }
+
+    const executeInput = await input.build(persona);
+    const turnResult = await executeFastMessageTurn({
+      ...executeInput,
+      persona,
+    });
+    const updatedAt = input.updatedAt ?? new Date().toISOString();
+    const committed = await replacePersonaIfRevision(input.personaId, persona.revision, (current) => ({
+      ...turnResult.persona,
+      updatedAt,
+      lastActiveAt: input.lastActiveAt ?? updatedAt,
+      lastHeartbeatAt: current.lastHeartbeatAt,
+    }));
+
+    if (committed.matched) {
+      return {
+        persona: committed.persona,
+        turnResult,
+      };
+    }
+
+    soulLogger.debug(
+      {
+        personaId: input.personaId,
+        expectedRevision: persona.revision,
+        actualRevision: committed.persona.revision,
+        attempt: attempt + 1,
+      },
+      "Fast message turn revision mismatch; retrying",
+    );
+  }
+
+  throw new Error("Unable to commit fast message turn after revision retries.");
 }
 
 type ClaimedShadowTurn = Awaited<ReturnType<typeof claimPersonaShadowTurn>>;
@@ -600,7 +678,7 @@ async function processClaimedShadowTurn(
       return committed.persona;
     }
 
-    soulLogger.warn(
+    soulLogger.debug(
       {
         personaId,
         jobId: job.id,
@@ -666,6 +744,23 @@ async function applyFastLiveUserState(personaId: string, userState: UserStateSna
   }));
 }
 
+async function bumpLiveDelivery(personaId: string, reason: string) {
+  return updatePersona(personaId, (persona) => ({
+    ...persona,
+    updatedAt: new Date().toISOString(),
+    mindState: {
+      ...persona.mindState,
+      liveDeliveryVersion: persona.mindState.liveDeliveryVersion + 1,
+      lastLiveDeliveryReason: reason,
+      processState: {
+        ...persona.mindState.processState,
+        last_live_delivery_reason: reason,
+        live_delivery_version: String(persona.mindState.liveDeliveryVersion + 1),
+      },
+    },
+  }));
+}
+
 async function queuePendingInternalEvents(persona: Persona) {
   const pending = persona.mindState.pendingInternalEvents.filter((event) => event.status === "pending");
 
@@ -698,6 +793,26 @@ async function queuePendingInternalEvents(persona: Persona) {
       ),
     },
   }));
+}
+
+async function enqueueShadowTurnForExecution(
+  personaId: string,
+  shadowTurn: PendingShadowTurn,
+  options?: {
+    backgroundFallback?: boolean;
+  },
+) {
+  const queuedPersona = await enqueuePersonaShadowTurn(personaId, shadowTurn);
+  const publishedIds = await publishPersonaShadowTurns({
+    personaId,
+    jobs: [shadowTurn],
+  });
+
+  if (options?.backgroundFallback !== false && !publishedIds.includes(shadowTurn.id)) {
+    scheduleLocalShadowExecution(personaId, shadowTurn.id);
+  }
+
+  return queuedPersona;
 }
 
 function isInternalEventReady(persona: Persona, now: Date) {
@@ -760,6 +875,11 @@ export async function executeSoulInternalEvent(
       handled: false,
       persona,
     };
+  }
+
+  const localShadowQueue = localShadowExecutionQueues.get(personaId);
+  if (localShadowQueue) {
+    await localShadowQueue.catch(() => undefined);
   }
 
   const now = options?.now ?? new Date();
@@ -1114,21 +1234,30 @@ export async function sendPersonaMessage(
   }
 
   const providers = getProviders();
+  const providerStatus = getProviderStatus();
+  const requestStartedAt = Date.now();
   const originalText = payload.text?.trim() ?? "";
   let userText = originalText;
   const imageFiles = (payload.images ?? []).filter((file) => file.size > 0);
   let audioAttachment: MessageAttachment | undefined;
+  let transcriptionMs = 0;
+  let imageObservationMs = 0;
+  let fastTurnMs = 0;
+  let assistantAppendMs = 0;
+  let shadowEnqueueMs = 0;
 
   if (payload.audioFile && payload.audioFile.size > 0) {
     audioAttachment = await persistMessageAttachment(payload.audioFile, "audio");
 
     if (!userText) {
+      const transcriptionStartedAt = Date.now();
       const buffer = Buffer.from(await payload.audioFile.arrayBuffer());
       userText = await providers.transcription.transcribeAudio({
         buffer,
         mimeType: payload.audioFile.type || "audio/webm",
         fileName: payload.audioFile.name,
       });
+      transcriptionMs = Date.now() - transcriptionStartedAt;
     }
   }
 
@@ -1166,6 +1295,7 @@ export async function sendPersonaMessage(
 
   const imageAttachments: MessageAttachment[] = [];
   const observations: PerceptionObservation[] = [];
+  const imageObservationStartedAt = imageFiles.length > 0 ? Date.now() : 0;
 
   for (const imageFile of imageFiles) {
     const buffer = Buffer.from(await imageFile.arrayBuffer());
@@ -1187,29 +1317,17 @@ export async function sendPersonaMessage(
     imageAttachments.push(attachment);
     observations.push(observation);
   }
+  if (imageObservationStartedAt > 0) {
+    imageObservationMs = Date.now() - imageObservationStartedAt;
+  }
 
-  const inferredUserState = await providers.reasoning.inferUserState({
-    persona,
-    messages: existingMessages,
-    latestUserText: userText,
-    channel: payload.channel ?? "web",
-    createdAt: userMessageCreatedAt,
-    visualContext: observations.map((observation) => ({
-      summary: observation.summary,
-      situationalSignals: observation.situationalSignals,
-      environmentPressure: observation.environmentPressure,
-      taskContext: observation.taskContext,
-      attentionTarget: observation.attentionTarget,
-    })),
-  });
-
-  userMessage.userState = inferredUserState;
   userMessage.attachments = [...userMessage.attachments, ...imageAttachments];
 
   await appendMessages([userMessage]);
   if (observations.length > 0) {
     await appendPerceptionObservations(observations);
   }
+
   let activePersona = persona;
   const { preferenceUpdate, persona: updatedPersona } = await applyPreferenceSignalIfNeeded(
     persona,
@@ -1219,57 +1337,64 @@ export async function sendPersonaMessage(
 
   const feedback = await listFeedback(personaId);
   const feedbackNotes = feedback.map((entry) => entry.note);
-  const userTurnExecution = await runVersionedSoulTurn({
+  const perception: SoulPerception = {
+    kind:
+      payload.audioFile && payload.audioFile.size > 0
+        ? "voice_turn"
+        : imageFiles.length > 0 && !originalText
+          ? "user_shared_image"
+          : "text_message",
+    channel: payload.channel ?? "web",
+    modality:
+      payload.audioFile && payload.audioFile.size > 0
+        ? "voice_note"
+        : imageFiles.length > 0 && !originalText
+          ? "image"
+          : observations.length > 0
+            ? "multimodal"
+            : "text",
+    content: userText || summarizeImageShare(imageFiles.length),
+    createdAt: userMessage.createdAt,
+    internal: false,
+    causationId: userMessage.id,
+    correlationId: userMessage.id,
+    metadata: {
+      messageId: userMessage.id,
+      attachmentTypes: userMessage.attachments.map((attachment) => attachment.type).join(","),
+    },
+  };
+
+  const fastTurnStartedAt = Date.now();
+  const userTurnExecution = await runVersionedFastMessageTurn({
     personaId,
     basePersona: activePersona,
     build: async () => ({
       messages: await listMessages(personaId),
       observations: await listPerceptionObservations(personaId),
       feedbackNotes,
-      perception: {
-        kind:
-          payload.audioFile && payload.audioFile.size > 0
-            ? "voice_turn"
-            : imageFiles.length > 0 && !originalText
-              ? "user_shared_image"
-              : "text_message",
-        channel: payload.channel ?? "web",
-        modality:
-          payload.audioFile && payload.audioFile.size > 0
-            ? "voice_note"
-            : imageFiles.length > 0 && !originalText
-              ? "image"
-              : observations.length > 0
-                ? "multimodal"
-                : "text",
-        content: userText || summarizeImageShare(imageFiles.length),
-        createdAt: userMessage.createdAt,
-        internal: false,
-        causationId: userMessage.id,
-        correlationId: userMessage.id,
-        userStateId: inferredUserState.id,
-        metadata: {
-          messageId: userMessage.id,
-          attachmentTypes: userMessage.attachments.map((attachment) => attachment.type).join(","),
-        },
-      },
+      perception,
       latestUserText: userText,
-      providedUserState: inferredUserState,
       reasoning: providers.reasoning,
       replyChannel: payload.channel === "telegram" ? "telegram" : "web",
-      renderReply: true,
       boundaryTriggered: Boolean(preferenceUpdate),
     }),
   });
+  fastTurnMs = Date.now() - fastTurnStartedAt;
+
   const userTurnResult = userTurnExecution.turnResult;
+  const inferredUserState = userTurnResult.userState;
   activePersona = userTurnExecution.persona;
-  activePersona = await queuePendingInternalEvents(activePersona);
+  userMessage.userState = inferredUserState;
+
+  await updateMessage(userMessage.id, (current) => ({
+    ...current,
+    userState: inferredUserState,
+  }));
 
   const replyText = preferenceUpdate
     ? composePreferenceReply(activePersona, preferenceUpdate)
     : userTurnResult.replyText ?? "";
-  const shouldReplyWithVoiceNote =
-    payload.channel === "telegram" || Boolean(audioAttachment);
+  const shouldReplyWithVoiceNote = payload.channel === "telegram" || Boolean(audioAttachment);
   const synthesized = shouldReplyWithVoiceNote
     ? await providers.voice.synthesize({
         personaName: activePersona.name,
@@ -1305,37 +1430,61 @@ export async function sendPersonaMessage(
     },
   });
 
+  const assistantAppendStartedAt = Date.now();
   await appendMessages([assistantMessage]);
+  assistantAppendMs = Date.now() - assistantAppendStartedAt;
 
   const messagesWithReply = await listMessages(personaId);
-  const assistantTurnExecution = await runVersionedSoulTurn({
-    personaId,
-    basePersona: activePersona,
-    build: async () => ({
-      messages: await listMessages(personaId),
-      observations: await listPerceptionObservations(personaId),
-      feedbackNotes,
-      perception: {
-        kind: "assistant_message",
-        channel: payload.channel ?? "web",
-        modality: synthesized.audioUrl ? "voice_note" : "text",
-        content: assistantMessage.body,
-        createdAt: assistantMessage.createdAt,
-        internal: true,
-        causationId: userMessage.id,
-        correlationId: userMessage.id,
-        metadata: {
-          messageId: assistantMessage.id,
-          replyMode: assistantMessage.replyMode,
-        },
-      },
-      latestUserText: "",
-      reasoning: providers.reasoning,
-      renderReply: false,
-    }),
+  const shadowEnqueueStartedAt = Date.now();
+  const userLearningTurn = buildPendingShadowTurn({
+    persona: activePersona,
+    perception: {
+      ...perception,
+      userStateId: inferredUserState.id,
+    },
+    providedUserState: inferredUserState,
   });
-  activePersona = assistantTurnExecution.persona;
-  activePersona = await queuePendingInternalEvents(activePersona);
+  activePersona = await enqueueShadowTurnForExecution(activePersona.id, userLearningTurn, {
+    backgroundFallback: true,
+  });
+
+  const assistantReflectionTurn = buildPendingShadowTurn({
+    persona: activePersona,
+    perception: {
+      kind: "assistant_message",
+      channel: payload.channel ?? "web",
+      modality: synthesized.audioUrl ? "voice_note" : "text",
+      content: assistantMessage.body,
+      createdAt: assistantMessage.createdAt,
+      internal: true,
+      causationId: userMessage.id,
+      correlationId: userMessage.id,
+      metadata: {
+        messageId: assistantMessage.id,
+        replyMode: assistantMessage.replyMode,
+      },
+    },
+  });
+  activePersona = await enqueueShadowTurnForExecution(activePersona.id, assistantReflectionTurn, {
+    backgroundFallback: true,
+  });
+  shadowEnqueueMs = Date.now() - shadowEnqueueStartedAt;
+
+  soulLogger.debug(
+    {
+      personaId,
+      channel: payload.channel ?? "web",
+      messageKind: userMessage.kind,
+      reasoningProvider: providerStatus.reasoning,
+      totalDurationMs: Date.now() - requestStartedAt,
+      transcriptionMs,
+      imageObservationMs,
+      fastTurnMs,
+      assistantAppendMs,
+      shadowEnqueueMs,
+    },
+    "message send completed",
+  );
 
   return {
     persona: activePersona,
@@ -1485,7 +1634,7 @@ export async function getLiveContextUpdate(
   return {
     persona,
     sessionFrame:
-      sessionFrame.contextVersion > (input.afterVersion ?? 0) ? sessionFrame : undefined,
+      sessionFrame.liveDeliveryVersion > (input.afterVersion ?? 0) ? sessionFrame : undefined,
     pendingJobs,
   };
 }
@@ -1568,6 +1717,10 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     activePersona = learned.persona;
     if (learned.contextualUpdate) {
       contextualUpdates.push(learned.contextualUpdate);
+      activePersona = await bumpLiveDelivery(
+        activePersona.id,
+        "boundary or preference changed during the live call",
+      );
     }
   }
 
@@ -1596,10 +1749,8 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     sessionId: parsed.sessionId,
   });
 
-  activePersona = await enqueuePersonaShadowTurn(activePersona.id, shadowTurn);
-  await publishPersonaShadowTurns({
-    personaId: activePersona.id,
-    jobs: [shadowTurn],
+  activePersona = await enqueueShadowTurnForExecution(activePersona.id, shadowTurn, {
+    backgroundFallback: false,
   });
 
   const sessionFrame = buildSessionFrame({
@@ -1616,7 +1767,7 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   return {
     message,
     persona: activePersona,
-    sessionFrame,
+    sessionFrame: contextualUpdates.length > 0 ? sessionFrame : undefined,
     contextualUpdate: contextualUpdates.length > 0 ? contextualUpdates.join("\n\n") : undefined,
   };
 }
@@ -1714,10 +1865,8 @@ export async function observeLiveVisualPerception(
     sessionId: payload.sessionId,
     providedUserState: observation.userState,
   });
-  const queuedPersona = await enqueuePersonaShadowTurn(fastPersona.id, shadowTurn);
-  await publishPersonaShadowTurns({
-    personaId,
-    jobs: [shadowTurn],
+  const queuedPersona = await enqueueShadowTurnForExecution(fastPersona.id, shadowTurn, {
+    backgroundFallback: false,
   });
   const sessionFrame = buildSessionFrame({
     persona: queuedPersona,
@@ -1732,6 +1881,69 @@ export async function observeLiveVisualPerception(
     persona: queuedPersona,
     sessionFrame,
     contextualUpdate: sessionFrame.contextDelta,
+  };
+}
+
+export async function finalizeLiveSession(
+  personaId: string,
+  payload: {
+    sessionId?: string;
+    mode?: LiveSessionMode;
+    reason?: "user_end" | "disconnect";
+  },
+) {
+  const persona = await getPersona(personaId);
+
+  if (!persona) {
+    throw new Error("Persona not found.");
+  }
+
+  const existingJob = persona.mindState.pendingShadowTurns.find(
+    (job) =>
+      job.sessionId === payload.sessionId &&
+      job.perception.kind === "memory_consolidation" &&
+      job.status !== "failed",
+  );
+
+  if (existingJob) {
+    return {
+      persona,
+      queued: false,
+      jobId: existingJob.id,
+    };
+  }
+
+  const createdAt = new Date().toISOString();
+  const perception = {
+    kind: "memory_consolidation" as const,
+    modality: "live_voice" as const,
+    channel: "live" as const,
+    internal: true,
+    createdAt,
+    sessionId: payload.sessionId,
+    correlationId: payload.sessionId ?? `session-end-${personaId}`,
+    content: "Consolidate the just-finished live session into durable memory without overfitting transient phrasing.",
+    metadata: {
+      mode: payload.mode ?? "voice",
+      reason: payload.reason ?? "disconnect",
+      sessionEnded: true,
+    },
+  } satisfies SoulPerception;
+
+  const shadowTurn = buildPendingShadowTurn({
+    persona,
+    perception,
+    sessionId: payload.sessionId,
+  });
+
+  const queuedPersona = await enqueueShadowTurnForExecution(persona.id, shadowTurn, {
+    backgroundFallback: false,
+  });
+
+  return {
+    persona: queuedPersona,
+    queued: true,
+    jobId: shadowTurn.id,
   };
 }
 

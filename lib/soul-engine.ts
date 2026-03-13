@@ -11,8 +11,10 @@ import { soulLogger } from "@/lib/soul-logger";
 import { learningArtifactSchema } from "@/lib/types";
 import type {
   CognitiveStepId,
+  FastTurnResult,
   InternalScheduledEvent,
   LearningArtifact,
+  MemoryNote,
   MessageEntry,
   MindProcess,
   PerceptionObservation,
@@ -30,6 +32,22 @@ import { truncate } from "@/lib/utils";
 type ReplyChannel = "web" | "telegram";
 
 type ReasoningAdapter = {
+  respondToUserTurn(input: {
+    persona: Persona;
+    messages: MessageEntry[];
+    latestUserText: string;
+    feedbackNotes: string[];
+    channel: ReplyChannel;
+    createdAt?: string;
+    visualContext?: Array<{
+      summary: string;
+      situationalSignals: string[];
+      environmentPressure: number;
+      taskContext?: string;
+      attentionTarget?: string;
+    }>;
+    boundaryTriggered?: boolean;
+  }): Promise<FastTurnResult>;
   inferUserState(input: {
     persona: Persona;
     messages: MessageEntry[];
@@ -65,6 +83,7 @@ type ReasoningAdapter = {
     process: MindProcess;
     perception: SoulPerception;
     feedbackNotes: string[];
+    replyText?: string;
   }): Promise<LearningArtifact[]>;
 };
 
@@ -93,6 +112,31 @@ export type ExecuteSoulTurnInput = {
   reasoning: ReasoningAdapter;
   replyChannel?: ReplyChannel;
   renderReply?: boolean;
+  boundaryTriggered?: boolean;
+};
+
+export type FastMessageTurnExecutionResult = {
+  perception: SoulPerception;
+  persona: Persona;
+  userState: UserStateSnapshot;
+  replyText: string;
+  process: MindProcess;
+  processIntent: string;
+  trace: SoulTraceEntry[];
+  events: SoulEvent[];
+  contextDelta?: string;
+  selectedArchetype?: SoulArchetypeId;
+};
+
+export type ExecuteFastMessageTurnInput = {
+  persona: Persona;
+  messages: MessageEntry[];
+  observations: PerceptionObservation[];
+  feedbackNotes: string[];
+  perception: SoulPerception;
+  latestUserText: string;
+  reasoning: ReasoningAdapter;
+  replyChannel?: ReplyChannel;
   boundaryTriggered?: boolean;
 };
 
@@ -147,8 +191,180 @@ function sanitizeProcessLocalMemory(record: Record<string, unknown>, limit = 8) 
   return sanitized;
 }
 
+function countReadyInternalEvents(persona: Persona) {
+  return persona.mindState.pendingInternalEvents.filter(
+    (event) => event.status === "pending" || event.status === "queued",
+  ).length;
+}
+
+function isLivePerception(perception: SoulPerception) {
+  return perception.channel === "live" || perception.modality === "live_voice";
+}
+
+function didCrossThreshold(previous: number | undefined, next: number | undefined, threshold: number) {
+  return (previous ?? 0) < threshold && (next ?? 0) >= threshold;
+}
+
+function determineLiveDeliveryDecision(input: {
+  previousPersona: Persona;
+  nextPersona: Persona;
+  perception: SoulPerception;
+}) {
+  if (!isLivePerception(input.perception)) {
+    return {
+      shouldDispatch: false,
+      reason: undefined,
+    };
+  }
+
+  if (input.perception.kind === "memory_consolidation") {
+    return {
+      shouldDispatch: false,
+      reason: undefined,
+    };
+  }
+
+  if (
+    input.perception.kind === "visual_session_start" ||
+    input.perception.kind === "visual_session_end"
+  ) {
+    return {
+      shouldDispatch: true,
+      reason: "visual mode changed",
+    };
+  }
+
+  if (input.previousPersona.mindState.activeProcess !== input.nextPersona.mindState.activeProcess) {
+    return {
+      shouldDispatch: true,
+      reason: `process shifted to ${input.nextPersona.mindState.activeProcess}`,
+    };
+  }
+
+  if (
+    input.previousPersona.mindState.currentProcessInstanceId !==
+    input.nextPersona.mindState.currentProcessInstanceId
+  ) {
+    return {
+      shouldDispatch: true,
+      reason: "process instance changed",
+    };
+  }
+
+  const previousState = input.previousPersona.mindState.lastUserState;
+  const nextState = input.nextPersona.mindState.lastUserState;
+
+  if (didCrossThreshold(previousState?.boundaryPressure, nextState?.boundaryPressure, 0.62)) {
+    return {
+      shouldDispatch: true,
+      reason: "boundary pressure crossed a live threshold",
+    };
+  }
+
+  if (didCrossThreshold(previousState?.repairRisk, nextState?.repairRisk, 0.66)) {
+    return {
+      shouldDispatch: true,
+      reason: "repair risk became urgent",
+    };
+  }
+
+  if (didCrossThreshold(previousState?.frustration, nextState?.frustration, 0.68)) {
+    return {
+      shouldDispatch: true,
+      reason: "frustration became salient",
+    };
+  }
+
+  if (
+    input.previousPersona.mindState.memoryRegions.boundaryMemory.length !==
+    input.nextPersona.mindState.memoryRegions.boundaryMemory.length
+  ) {
+    return {
+      shouldDispatch: true,
+      reason: "boundary memory changed",
+    };
+  }
+
+  if (
+    input.previousPersona.mindState.openLoops.length !== input.nextPersona.mindState.openLoops.length
+  ) {
+    return {
+      shouldDispatch: true,
+      reason: "open loops changed",
+    };
+  }
+
+  if (countReadyInternalEvents(input.previousPersona) !== countReadyInternalEvents(input.nextPersona)) {
+    return {
+      shouldDispatch: true,
+      reason: "ready internal events changed",
+    };
+  }
+
+  if (
+    input.perception.kind === "screen_observation" ||
+    input.perception.kind === "camera_observation"
+  ) {
+    return {
+      shouldDispatch: true,
+      reason: "visual context updated",
+    };
+  }
+
+  return {
+    shouldDispatch: false,
+    reason: undefined,
+  };
+}
+
 function boundedArray<T>(items: T[], limit: number) {
   return items.slice(0, limit);
+}
+
+function memoryNote(
+  summary: string,
+  createdAt: string,
+  options?: {
+    sourceMessageId?: string;
+    sourceText?: string;
+    weight?: number;
+  },
+): MemoryNote {
+  return {
+    id: randomUUID(),
+    summary,
+    sourceMessageId: options?.sourceMessageId,
+    sourceText: options?.sourceText,
+    weight: options?.weight ?? 3,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function mergeMemoryNotes<T extends { summary: string; updatedAt: string; weight?: number }>(
+  existing: T[],
+  next: T[],
+  limit = 16,
+) {
+  const merged = [...existing];
+
+  for (const candidate of next) {
+    const duplicate = merged.find(
+      (note) => note.summary.toLowerCase() === candidate.summary.toLowerCase(),
+    );
+
+    if (duplicate) {
+      duplicate.updatedAt = candidate.updatedAt;
+      if (typeof candidate.weight === "number" && typeof duplicate.weight === "number") {
+        duplicate.weight = Math.min(5, Math.max(duplicate.weight, candidate.weight)) as T["weight"];
+      }
+      continue;
+    }
+
+    merged.unshift(candidate);
+  }
+
+  return merged.slice(0, limit);
 }
 
 function buildVisualContext(observations: PerceptionObservation[]) {
@@ -699,7 +915,9 @@ function toInternalScheduledEvents(input: {
   persona: Persona;
   perception: SoulPerception;
 }) {
-  const previous = input.persona.mindState.pendingInternalEvents;
+  const previous = input.persona.mindState.pendingInternalEvents.filter(
+    (event) => event.origin === "open_loop" || event.status !== "pending"
+  );
   const mapped = input.persona.mindState.scheduledPerceptions.map((scheduled) => ({
     id: `internal_${scheduled.id}`,
     dedupeKey: `${scheduled.kind}:${scheduled.source}:${scheduled.sourceId ?? scheduled.summary}`,
@@ -804,6 +1022,409 @@ function modelName() {
     process.env.OPENAI_MODEL?.trim() ||
     "mock"
   );
+}
+
+export async function executeFastMessageTurn(
+  input: ExecuteFastMessageTurnInput,
+): Promise<FastMessageTurnExecutionResult> {
+  const startedAt = Date.now();
+  const provider = providerName();
+  const model = modelName();
+  const perception: SoulPerception = {
+    ...input.perception,
+    id: input.perception.id ?? createPerceptionId(),
+    causationId: input.perception.causationId ?? latestMessageForRole(input.messages, "user")?.id,
+    correlationId:
+      input.perception.correlationId ??
+      input.perception.sessionId ??
+      input.perception.id ??
+      createPerceptionId(),
+    modality: input.perception.modality ?? (input.perception.channel === "live" ? "live_voice" : "text"),
+    createdAt: input.perception.createdAt ?? new Date().toISOString(),
+  };
+
+  const archetype = archetypeForPersona(input.persona);
+  const selectedArchetype = archetype?.id;
+  const personalityConstitution = applySoulArchetypeToConstitution(
+    input.persona.personalityConstitution,
+    archetype,
+  );
+  const seededRelationship = applySoulArchetypeToRelationship(
+    input.persona.relationshipModel,
+    archetype,
+  );
+  const seededPersona: Persona = {
+    ...input.persona,
+    personalityConstitution,
+    relationshipModel: seededRelationship,
+  };
+
+  const events: SoulEvent[] = [
+    {
+      id: createEventId(),
+      type: "perception_received",
+      perceptionId: perception.id,
+      channel: perception.channel,
+      sessionId: perception.sessionId,
+      summary: summarizePerception(perception),
+      memoryKeys: [],
+      fallback: false,
+      startedAt: perception.createdAt,
+      completedAt: perception.createdAt,
+      durationMs: 0,
+      metadata: {
+        path: "fast_message_path",
+      },
+    },
+  ];
+  const trace: SoulTraceEntry[] = [];
+
+  const [encodeStarted, encodeCompleted] = createStepLifecycleEvents({
+    stepId: "encode_perception",
+    process: seededPersona.mindState.activeProcess,
+    processInstanceId: seededPersona.mindState.currentProcessInstanceId,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Perception encoded for the fast message path",
+    inputSummary: summarizePerception(input.perception),
+    outputSummary: summarizePerception(perception),
+    createdAt: perception.createdAt,
+  });
+  events.push(encodeStarted, encodeCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "encode_perception",
+      process: seededPersona.mindState.activeProcess,
+      processInstanceId: seededPersona.mindState.currentProcessInstanceId,
+      eventId: encodeCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: summarizePerception(input.perception),
+      outputSummary: summarizePerception(perception),
+      createdAt: perception.createdAt,
+    }),
+  );
+
+  const fastTurn = await input.reasoning.respondToUserTurn({
+    persona: seededPersona,
+    messages: input.messages,
+    latestUserText: input.latestUserText,
+    feedbackNotes: input.feedbackNotes,
+    channel: input.replyChannel ?? "web",
+    createdAt: perception.createdAt,
+    visualContext: buildVisualContext(input.observations),
+    boundaryTriggered: input.boundaryTriggered,
+  });
+
+  const [appraiseStarted, appraiseCompleted] = createStepLifecycleEvents({
+    stepId: "appraise_user_state",
+    process: seededPersona.mindState.activeProcess,
+    processInstanceId: seededPersona.mindState.currentProcessInstanceId,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast-path user-state appraisal completed",
+    inputSummary: truncate(input.latestUserText || summarizePerception(perception), 160),
+    outputSummary: summarizeUserState(fastTurn.userState),
+    provider,
+    model,
+    createdAt: perception.createdAt,
+  });
+  events.push(appraiseStarted, appraiseCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "appraise_user_state",
+      process: seededPersona.mindState.activeProcess,
+      processInstanceId: seededPersona.mindState.currentProcessInstanceId,
+      eventId: appraiseCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: truncate(input.latestUserText || summarizePerception(perception), 160),
+      outputSummary: summarizeUserState(fastTurn.userState),
+      provider,
+      model,
+      createdAt: perception.createdAt,
+    }),
+  );
+
+  const updatedRelationshipModel = deriveRelationshipModel({
+    persona: seededPersona,
+    userState: fastTurn.userState,
+  });
+
+  const baseState = createInitialMindState({
+    persona: {
+      ...seededPersona,
+      relationshipModel: updatedRelationshipModel,
+      personalityConstitution,
+    },
+    messages: input.messages,
+    observations: input.observations,
+    latestUserState: fastTurn.userState,
+    boundaryTriggered: input.boundaryTriggered,
+  });
+
+  const selectedProcess = fastTurn.process || baseState.activeProcess;
+  const processTransition = processInstanceFor(
+    seededPersona,
+    selectedProcess,
+    perception,
+    seededPersona.mindState.activeProcess,
+  );
+
+  const [selectStarted, selectCompleted] = createStepLifecycleEvents({
+    stepId: "select_process",
+    process: selectedProcess,
+    processInstanceId: processTransition.currentProcessInstanceId,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast-path process selected",
+    inputSummary: summarizeUserState(fastTurn.userState),
+    outputSummary: `Process ${selectedProcess}`,
+    provider,
+    model,
+    createdAt: perception.createdAt,
+  });
+  events.push(selectStarted, selectCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "select_process",
+      process: selectedProcess,
+      processInstanceId: processTransition.currentProcessInstanceId,
+      eventId: selectCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: summarizeUserState(fastTurn.userState),
+      outputSummary: `Selected ${selectedProcess}.`,
+      provider,
+      model,
+      createdAt: perception.createdAt,
+    }),
+  );
+
+  const currentInstance = processTransition.processInstances[processTransition.currentProcessInstanceId!];
+  const updatedCurrentInstance: ProcessInstanceState = {
+    ...currentInstance,
+    localMemory: sanitizeProcessLocalMemory(fastTurn.updatedLocalMemory),
+    lastPerceptionId: perception.id,
+    updatedAt: perception.createdAt,
+  };
+  const processInstances = {
+    ...processTransition.processInstances,
+    [updatedCurrentInstance.id]: updatedCurrentInstance,
+  };
+
+  const [intentStarted, intentCompleted] = createStepLifecycleEvents({
+    stepId: "deliberate_intent",
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast-path intent deliberated",
+    inputSummary: `Process ${selectedProcess}`,
+    outputSummary: fastTurn.processIntent,
+    provider,
+    model,
+    createdAt: perception.createdAt,
+  });
+  events.push(intentStarted, intentCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "deliberate_intent",
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      eventId: intentCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: `Process ${selectedProcess}`,
+      outputSummary: fastTurn.processIntent,
+      provider,
+      model,
+      createdAt: perception.createdAt,
+      memoryDiffs: Object.keys(updatedCurrentInstance.localMemory),
+    }),
+  );
+
+  const [renderStarted, renderCompleted] = createStepLifecycleEvents({
+    stepId: "render_response",
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast message path rendered a visible reply",
+    inputSummary: fastTurn.processIntent,
+    outputSummary: truncate(fastTurn.replyText, 180),
+    provider,
+    model,
+    createdAt: perception.createdAt,
+  });
+  events.push(renderStarted, renderCompleted);
+  events.push({
+    id: createEventId(),
+    type: "response_dispatched",
+    perceptionId: perception.id,
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    channel: perception.channel,
+    sessionId: perception.sessionId,
+    summary: truncate(fastTurn.replyText, 180),
+    outputSummary: truncate(fastTurn.replyText, 180),
+    memoryKeys: [],
+    provider,
+    model,
+    fallback: false,
+    startedAt: perception.createdAt,
+    completedAt: perception.createdAt,
+    durationMs: 0,
+    metadata: {
+      path: "fast_message_path",
+    },
+  });
+  trace.push(
+    createStepTrace({
+      stepId: "render_response",
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      eventId: renderCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: fastTurn.processIntent,
+      outputSummary: truncate(fastTurn.replyText, 180),
+      provider,
+      model,
+      createdAt: perception.createdAt,
+    }),
+  );
+
+  const latestUserMessage = latestMessageForRole(input.messages, "user");
+  const processMemory = mergeMemoryNotes(
+    baseState.memoryRegions.processMemory,
+    [
+      memoryNote(`Fast-path intent (${selectedProcess}): ${fastTurn.processIntent}`, perception.createdAt, {
+        sourceMessageId: latestUserMessage?.id,
+        sourceText: input.latestUserText,
+        weight: 3,
+      }),
+    ],
+    12,
+  );
+
+  const soulMemoryUpdates = buildSoulMemoryUpdates({
+    persona: seededPersona,
+    userState: fastTurn.userState,
+    latestUserText: input.latestUserText,
+    perception,
+    selectedArchetype,
+  });
+
+  if (fastTurn.relationshipDelta) {
+    soulMemoryUpdates["relationship.fast_delta"] = {
+      kind: "relationship_note",
+      summary: fastTurn.relationshipDelta,
+      value: fastTurn.relationshipDelta,
+      weight: 2,
+      sourceIds: [perception.id ?? ""].filter(Boolean),
+      updatedAt: perception.createdAt,
+    };
+  }
+
+  const commitSummary = `Fast message path committed process ${selectedProcess} with ${Object.keys(updatedCurrentInstance.localMemory).length} local memory keys.`;
+  const [commitStarted, commitCompleted] = createStepLifecycleEvents({
+    stepId: "commit_trace",
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast message trace committed",
+    inputSummary: `${trace.length} fast-path traces`,
+    outputSummary: commitSummary,
+    createdAt: perception.createdAt,
+  });
+  events.push(commitStarted, commitCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "commit_trace",
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      eventId: commitCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: `${trace.length} fast-path traces`,
+      outputSummary: commitSummary,
+      createdAt: perception.createdAt,
+    }),
+  );
+
+  const finalPersona: Persona = {
+    ...seededPersona,
+    relationshipModel: updatedRelationshipModel,
+    mindState: {
+      ...seededPersona.mindState,
+      ...baseState,
+      activeProcess: selectedProcess,
+      currentProcessInstanceId: updatedCurrentInstance.id,
+      currentDrive: fastTurn.currentDrive || baseState.currentDrive,
+      processInstances,
+      soulMemory: mergeSoulMemory(seededPersona.mindState.soulMemory, soulMemoryUpdates),
+      learningState: seededPersona.mindState.learningState,
+      pendingInternalEvents: seededPersona.mindState.pendingInternalEvents,
+      pendingShadowTurns: seededPersona.mindState.pendingShadowTurns,
+      lastUserState: fastTurn.userState,
+      recentUserStates: [fastTurn.userState, ...seededPersona.mindState.recentUserStates].slice(0, 12),
+      memoryRegions: {
+        ...baseState.memoryRegions,
+        episodicMemory: seededPersona.mindState.memoryRegions.episodicMemory,
+        repairMemory: seededPersona.mindState.memoryRegions.repairMemory,
+        learnedUserNotes: seededPersona.mindState.memoryRegions.learnedUserNotes,
+        learnedRelationshipNotes: seededPersona.mindState.memoryRegions.learnedRelationshipNotes,
+        processMemory,
+      },
+      recentEvents: boundedArray([...events, ...seededPersona.mindState.recentEvents], 80),
+      traceHead: boundedArray([...trace, ...seededPersona.mindState.traceHead], 40),
+      contextVersion: seededPersona.mindState.contextVersion + 1,
+      traceVersion: seededPersona.mindState.traceVersion + trace.length,
+      processState: {
+        ...baseState.processState,
+        process_instance_id: updatedCurrentInstance.id,
+        process_intent: fastTurn.processIntent,
+        current_drive: fastTurn.currentDrive || baseState.currentDrive,
+        fast_turn_path: "true",
+        ...(fastTurn.relationshipDelta ? { relationship_delta: fastTurn.relationshipDelta } : {}),
+      },
+    },
+  };
+
+  soulLogger.debug(
+    {
+      personaId: finalPersona.id,
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      perceptionId: perception.id,
+      correlationId: perception.correlationId,
+      archetype: selectedArchetype,
+      durationMs: Date.now() - startedAt,
+      path: "fast_message_path",
+    },
+    "fast message turn executed",
+  );
+
+  return {
+    perception,
+    persona: finalPersona,
+    userState: fastTurn.userState,
+    replyText: fastTurn.replyText,
+    process: selectedProcess,
+    processIntent: fastTurn.processIntent,
+    trace,
+    events,
+    contextDelta: `Fast message path replied through ${selectedProcess}.`,
+    selectedArchetype,
+  };
 }
 
 export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<TurnExecutionResult> {
@@ -1175,7 +1796,29 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
       feedbackNotes: input.feedbackNotes,
       channel: input.replyChannel ?? "web",
     });
+  }
 
+  const fallbackLearningArtifacts = buildLearningArtifacts({
+    persona: preLearnPersona,
+    userState: appraisedUserState,
+    perception,
+    latestUserText,
+    feedbackNotes: input.feedbackNotes,
+    messages: input.messages,
+    process: preLearnPersona.mindState.activeProcess,
+  });
+  
+  const rawProviderArtifacts = await input.reasoning.extractLearningArtifacts({
+    persona: preLearnPersona,
+    userState: appraisedUserState,
+    perception,
+    feedbackNotes: input.feedbackNotes,
+    messages: input.messages,
+    process: preLearnPersona.mindState.activeProcess,
+    replyText,
+  });
+
+  if (replyText) {
     const [renderStarted, renderCompleted] = createStepLifecycleEvents({
       stepId: "render_response",
       process: preLearnPersona.mindState.activeProcess,
@@ -1225,24 +1868,8 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     );
   }
 
-  const fallbackLearningArtifacts = buildLearningArtifacts({
-    persona: preLearnPersona,
-    userState: appraisedUserState,
-    perception,
-    latestUserText,
-    feedbackNotes: input.feedbackNotes,
-    messages: input.messages,
-    process: preLearnPersona.mindState.activeProcess,
-  });
   const learningArtifacts = normalizeLearningArtifactsForEngine({
-    providerArtifacts: await input.reasoning.extractLearningArtifacts({
-      persona: preLearnPersona,
-      userState: appraisedUserState,
-      perception,
-      feedbackNotes: input.feedbackNotes,
-      messages: input.messages,
-      process: preLearnPersona.mindState.activeProcess,
-    }),
+    providerArtifacts: rawProviderArtifacts,
     fallbackArtifacts: fallbackLearningArtifacts,
   });
   events.push(
@@ -1395,8 +2022,9 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     }),
   );
 
-  const committedPersona: Persona = {
+  const finalPersona: Persona = {
     ...withLearningPersona,
+    relationshipModel: updatedRelationshipModel,
     mindState: {
       ...withLearningPersona.mindState,
       pendingInternalEvents,
@@ -1405,11 +2033,45 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
       traceHead: boundedArray([...trace, ...withLearningPersona.mindState.traceHead], 40),
       contextVersion: withLearningPersona.mindState.contextVersion + 1,
       traceVersion: withLearningPersona.mindState.traceVersion + trace.length,
+      processState: {
+        ...withLearningPersona.mindState.processState,
+        process_instance_id: currentInstance.id,
+        trace_version: String(withLearningPersona.mindState.traceVersion + trace.length),
+      },
+    },
+  };
+
+  const liveDeliveryDecision = determineLiveDeliveryDecision({
+    previousPersona: input.persona,
+    nextPersona: finalPersona,
+    perception,
+  });
+
+  const deliverablePersona: Persona = {
+    ...finalPersona,
+    mindState: {
+      ...finalPersona.mindState,
+      liveDeliveryVersion: liveDeliveryDecision.shouldDispatch
+        ? finalPersona.mindState.liveDeliveryVersion + 1
+        : finalPersona.mindState.liveDeliveryVersion,
+      lastLiveDeliveryReason:
+        liveDeliveryDecision.reason ?? finalPersona.mindState.lastLiveDeliveryReason,
+      processState: {
+        ...finalPersona.mindState.processState,
+        live_delivery_version: String(
+          liveDeliveryDecision.shouldDispatch
+            ? finalPersona.mindState.liveDeliveryVersion + 1
+            : finalPersona.mindState.liveDeliveryVersion,
+        ),
+        ...(liveDeliveryDecision.reason
+          ? { last_live_delivery_reason: liveDeliveryDecision.reason }
+          : {}),
+      },
     },
   };
 
   const sessionFrame = buildSoulHarness({
-    persona: committedPersona,
+    persona: deliverablePersona,
     messages: input.messages,
     feedbackNotes: input.feedbackNotes,
     perception: {
@@ -1420,29 +2082,18 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
 
   const contextDelta = replyText
     ? `Latest rendered response intent: ${truncate(replyText, 180)}`
-    : `Updated process: ${committedPersona.mindState.activeProcess}. Drive: ${committedPersona.mindState.currentDrive}.`;
-
-  const finalPersona: Persona = {
-    ...committedPersona,
-    relationshipModel: updatedRelationshipModel,
-    mindState: {
-      ...committedPersona.mindState,
-      processState: {
-        ...committedPersona.mindState.processState,
-        process_instance_id: currentInstance.id,
-        trace_version: String(committedPersona.mindState.traceVersion),
-      },
-    },
-  };
+    : `Updated process: ${deliverablePersona.mindState.activeProcess}. Drive: ${deliverablePersona.mindState.currentDrive}.`;
 
   soulLogger.debug(
     {
-      personaId: finalPersona.id,
-      process: finalPersona.mindState.activeProcess,
-      processInstanceId: finalPersona.mindState.currentProcessInstanceId,
+      personaId: deliverablePersona.id,
+      process: deliverablePersona.mindState.activeProcess,
+      processInstanceId: deliverablePersona.mindState.currentProcessInstanceId,
       perceptionId: perception.id,
       correlationId: perception.correlationId,
       archetype: selectedArchetype,
+      liveDelivery: liveDeliveryDecision.shouldDispatch,
+      liveDeliveryReason: liveDeliveryDecision.reason,
       durationMs: Date.now() - startedAt,
     },
     "soul turn executed",
@@ -1450,14 +2101,16 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
 
   return {
     perception,
-    persona: finalPersona,
+    persona: deliverablePersona,
     userState: appraisedUserState,
     replyText,
     sessionFrame: {
       ...sessionFrame,
       processInstanceId: currentInstance.id,
-      traceVersion: finalPersona.mindState.traceVersion,
-      contextVersion: finalPersona.mindState.contextVersion,
+      traceVersion: deliverablePersona.mindState.traceVersion,
+      contextVersion: deliverablePersona.mindState.contextVersion,
+      liveDeliveryVersion: deliverablePersona.mindState.liveDeliveryVersion,
+      deliveryReason: liveDeliveryDecision.reason,
       contextDelta,
     },
     trace,

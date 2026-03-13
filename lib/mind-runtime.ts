@@ -327,7 +327,7 @@ function maybeCreateLoops(text: string, sourceMessageId: string, createdAt: stri
   return openLoopTemplates
     .filter((template) => template.match.test(text))
     .map((template) => ({
-      id: randomUUID(),
+      id: sourceMessageId ? `loop-${sourceMessageId}-${template.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : randomUUID(),
       title: template.title,
       summary: template.summary,
       followUpPrompt: template.followUpPrompt,
@@ -1498,6 +1498,8 @@ function buildStateFromMessages(input: {
     emotionalBaseline,
     recentTrend,
     contextVersion: 1,
+    liveDeliveryVersion: 1,
+    lastLiveDeliveryReason: "session bootstrap",
     traceVersion: 1,
     processState: {
       last_process: activeProcess,

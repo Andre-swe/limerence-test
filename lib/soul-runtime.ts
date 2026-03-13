@@ -2,6 +2,7 @@ import { getReadyOpenLoop } from "@/lib/mind-runtime";
 import { getReadyScheduledPerceptions, getSoulProcessDefinition } from "@/lib/soul-kernel";
 import { buildSoulHarness, type SoulMemory } from "@/lib/soul-harness";
 import type { HeartbeatDecision, MessageEntry, MindProcess, Persona, SoulPerception, UserStateSnapshot } from "@/lib/types";
+import { truncate } from "@/lib/utils";
 
 export type SoulConversationProcess = MindProcess;
 
@@ -40,6 +41,13 @@ export type SoulIntentPlan = {
 
 export type SoulLearningPlan = {
   process: MindProcess;
+  memories: SoulMemory[];
+  systemInstruction: string;
+  userPrompt: string;
+  stylePrompt: string;
+};
+
+export type SoulFastTurnPlan = {
   memories: SoulMemory[];
   systemInstruction: string;
   userPrompt: string;
@@ -523,6 +531,99 @@ export function renderIntentPrompt(plan: SoulIntentPlan) {
   return `${plan.systemInstruction}\n\n${renderMemories(plan.memories)}\n\n${plan.userPrompt}\n\n${plan.stylePrompt}`;
 }
 
+export function planFastTurnResponse(input: {
+  persona: Persona;
+  messages: MessageEntry[];
+  feedbackNotes: string[];
+  latestUserText: string;
+  channel: "web" | "telegram";
+  visualContext?: Array<{
+    summary: string;
+    situationalSignals: string[];
+    environmentPressure: number;
+    taskContext?: string;
+    attentionTarget?: string;
+  }>;
+}): SoulFastTurnPlan {
+  const memories = baseMemories(input.persona, input.messages, input.feedbackNotes);
+  const recentArc = input.messages
+    .slice(-6)
+    .map((message) => `${message.role}:${truncate(message.body, 140)}`)
+    .join(" | ");
+  const visualContext =
+    input.visualContext && input.visualContext.length > 0
+      ? input.visualContext
+          .map((item) => {
+            const signals =
+              item.situationalSignals.length > 0
+                ? ` Signals: ${item.situationalSignals.join(", ")}.`
+                : "";
+            const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
+            const target = item.attentionTarget ? ` Attention target: ${item.attentionTarget}.` : "";
+            return `${item.summary}.${signals}${task}${target}`.trim();
+          })
+          .join(" | ")
+      : "none";
+  const processCatalog = [
+    "arrival",
+    "attunement",
+    "comfort",
+    "celebration",
+    "play",
+    "memory_recall",
+    "repair",
+    "boundary_negotiation",
+    "follow_through",
+    "silence_holding",
+    "grief_presence",
+    "practical_guidance",
+    "reengagement",
+    "protective_check_in",
+  ]
+    .map((process) => `${process}: ${getSoulProcessDefinition(process as MindProcess).summary}`)
+    .join(" | ");
+
+  return {
+    memories,
+    systemInstruction: [
+      "You are the immediate visible-response planner for the persona.",
+      "In one pass, infer the user's current emotional state, choose the most fitting process, decide the persona's intent, and write the actual reply.",
+      "Return ONLY strict JSON with these keys:",
+      "- replyText",
+      "- userState",
+      "- process",
+      "- processIntent",
+      "- currentDrive",
+      "- updatedLocalMemory",
+      "- relationshipDelta (optional)",
+      "The userState object must include:",
+      "id, modality, topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, visualContextSummary, situationalSignals, environmentPressure, taskContext, attentionTarget, summary, evidence, confidence, provenance, createdAt.",
+      "All numeric userState fields must be between 0 and 1.",
+      "process must be one of:",
+      processCatalog,
+      "updatedLocalMemory must stay flat: only string, number, or boolean values.",
+      "Reply naturally as the remembered person, not as an assistant, and keep the reply concise.",
+    ].join(" "),
+    userPrompt: [
+      `Channel: ${input.channel}`,
+      `Latest user message: "${input.latestUserText}"`,
+      `Recent arc: ${recentArc || "none"}`,
+      `Visual context: ${visualContext}`,
+    ].join("\n"),
+    stylePrompt: joins([
+      styleFingerprint(input.persona),
+      input.feedbackNotes.length > 0
+        ? `Recent correction notes: ${input.feedbackNotes.slice(-3).join(" | ")}`
+        : undefined,
+      "Respond now; leave slower reflection and durable learning for later.",
+    ]),
+  };
+}
+
+export function renderFastTurnPrompt(plan: SoulFastTurnPlan) {
+  return `${plan.systemInstruction}\n\n${renderMemories(plan.memories)}\n\n${plan.userPrompt}\n\n${plan.stylePrompt}`;
+}
+
 export function planLearningExtraction(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -530,8 +631,10 @@ export function planLearningExtraction(input: {
   process: MindProcess;
   perception: SoulPerception;
   feedbackNotes: string[];
+  replyText?: string;
 }): SoulLearningPlan {
   const memories = baseMemories(input.persona, input.messages, input.feedbackNotes);
+  const renderedReply = input.replyText?.trim();
   
   return {
     process: input.process,
@@ -545,7 +648,13 @@ export function planLearningExtraction(input: {
       "- effectSummary: (optional) Any specific effect this should have later.",
       "- memoryKeys: an array of strings like 'user.notes' where this might belong."
     ].join(" "),
-    userPrompt: `Extract up to 5 critical learning artifacts from the most recent shift in conversation.`,
+    userPrompt: [
+      "Extract up to 5 critical learning artifacts from the most recent shift in conversation.",
+      renderedReply ? `The rendered response was: "${renderedReply}"` : undefined,
+      "Use the rendered response when deciding what this turn taught the soul about the user, the relationship, and its own consistency.",
+    ]
+      .filter(Boolean)
+      .join(" "),
     stylePrompt: "Focus exclusively on relational truth and personality coherence.",
   };
 }

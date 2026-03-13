@@ -363,6 +363,9 @@ export function ConversationPanel({
         setLiveState("listening");
       }}
       onClose={(event) => {
+        const closingSessionId = sessionId;
+        const closingMode = activeMode;
+        const endedByUser = userEndedLiveRef.current;
         if (!userEndedLiveRef.current) {
           const reason = event.reason?.trim();
           const message =
@@ -371,6 +374,19 @@ export function ConversationPanel({
               ? `The live session ended unexpectedly (${event.code}).`
               : "The live session ended unexpectedly.");
           setLiveError(message);
+        }
+        if (closingSessionId && !endedByUser) {
+          void fetch(`/api/personas/${personaId}/live/end`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sessionId: closingSessionId,
+              mode: closingMode,
+              reason: "disconnect",
+            }),
+          }).catch(() => undefined);
         }
         setLiveState("idle");
         setSessionContextText("");
@@ -515,30 +531,25 @@ function ConversationPanelInner({
       return;
     }
 
-    const nextContext = pendingSessionFrame.contextText;
-    if (
-      pendingSessionFrame.contextVersion <= sessionContextVersion &&
-      nextContext === sessionContextText
-    ) {
+    if (pendingSessionFrame.liveDeliveryVersion <= sessionContextVersion) {
       setPendingSessionFrame(null);
       return;
     }
 
     sendSessionSettings({
       context: {
-        text: nextContext,
+        text: pendingSessionFrame.contextText,
         type: "persistent",
       },
       systemPrompt: pendingSessionFrame.systemPrompt,
       variables: pendingSessionFrame.variables,
     });
-    setSessionContextText(nextContext);
-    setSessionContextVersion(pendingSessionFrame.contextVersion);
+    setSessionContextText(pendingSessionFrame.contextText);
+    setSessionContextVersion(pendingSessionFrame.liveDeliveryVersion);
     setPendingSessionFrame(null);
   }, [
     pendingSessionFrame,
     sendSessionSettings,
-    sessionContextText,
     sessionContextVersion,
     setPendingSessionFrame,
     setSessionContextText,
@@ -849,7 +860,7 @@ function ConversationPanelInner({
       setActiveMode(preparedVisualStream && session.mode !== "voice" ? session.mode : "voice");
       setSessionId(session.sessionSettings.customSessionId);
       setSessionContextText(session.sessionSettings.context?.text ?? "");
-      setSessionContextVersion(session.soulFrame.contextVersion);
+      setSessionContextVersion(session.soulFrame.liveDeliveryVersion);
 
       await connect({
         auth: {
@@ -885,6 +896,19 @@ function ConversationPanelInner({
     setLiveError(null);
     userEndedLiveRef.current = true;
     await stopVisualSharing(true);
+    if (sessionId) {
+      await fetch(`/api/personas/${personaId}/live/end`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId,
+          mode: activeMode,
+          reason: "user_end",
+        }),
+      }).catch(() => undefined);
+    }
     await disconnect().catch((error) => {
       userEndedLiveRef.current = false;
       setLiveError(resolveErrorMessage(error));

@@ -247,6 +247,16 @@ export const userStateSnapshotSchema = z.object({
   createdAt: z.string(),
 });
 
+export const fastTurnResultSchema = z.object({
+  replyText: z.string().trim().min(1).max(2400),
+  userState: userStateSnapshotSchema,
+  process: soulProcessSchema,
+  processIntent: z.string().trim().min(1).max(280),
+  currentDrive: z.string().trim().min(1).max(280),
+  updatedLocalMemory: scalarLocalMemorySchema.default({}),
+  relationshipDelta: z.string().trim().min(1).max(280).optional(),
+});
+
 export const soulPerceptionSchema = z.object({
   id: z.string().optional(),
   causationId: z.string().optional(),
@@ -463,6 +473,8 @@ export const soulStateSchema = z.object({
   emotionalBaseline: z.string(),
   recentTrend: z.string(),
   contextVersion: z.number().min(1).default(1),
+  liveDeliveryVersion: z.number().min(1).default(1),
+  lastLiveDeliveryReason: z.string().optional(),
   traceVersion: z.number().min(1).default(1),
   processState: z.record(z.string(), z.string()).default({}),
   processInstances: z.record(z.string(), processInstanceStateSchema).default({}),
@@ -509,7 +521,9 @@ export const soulSessionFrameSchema = z.object({
   currentDrive: z.string(),
   traceVersion: z.number().min(1).default(1),
   contextVersion: z.number().min(1).default(1),
+  liveDeliveryVersion: z.number().min(1).default(1),
   contextDelta: z.string().optional(),
+  deliveryReason: z.string().optional(),
   readyEvents: z.array(z.string()).default([]),
 });
 
@@ -701,6 +715,7 @@ export type WorkingMemory = z.infer<typeof workingMemorySchema>;
 export type PersonalityConstitution = z.infer<typeof personalityConstitutionSchema>;
 export type RelationshipModel = z.infer<typeof relationshipModelSchema>;
 export type UserStateSnapshot = z.infer<typeof userStateSnapshotSchema>;
+export type FastTurnResult = z.infer<typeof fastTurnResultSchema>;
 export type SoulPerception = z.infer<typeof soulPerceptionSchema>;
 export type ScheduledPerception = z.infer<typeof scheduledPerceptionSchema>;
 export type MemoryNote = z.infer<typeof memoryNoteSchema>;

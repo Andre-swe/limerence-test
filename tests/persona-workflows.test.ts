@@ -14,6 +14,7 @@ import {
   createPersonaFromForm,
   executeQueuedShadowTurn,
   executeSoulInternalEvent,
+  finalizeLiveSession,
   getLiveContextUpdate,
   observeLiveVisualPerception,
   processTelegramWebhook,
@@ -198,6 +199,43 @@ describe("persona workflows", () => {
     expect(result.appended[1].role).toBe("assistant");
   });
 
+  it("queues assistant reflection as a shadow turn instead of blocking the web reply", async () => {
+    const previousInngestKey = process.env.INNGEST_EVENT_KEY;
+    process.env.INNGEST_EVENT_KEY = "test-inngest-key";
+    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue({ ids: ["mock-id"] });
+
+    try {
+      await withoutReasoningProviders(async () => {
+        const result = await sendPersonaMessage("persona-mom", {
+          text: "hello there",
+          channel: "web",
+        });
+
+        const persona = await getPersona("persona-mom");
+        const assistantShadowTurn = persona?.mindState.pendingShadowTurns.find(
+          (job) =>
+            job.perception.kind === "assistant_message" &&
+            job.perception.metadata?.messageId === result.appended[1].id,
+        );
+
+        expect(assistantShadowTurn?.status).toBe("pending");
+
+        const events = sendSpy.mock.calls.flatMap(([payload]) =>
+          Array.isArray(payload) ? payload : [payload],
+        );
+
+        expect(events.some((event) => event.name === "soul/shadow-turn")).toBe(true);
+      });
+    } finally {
+      sendSpy.mockRestore();
+      if (previousInngestKey === undefined) {
+        delete process.env.INNGEST_EVENT_KEY;
+      } else {
+        process.env.INNGEST_EVENT_KEY = previousInngestKey;
+      }
+    }
+  });
+
   it("learns work-hour boundaries from natural language", async () => {
     const result = await sendPersonaMessage("persona-mom", {
       text: "don't text me while I'm at work.",
@@ -248,7 +286,7 @@ describe("persona workflows", () => {
     expect(persona?.heartbeatPolicy.workHoursEnabled).toBe(true);
     expect(result.contextualUpdate).toContain("boundary");
     expect(messages.at(-1)?.channel).toBe("live");
-    expect(result.sessionFrame.readyEvents.length).toBeGreaterThanOrEqual(0);
+    expect(result.sessionFrame?.readyEvents.length ?? 0).toBeGreaterThanOrEqual(0);
   });
 
   it("stores structured user state for live voice turns from prosody hints", async () => {
@@ -274,7 +312,7 @@ describe("persona workflows", () => {
   it("publishes shadow-turn jobs to inngest for live transcripts and visual observations", async () => {
     const previousInngestKey = process.env.INNGEST_EVENT_KEY;
     process.env.INNGEST_EVENT_KEY = "test-inngest-key";
-    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue({ ids: ["mock-id"] });
 
     try {
       await withoutReasoningProviders(async () => {
@@ -315,7 +353,7 @@ describe("persona workflows", () => {
   it("keeps live context polling read-only when inngest execution is enabled", async () => {
     const previousInngestKey = process.env.INNGEST_EVENT_KEY;
     process.env.INNGEST_EVENT_KEY = "test-inngest-key";
-    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue(undefined);
+    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue({ ids: ["mock-id"] });
 
     try {
       await withoutReasoningProviders(async () => {
@@ -335,7 +373,7 @@ describe("persona workflows", () => {
 
         const context = await getLiveContextUpdate("persona-mom", {
           sessionId: "live-inngest-2",
-          afterVersion: result.sessionFrame.contextVersion,
+          afterVersion: result.sessionFrame?.liveDeliveryVersion ?? 0,
         });
         const afterContextPersona = await getPersona("persona-mom");
         const afterContextJob = afterContextPersona?.mindState.pendingShadowTurns.find(
@@ -357,7 +395,7 @@ describe("persona workflows", () => {
 
   it("executes queued shadow turns through the shared background executor", async () => {
     await withoutReasoningProviders(async () => {
-      const result = await appendLiveTranscriptTurn("persona-mom", {
+      await appendLiveTranscriptTurn("persona-mom", {
         role: "user",
         body: "please hold onto this thought.",
         eventId: "evt-shadow-exec-1",
@@ -380,7 +418,7 @@ describe("persona workflows", () => {
       expect(execution.handled).toBe(true);
       expect(processedJob?.status).toBe("completed");
       expect(processedPersona?.mindState.contextVersion).toBeGreaterThan(
-        result.sessionFrame.contextVersion,
+        queuedPersona!.mindState.contextVersion,
       );
     });
   });
@@ -407,7 +445,7 @@ describe("persona workflows", () => {
 
         const context = await getLiveContextUpdate("persona-mom", {
           sessionId: "live-poll-fallback-1",
-          afterVersion: result.sessionFrame.contextVersion,
+          afterVersion: result.sessionFrame?.liveDeliveryVersion ?? 0,
         });
         const processedPersona = await getPersona("persona-mom");
         const processedJob = processedPersona?.mindState.pendingShadowTurns.find(
@@ -424,6 +462,77 @@ describe("persona workflows", () => {
         process.env.INNGEST_EVENT_KEY = previousInngestKey;
       }
     }
+  });
+
+  it("does not ship a live context update for every ordinary live turn", async () => {
+    await withoutReasoningProviders(async () => {
+      // First live turn will shift process from arrival to attunement, triggering delivery
+      await appendLiveTranscriptTurn("persona-mom", {
+        role: "user",
+        body: "hello.",
+        eventId: "evt-ordinary-live-0",
+        sessionId: "live-ordinary-1",
+      });
+
+      const result = await appendLiveTranscriptTurn("persona-mom", {
+        role: "user",
+        body: "go ahead.",
+        eventId: "evt-ordinary-live-1",
+        sessionId: "live-ordinary-1",
+      });
+
+      expect(result.sessionFrame).toBeUndefined();
+
+      const queuedPersona = await getPersona("persona-mom");
+      const queuedJob = queuedPersona?.mindState.pendingShadowTurns.find(
+        (job) => job.sessionId === "live-ordinary-1" && job.perception.causationId === result.message.id,
+      );
+      expect(queuedJob?.status).toBe("pending");
+
+      await executeQueuedShadowTurn("persona-mom", queuedJob!.id);
+      const context = await getLiveContextUpdate("persona-mom", {
+        sessionId: "live-ordinary-1",
+        afterVersion: queuedPersona!.mindState.liveDeliveryVersion,
+      });
+
+      expect(context.sessionFrame).toBeUndefined();
+    });
+  });
+
+  it("ships a live context update immediately when a live boundary is set", async () => {
+    await withoutReasoningProviders(async () => {
+      const before = await getPersona("persona-mom");
+      const result = await appendLiveTranscriptTurn("persona-mom", {
+        role: "user",
+        body: "don't text me while i'm at work.",
+        eventId: "evt-live-boundary-1",
+        sessionId: "live-boundary-1",
+      });
+
+      expect(result.sessionFrame?.liveDeliveryVersion).toBeGreaterThan(
+        before!.mindState.liveDeliveryVersion,
+      );
+      expect(result.sessionFrame?.deliveryReason?.toLowerCase()).toContain("boundary");
+    });
+  });
+
+  it("queues a post-call consolidation turn when the live session ends", async () => {
+    await withoutReasoningProviders(async () => {
+      const result = await finalizeLiveSession("persona-mom", {
+        sessionId: "live-ended-1",
+        mode: "voice",
+        reason: "user_end",
+      });
+
+      expect(result.queued).toBe(true);
+
+      const persona = await getPersona("persona-mom");
+      const queuedJob = persona?.mindState.pendingShadowTurns.find((job) => job.id === result.jobId);
+
+      expect(queuedJob?.perception.kind).toBe("memory_consolidation");
+      expect(queuedJob?.sessionId).toBe("live-ended-1");
+      expect(queuedJob?.status).toBe("pending");
+    });
   });
 
   it("queues internal scheduled events for follow-through and reengagement", async () => {
@@ -541,7 +650,7 @@ describe("persona workflows", () => {
       expect(afterMessages).toHaveLength(beforeMessages.length);
       expect(result.observation.kind).toBe("screen_observation");
       expect(observations.at(-1)?.sessionId).toBe("live-screen-1");
-      expect(result.sessionFrame.contextText.length).toBeGreaterThan(0);
+      expect(result.sessionFrame!.contextText.length).toBeGreaterThan(0);
       expect(persona?.mindState.lastUserState?.modality).toBe("multimodal");
     });
   });
@@ -629,6 +738,7 @@ describe("persona workflows", () => {
       createdAt: "2026-03-12T12:00:00.000Z",
       audioStatus: "unavailable" as const,
       userState,
+      attachments: [],
       delivery: {
         webInbox: true,
         telegramStatus: "not_requested" as const,
