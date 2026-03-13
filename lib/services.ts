@@ -730,18 +730,23 @@ export async function executeQueuedShadowTurn(personaId: string, jobId: string) 
 }
 
 async function applyFastLiveUserState(personaId: string, userState: UserStateSnapshot) {
-  return updatePersona(personaId, (persona) => ({
-    ...persona,
-    updatedAt: userState.createdAt,
-    lastActiveAt: userState.createdAt,
-    mindState: {
-      ...persona.mindState,
-      lastUserState: userState,
-      recentUserStates: [userState, ...persona.mindState.recentUserStates].slice(0, 12),
-      recentShift: userState.summary,
-      contextVersion: persona.mindState.contextVersion + 1,
-    },
-  }));
+  return updatePersona(personaId, (persona) => {
+    // Smooth the incoming heuristic state against the previous snapshot to
+    // dampen noisy per-turn jitter while preserving directional momentum.
+    const smoothed = reduceLiveUserState(persona.mindState.lastUserState, userState);
+    return {
+      ...persona,
+      updatedAt: userState.createdAt,
+      lastActiveAt: userState.createdAt,
+      mindState: {
+        ...persona.mindState,
+        lastUserState: smoothed,
+        recentUserStates: [smoothed, ...persona.mindState.recentUserStates].slice(0, 12),
+        recentShift: userState.summary,
+        contextVersion: persona.mindState.contextVersion + 1,
+      },
+    };
+  });
 }
 
 async function bumpLiveDelivery(personaId: string, reason: string) {
@@ -759,6 +764,314 @@ async function bumpLiveDelivery(personaId: string, reason: string) {
       },
     },
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Live state-transition reducer
+// ---------------------------------------------------------------------------
+// Instead of raw threshold crossings, we reduce the incoming heuristic user
+// state against the previous snapshot using exponential smoothing + momentum.
+// A transition is "meaningful" only when the smoothed delta exceeds a channel-
+// specific salience threshold — this filters noisy per-turn jitter while still
+// catching genuine emotional shifts promptly.
+
+type SmoothedDelta = {
+  field: string;
+  previous: number;
+  next: number;
+  smoothed: number;
+  delta: number;
+};
+
+const LIVE_STATE_ALPHA = 0.35; // EMA smoothing — lower = more inertia
+
+/** Scalar fields on UserStateSnapshot that carry live-transition signal. */
+const REDUCIBLE_FIELDS: Array<keyof UserStateSnapshot> = [
+  "valence",
+  "arousal",
+  "activation",
+  "vulnerability",
+  "desireForCloseness",
+  "desireForSpace",
+  "repairRisk",
+  "boundaryPressure",
+  "taskFocus",
+  "griefLoad",
+  "frustration",
+  "environmentPressure",
+];
+
+/**
+ * Produce a smoothed user state snapshot by blending `candidate` toward
+ * `previous` using exponential moving average. This dampens per-turn jitter
+ * while preserving momentum when a score moves consistently in one direction.
+ */
+export function reduceLiveUserState(
+  previous: UserStateSnapshot | undefined,
+  candidate: UserStateSnapshot,
+  alpha = LIVE_STATE_ALPHA,
+): UserStateSnapshot {
+  if (!previous) return candidate;
+
+  const reduced = { ...candidate };
+  for (const field of REDUCIBLE_FIELDS) {
+    const p = previous[field];
+    const n = candidate[field];
+    if (typeof p === "number" && typeof n === "number") {
+      (reduced as Record<string, unknown>)[field] = p + alpha * (n - p);
+    }
+  }
+  return reduced;
+}
+
+/** Fields we track for live transition detection, with their salience bar. */
+const TRANSITION_CHANNELS: Array<{
+  field: keyof UserStateSnapshot;
+  threshold: number;
+  /** Lower threshold used during high-sensitivity processes. */
+  sensitiveThreshold: number;
+  reason: string;
+}> = [
+  { field: "boundaryPressure", threshold: 0.12, sensitiveThreshold: 0.08, reason: "boundary_activated" },
+  { field: "repairRisk", threshold: 0.10, sensitiveThreshold: 0.06, reason: "repair_risk_crossed" },
+  { field: "frustration", threshold: 0.12, sensitiveThreshold: 0.08, reason: "frustration_became_salient" },
+  { field: "griefLoad", threshold: 0.12, sensitiveThreshold: 0.07, reason: "grief_intensified" },
+  { field: "vulnerability", threshold: 0.14, sensitiveThreshold: 0.09, reason: "vulnerability_surfaced" },
+  { field: "valence", threshold: 0.15, sensitiveThreshold: 0.10, reason: "valence_shifted" },
+  { field: "arousal", threshold: 0.15, sensitiveThreshold: 0.10, reason: "arousal_changed" },
+];
+
+/** Processes where we use lower thresholds to catch subtler shifts. */
+const HIGH_SENSITIVITY_PROCESSES = new Set([
+  "repair",
+  "boundary_negotiation",
+  "grief_presence",
+  "protective_check_in",
+]);
+
+export type LiveTransition = {
+  meaningful: boolean;
+  reason: string | undefined;
+  deltas: SmoothedDelta[];
+};
+
+/**
+ * Detect whether the transition between two user state snapshots is
+ * meaningful enough to warrant a mid-call shadow cognition turn.
+ *
+ * Process-aware: during high-sensitivity processes (repair, grief_presence,
+ * boundary_negotiation, protective_check_in) salience thresholds are lowered
+ * to catch subtler shifts that matter in those contexts.
+ */
+export function detectMeaningfulTransition(
+  previous: UserStateSnapshot | undefined,
+  next: UserStateSnapshot | undefined,
+  currentProcess?: string,
+): LiveTransition {
+  if (!previous || !next) {
+    return { meaningful: true, reason: "no_prior_state", deltas: [] };
+  }
+
+  const sensitive = currentProcess ? HIGH_SENSITIVITY_PROCESSES.has(currentProcess) : false;
+  const deltas: SmoothedDelta[] = [];
+  let topReason: string | undefined;
+  let topDelta = 0;
+
+  for (const channel of TRANSITION_CHANNELS) {
+    const p = previous[channel.field] as number | undefined;
+    const n = next[channel.field] as number | undefined;
+    const pVal = p ?? 0.5;
+    const nVal = n ?? 0.5;
+    const smoothed = pVal + LIVE_STATE_ALPHA * (nVal - pVal);
+    const delta = Math.abs(smoothed - pVal);
+    deltas.push({ field: channel.field, previous: pVal, next: nVal, smoothed, delta });
+
+    const bar = sensitive ? channel.sensitiveThreshold : channel.threshold;
+    if (delta >= bar && delta > topDelta) {
+      topDelta = delta;
+      topReason = channel.reason;
+    }
+  }
+
+  return {
+    meaningful: topReason !== undefined,
+    reason: topReason,
+    deltas,
+  };
+}
+
+/**
+ * Adaptive periodic sync — replaces the blunt "every 5th turn" rule.
+ *
+ * Sync frequency scales with session length and recency of meaningful
+ * transitions. Early in a call we sync more often (establishing baseline),
+ * then widen the interval as the session stabilises, unless there have been
+ * recent meaningful transitions keeping things active.
+ */
+function shouldPeriodicSync(input: {
+  sessionUserTurnCount: number;
+  lastTransitionTurnIndex: number;
+  activeProcess: string;
+}): boolean {
+  const { sessionUserTurnCount, lastTransitionTurnIndex, activeProcess } = input;
+  if (sessionUserTurnCount <= 1) return false; // first turn handled separately
+
+  // High-sensitivity processes get more frequent sync
+  const highSensitivity = ["repair", "boundary_negotiation", "grief_presence"].includes(activeProcess);
+
+  // Base interval: starts at 4, grows with session length, caps at 10
+  const baseInterval = Math.min(10, 4 + Math.floor(sessionUserTurnCount / 8));
+  const interval = highSensitivity ? Math.max(3, baseInterval - 2) : baseInterval;
+
+  // How many turns since the last meaningful transition (or session start)?
+  const turnsSinceTransition = sessionUserTurnCount - lastTransitionTurnIndex;
+
+  // Sync when we've been quiet for `interval` turns
+  return turnsSinceTransition >= interval && turnsSinceTransition % interval === 0;
+}
+
+/** Session-level state for tracking transition recency. */
+const sessionLastTransitionTurn = new Map<string, number>();
+
+function shouldEnqueueLiveShadowTurn(input: {
+  persona: Persona;
+  inferredUserState?: UserStateSnapshot;
+  messages: MessageEntry[];
+  sessionId?: string;
+  hasContextualUpdate: boolean;
+}): { enqueue: boolean; reason: string } {
+  const { persona, inferredUserState, hasContextualUpdate } = input;
+
+  // Always enqueue if a boundary/preference was detected
+  if (hasContextualUpdate) return { enqueue: true, reason: "boundary_activated" };
+
+  // Always enqueue if no user state to compare against
+  const previous = persona.mindState.lastUserState;
+  if (!previous || !inferredUserState) return { enqueue: true, reason: "no_prior_state" };
+
+  // Always enqueue the first user turn in this live session — establishes
+  // the cognitive baseline for the call
+  const sessionUserTurns = input.messages.filter(
+    (m) =>
+      m.channel === "live" &&
+      m.role === "user" &&
+      (!input.sessionId || m.metadata?.sessionId === input.sessionId),
+  );
+  if (sessionUserTurns.length <= 1) return { enqueue: true, reason: "session_first_turn" };
+
+  // Run the smoothed transition detector — pass current process for sensitivity
+  const transition = detectMeaningfulTransition(
+    previous,
+    inferredUserState,
+    persona.mindState.activeProcess,
+  );
+  if (transition.meaningful) {
+    // Record that a meaningful transition happened at this turn index
+    if (input.sessionId) {
+      sessionLastTransitionTurn.set(input.sessionId, sessionUserTurns.length);
+    }
+    return { enqueue: true, reason: transition.reason ?? "state_transition" };
+  }
+
+  // Adaptive periodic sync fallback
+  const lastTransitionIdx = input.sessionId
+    ? (sessionLastTransitionTurn.get(input.sessionId) ?? 1)
+    : 1;
+  if (
+    shouldPeriodicSync({
+      sessionUserTurnCount: sessionUserTurns.length,
+      lastTransitionTurnIndex: lastTransitionIdx,
+      activeProcess: persona.mindState.activeProcess,
+    })
+  ) {
+    return { enqueue: true, reason: "periodic_sync" };
+  }
+
+  return { enqueue: false, reason: "deferred_to_consolidation" };
+}
+
+/** Reset session transition tracking (for tests). */
+export function resetLiveSessionState() {
+  sessionLastTransitionTurn.clear();
+}
+
+export async function resetServiceRuntimeStateForTests() {
+  await Promise.allSettled([...localShadowExecutionQueues.values()]);
+  localShadowExecutionQueues.clear();
+  resetLiveSessionState();
+}
+
+function clearLiveSessionState(sessionId?: string) {
+  if (!sessionId) {
+    return;
+  }
+
+  sessionLastTransitionTurn.delete(sessionId);
+}
+
+// ---------------------------------------------------------------------------
+// Visual-change gating
+// ---------------------------------------------------------------------------
+// Instead of a single environmentPressure threshold, compare the current
+// observation against the last observation for the session across multiple
+// dimensions. Only escalate when the scene has *materially* changed or the
+// observation is high-signal on its own.
+
+const DISTRESS_SIGNALS = /\b(distress|crying|urgent|emergency|panic|injury|blood|accident)\b/i;
+
+export function compareVisualObservation(
+  previous: PerceptionObservation | undefined,
+  next: PerceptionObservation,
+): { escalate: boolean; reason: string } {
+  // First observation in a session is always escalated — establishes visual context
+  if (!previous) {
+    return { escalate: true, reason: "first_visual_observation" };
+  }
+
+  // High-distress signals always escalate regardless of comparison
+  if (next.situationalSignals.some((s) => DISTRESS_SIGNALS.test(s))) {
+    return { escalate: true, reason: "high_signal_distress" };
+  }
+
+  // Attention target changed (e.g. user switched apps, looked at someone new)
+  if (
+    next.attentionTarget &&
+    previous.attentionTarget &&
+    next.attentionTarget !== previous.attentionTarget
+  ) {
+    return { escalate: true, reason: "attention_target_changed" };
+  }
+
+  // Task context changed (e.g. switched from coding to email)
+  if (
+    next.taskContext &&
+    previous.taskContext &&
+    next.taskContext !== previous.taskContext
+  ) {
+    return { escalate: true, reason: "task_context_changed" };
+  }
+
+  // Environment pressure jumped significantly
+  const pressureDelta = Math.abs(next.environmentPressure - previous.environmentPressure);
+  if (pressureDelta >= 0.2) {
+    return { escalate: true, reason: "environment_pressure_jump" };
+  }
+
+  // New situational signals that weren't present before
+  const previousSignalSet = new Set(previous.situationalSignals.map((s) => s.toLowerCase()));
+  const novelSignals = next.situationalSignals.filter(
+    (s) => !previousSignalSet.has(s.toLowerCase()),
+  );
+  if (novelSignals.length >= 2) {
+    return { escalate: true, reason: "novel_situational_signals" };
+  }
+
+  // Absolute high pressure still escalates even without comparison change
+  if (next.environmentPressure >= 0.7) {
+    return { escalate: true, reason: "high_environment_pressure" };
+  }
+
+  return { escalate: false, reason: "visual_scene_stable" };
 }
 
 async function queuePendingInternalEvents(persona: Persona) {
@@ -940,7 +1253,7 @@ export async function executeSoulInternalEvent(
               }
             : event,
         ),
-        recentEvents: [executedEvent, ...current.mindState.recentEvents].slice(0, 80),
+        recentEvents: [executedEvent, ...current.mindState.recentEvents].slice(0, 32),
       },
     };
   });
@@ -1631,10 +1944,23 @@ export async function getLiveContextUpdate(
     return job.sessionId === input.sessionId;
   }).length;
 
+  const delivering = sessionFrame.liveDeliveryVersion > (input.afterVersion ?? 0);
+  if (delivering) {
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: input.sessionId,
+        version: sessionFrame.liveDeliveryVersion,
+        reason: sessionFrame.deliveryReason,
+        event: "live_context_delivery_sent",
+      },
+      "Live context delivery sent to Hume",
+    );
+  }
+
   return {
     persona,
-    sessionFrame:
-      sessionFrame.liveDeliveryVersion > (input.afterVersion ?? 0) ? sessionFrame : undefined,
+    sessionFrame: delivering ? sessionFrame : undefined,
     pendingJobs,
   };
 }
@@ -1708,6 +2034,11 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   let activePersona = persona;
   const contextualUpdates: string[] = [];
 
+  // Capture the pre-update persona so that shouldEnqueueLiveShadowTurn
+  // compares the PREVIOUS smoothed state against the raw candidate — not
+  // the already-updated smoothed value (which would shrink the delta).
+  const preUpdatePersona = persona;
+
   if (inferredUserState) {
     activePersona = await applyFastLiveUserState(personaId, inferredUserState);
   }
@@ -1743,32 +2074,72 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     },
   } satisfies SoulPerception;
 
-  const shadowTurn = buildPendingShadowTurn({
-    persona: activePersona,
-    perception,
-    sessionId: parsed.sessionId,
-  });
+  // Skip full shadow cognition for assistant turns — Hume drives those, the soul
+  // only needs to observe user turns. Assistant messages are still persisted above
+  // and will be available for post-call consolidation.
+  // Use preUpdatePersona so the transition detector compares the PREVIOUS
+  // smoothed state against the raw candidate, not the already-updated one.
+  const hasContextualUpdate = contextualUpdates.length > 0;
+  const shadowDecision = isAssistant
+    ? { enqueue: false, reason: "assistant_turn" }
+    : shouldEnqueueLiveShadowTurn({
+        persona: preUpdatePersona,
+        inferredUserState,
+        messages,
+        sessionId: parsed.sessionId,
+        hasContextualUpdate,
+      });
 
-  activePersona = await enqueueShadowTurnForExecution(activePersona.id, shadowTurn, {
-    backgroundFallback: false,
-  });
+  if (shadowDecision.enqueue) {
+    const shadowTurn = buildPendingShadowTurn({
+      persona: activePersona,
+      perception,
+      sessionId: parsed.sessionId,
+      providedUserState: inferredUserState,
+    });
+
+    activePersona = await enqueueShadowTurnForExecution(activePersona.id, shadowTurn, {
+      backgroundFallback: false,
+    });
+
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: parsed.sessionId,
+        reason: shadowDecision.reason,
+        event: "live_shadow_turn_enqueued",
+      },
+      "Live shadow turn enqueued",
+    );
+  } else {
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: parsed.sessionId,
+        reason: shadowDecision.reason,
+        event: "live_shadow_turn_skipped",
+      },
+      "Live shadow turn skipped",
+    );
+  }
 
   const sessionFrame = buildSessionFrame({
     persona: activePersona,
     messages,
     feedbackNotes,
     perception,
-    contextDelta:
-      contextualUpdates.length > 0
-        ? contextualUpdates.join(" ")
-        : "Shadow cognition queued for this live turn.",
+    contextDelta: hasContextualUpdate
+      ? contextualUpdates.join(" ")
+      : shadowDecision.enqueue
+        ? `Shadow cognition queued: ${shadowDecision.reason}.`
+        : "Turn observed; deferred to post-call consolidation.",
   });
 
   return {
     message,
     persona: activePersona,
-    sessionFrame: contextualUpdates.length > 0 ? sessionFrame : undefined,
-    contextualUpdate: contextualUpdates.length > 0 ? contextualUpdates.join("\n\n") : undefined,
+    sessionFrame: hasContextualUpdate ? sessionFrame : undefined,
+    contextualUpdate: hasContextualUpdate ? contextualUpdates.join("\n\n") : undefined,
   };
 }
 
@@ -1859,28 +2230,75 @@ export async function observeLiveVisualPerception(
       mode: payload.mode,
     },
   } satisfies SoulPerception;
-  const shadowTurn = buildPendingShadowTurn({
-    persona: fastPersona,
-    perception,
-    sessionId: payload.sessionId,
-    providedUserState: observation.userState,
-  });
-  const queuedPersona = await enqueueShadowTurnForExecution(fastPersona.id, shadowTurn, {
-    backgroundFallback: false,
-  });
+
+  // Determine whether this observation warrants a mid-call shadow turn.
+  // Session start/end events always escalate. For frame observations, compare
+  // against the previous observation in this session.
+  const isSessionEvent = payload.event === "start" || payload.event === "end";
+  const allObservations = await listPerceptionObservations(personaId);
+  const previousSessionObs = allObservations
+    .filter(
+      (o) =>
+        o.sessionId === payload.sessionId &&
+        o.id !== observation.id &&
+        o.kind !== "visual_session_start" &&
+        o.kind !== "visual_session_end",
+    )
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .at(-1);
+
+  const visualDecision = isSessionEvent
+    ? { escalate: true, reason: "session_mode_transition" }
+    : compareVisualObservation(previousSessionObs, observation);
+
+  let resultPersona = fastPersona;
+  if (visualDecision.escalate) {
+    const shadowTurn = buildPendingShadowTurn({
+      persona: fastPersona,
+      perception,
+      sessionId: payload.sessionId,
+      providedUserState: observation.userState,
+    });
+    resultPersona = await enqueueShadowTurnForExecution(fastPersona.id, shadowTurn, {
+      backgroundFallback: false,
+    });
+
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: payload.sessionId,
+        reason: visualDecision.reason,
+        event: "visual_observation_escalated",
+      },
+      "Visual observation escalated to shadow cognition",
+    );
+  } else {
+    soulLogger.debug(
+      {
+        personaId,
+        sessionId: payload.sessionId,
+        reason: visualDecision.reason,
+        event: "visual_observation_stored",
+      },
+      "Visual observation stored, deferred to consolidation",
+    );
+  }
+
   const sessionFrame = buildSessionFrame({
-    persona: queuedPersona,
+    persona: resultPersona,
     messages,
     feedbackNotes,
     perception,
-    contextDelta: `Visual observation queued from ${payload.mode}.`,
+    contextDelta: visualDecision.escalate
+      ? `Visual observation escalated (${visualDecision.reason}) from ${payload.mode}.`
+      : `Visual frame stored from ${payload.mode}; deferred to post-call consolidation.`,
   });
 
   return {
     observation,
-    persona: queuedPersona,
-    sessionFrame,
-    contextualUpdate: sessionFrame.contextDelta,
+    persona: resultPersona,
+    sessionFrame: visualDecision.escalate ? sessionFrame : undefined,
+    contextualUpdate: visualDecision.escalate ? sessionFrame.contextDelta : undefined,
   };
 }
 
@@ -1906,12 +2324,93 @@ export async function finalizeLiveSession(
   );
 
   if (existingJob) {
+    clearLiveSessionState(payload.sessionId);
     return {
       persona,
       queued: false,
       jobId: existingJob.id,
     };
   }
+
+  // -----------------------------------------------------------------------
+  // Gather rich session evidence for the consolidation pass
+  // -----------------------------------------------------------------------
+  const [messages, observations, feedback] = await Promise.all([
+    listMessages(personaId),
+    listPerceptionObservations(personaId),
+    listFeedback(personaId),
+  ]);
+
+  const sessionMessages = messages.filter(
+    (m) => m.channel === "live" && (!payload.sessionId || m.metadata?.sessionId === payload.sessionId),
+  );
+  const sessionObservations = observations.filter(
+    (o) => payload.sessionId && o.sessionId === payload.sessionId,
+  );
+  const userTurns = sessionMessages.filter((m) => m.role === "user");
+  const assistantTurns = sessionMessages.filter((m) => m.role === "assistant");
+  const sessionFeedback = feedback.filter((f) =>
+    sessionMessages.some((m) => m.id === f.messageId),
+  );
+
+  // Build a user state trajectory from heuristic states on the messages
+  const stateSnapshots = userTurns.filter((m) => m.userState).slice(-10);
+  const userStateTrajectory = stateSnapshots
+    .map(
+      (m) =>
+        `[${m.userState!.summary}] valence=${m.userState!.valence.toFixed(2)} vulnerability=${m.userState!.vulnerability.toFixed(2)} frustration=${m.userState!.frustration.toFixed(2)}`,
+    )
+    .join(" → ");
+
+  // Detect if repair may be needed (frustration or repair risk spiked during call)
+  const peakFrustration = Math.max(0, ...stateSnapshots.map((m) => m.userState!.frustration));
+  const peakRepairRisk = Math.max(0, ...stateSnapshots.map((m) => m.userState!.repairRisk));
+  const repairWarning =
+    peakFrustration >= 0.5 || peakRepairRisk >= 0.45 || sessionFeedback.length > 0;
+
+  // Extract key topics from user turns for episodic memory
+  const keyUserPhrases = userTurns
+    .slice(-6)
+    .map((m) => m.body)
+    .filter((b) => b.length > 10);
+
+  // Visual context summary
+  const visualSummary = sessionObservations
+    .filter((o) => o.kind !== "visual_session_start" && o.kind !== "visual_session_end")
+    .slice(-4)
+    .map((o) => o.summary)
+    .join("; ");
+
+  // Build the consolidation brief with explicit learning directives
+  const consolidationBrief = [
+    `## Session Summary`,
+    `Session ended (${payload.reason ?? "disconnect"}). ${userTurns.length} user turns, ${assistantTurns.length} assistant turns.`,
+    sessionObservations.length > 0
+      ? `Visual context: ${sessionObservations.length} observations (${payload.mode ?? "voice"}). ${visualSummary}`
+      : undefined,
+    userStateTrajectory
+      ? `\n## Emotional Trajectory\n${userStateTrajectory}`
+      : undefined,
+    keyUserPhrases.length > 0
+      ? `\n## Key User Phrases\n${keyUserPhrases.map((p) => `- "${p}"`).join("\n")}`
+      : undefined,
+    repairWarning
+      ? `\n## Repair Notes\nPeak frustration: ${peakFrustration.toFixed(2)}, peak repair risk: ${peakRepairRisk.toFixed(2)}.${sessionFeedback.length > 0 ? ` User gave ${sessionFeedback.length} correction(s) during the call: ${sessionFeedback.map((f) => f.note).join("; ")}` : ""} Produce explicit repair notes if warranted.`
+      : undefined,
+    `\n## Consolidation Directives`,
+    `Extract the following durable learning from this session:`,
+    `1. **Episodic memory**: What happened in this call that is worth remembering as a concrete episode?`,
+    `2. **Learned user notes**: What did you learn about the user (facts, habits, concerns, context)?`,
+    `3. **Learned relationship notes**: How did the relationship change or deepen? Any new shared references, rituals, or trust signals?`,
+    repairWarning
+      ? `4. **Repair notes**: What went wrong, and what should be different next time?`
+      : undefined,
+    `5. **Open loops**: Are there follow-through items the user mentioned (appointments, events, decisions) that deserve a check-in later?`,
+    `6. **Relational tone summary**: In one sentence, how would you describe the emotional quality of this interaction?`,
+    `\nDo not overfit transient phrasing. Focus on what will still matter in the next conversation.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const createdAt = new Date().toISOString();
   const perception = {
@@ -1922,11 +2421,17 @@ export async function finalizeLiveSession(
     createdAt,
     sessionId: payload.sessionId,
     correlationId: payload.sessionId ?? `session-end-${personaId}`,
-    content: "Consolidate the just-finished live session into durable memory without overfitting transient phrasing.",
+    content: consolidationBrief,
     metadata: {
       mode: payload.mode ?? "voice",
       reason: payload.reason ?? "disconnect",
       sessionEnded: true,
+      sessionTurnCount: userTurns.length + assistantTurns.length,
+      sessionObservationCount: sessionObservations.length,
+      sessionFeedbackCount: sessionFeedback.length,
+      peakFrustration,
+      peakRepairRisk,
+      repairWarning,
     },
   } satisfies SoulPerception;
 
@@ -1939,6 +2444,22 @@ export async function finalizeLiveSession(
   const queuedPersona = await enqueueShadowTurnForExecution(persona.id, shadowTurn, {
     backgroundFallback: false,
   });
+
+  soulLogger.debug(
+    {
+      personaId,
+      sessionId: payload.sessionId,
+      event: "post_call_consolidation_enqueued",
+      userTurnCount: userTurns.length,
+      assistantTurnCount: assistantTurns.length,
+      observationCount: sessionObservations.length,
+      feedbackCount: sessionFeedback.length,
+      repairWarning,
+    },
+    "Post-call consolidation enqueued",
+  );
+
+  clearLiveSessionState(payload.sessionId);
 
   return {
     persona: queuedPersona,

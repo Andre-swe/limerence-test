@@ -181,7 +181,7 @@ function topProsodySignals(scores?: Record<string, number>) {
     .map(([key]) => key);
 }
 
-function memoryNote(
+export function memoryNote(
   summary: string,
   createdAt: string,
   options?: {
@@ -201,7 +201,11 @@ function memoryNote(
   };
 }
 
-function mergeMemoryNotes(existing: MemoryNote[], next: MemoryNote[], limit = 16) {
+export function mergeMemoryNotes<T extends { summary: string; updatedAt: string; weight?: number }>(
+  existing: T[],
+  next: T[],
+  limit = 16,
+) {
   const merged = [...existing];
 
   for (const candidate of next) {
@@ -210,7 +214,9 @@ function mergeMemoryNotes(existing: MemoryNote[], next: MemoryNote[], limit = 16
     );
     if (duplicate) {
       duplicate.updatedAt = candidate.updatedAt;
-      duplicate.weight = Math.min(5, Math.max(duplicate.weight, candidate.weight));
+      if (typeof candidate.weight === "number" && typeof duplicate.weight === "number") {
+        duplicate.weight = Math.min(5, Math.max(duplicate.weight, candidate.weight));
+      }
       continue;
     }
     merged.unshift(candidate);

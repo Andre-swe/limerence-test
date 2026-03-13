@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { buildSoulHarness } from "@/lib/soul-harness";
-import { createInitialMindState } from "@/lib/mind-runtime";
+import { createInitialMindState, memoryNote, mergeMemoryNotes } from "@/lib/mind-runtime";
 import {
   applySoulArchetypeToConstitution,
   applySoulArchetypeToRelationship,
@@ -14,7 +14,6 @@ import type {
   FastTurnResult,
   InternalScheduledEvent,
   LearningArtifact,
-  MemoryNote,
   MessageEntry,
   MindProcess,
   PerceptionObservation,
@@ -321,52 +320,6 @@ function boundedArray<T>(items: T[], limit: number) {
   return items.slice(0, limit);
 }
 
-function memoryNote(
-  summary: string,
-  createdAt: string,
-  options?: {
-    sourceMessageId?: string;
-    sourceText?: string;
-    weight?: number;
-  },
-): MemoryNote {
-  return {
-    id: randomUUID(),
-    summary,
-    sourceMessageId: options?.sourceMessageId,
-    sourceText: options?.sourceText,
-    weight: options?.weight ?? 3,
-    createdAt,
-    updatedAt: createdAt,
-  };
-}
-
-function mergeMemoryNotes<T extends { summary: string; updatedAt: string; weight?: number }>(
-  existing: T[],
-  next: T[],
-  limit = 16,
-) {
-  const merged = [...existing];
-
-  for (const candidate of next) {
-    const duplicate = merged.find(
-      (note) => note.summary.toLowerCase() === candidate.summary.toLowerCase(),
-    );
-
-    if (duplicate) {
-      duplicate.updatedAt = candidate.updatedAt;
-      if (typeof candidate.weight === "number" && typeof duplicate.weight === "number") {
-        duplicate.weight = Math.min(5, Math.max(duplicate.weight, candidate.weight)) as T["weight"];
-      }
-      continue;
-    }
-
-    merged.unshift(candidate);
-  }
-
-  return merged.slice(0, limit);
-}
-
 function buildVisualContext(observations: PerceptionObservation[]) {
   return observations.slice(-4).map((observation) => ({
     summary: observation.summary,
@@ -601,7 +554,7 @@ function processInstanceFor(
     updatedAt: perception.createdAt,
   };
 
-  const processInstances = {
+  const rawInstances: Record<string, ProcessInstanceState> = {
     ...persona.mindState.processInstances,
     ...(existing
       ? {
@@ -614,6 +567,15 @@ function processInstanceFor(
       : {}),
     [nextId]: nextInstance,
   };
+
+  // Evict old superseded instances — keep the active one + last 4 superseded
+  const entries = Object.entries(rawInstances);
+  const active = entries.filter(([, inst]) => inst.status === "active");
+  const superseded = entries
+    .filter(([, inst]) => inst.status === "superseded")
+    .sort(([, a], [, b]) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 4);
+  const processInstances = Object.fromEntries([...active, ...superseded]);
 
   return {
     currentProcessInstanceId: nextId,
@@ -729,7 +691,7 @@ function buildLearningArtifacts(input: {
     ),
   );
 
-  if (input.feedbackNotes.length > 0 || input.userState?.repairRisk && input.userState.repairRisk >= 0.58) {
+  if (input.feedbackNotes.length > 0 || (input.userState?.repairRisk && input.userState.repairRisk >= 0.58)) {
     artifacts.push(
       createLearningArtifact(
         "repair_from_feedback",
@@ -1384,7 +1346,7 @@ export async function executeFastMessageTurn(
         learnedRelationshipNotes: seededPersona.mindState.memoryRegions.learnedRelationshipNotes,
         processMemory,
       },
-      recentEvents: boundedArray([...events, ...seededPersona.mindState.recentEvents], 80),
+      recentEvents: boundedArray([...events, ...seededPersona.mindState.recentEvents], 32),
       traceHead: boundedArray([...trace, ...seededPersona.mindState.traceHead], 40),
       contextVersion: seededPersona.mindState.contextVersion + 1,
       traceVersion: seededPersona.mindState.traceVersion + trace.length,
@@ -2029,7 +1991,7 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
       ...withLearningPersona.mindState,
       pendingInternalEvents,
       pendingShadowTurns: withLearningPersona.mindState.pendingShadowTurns,
-      recentEvents: boundedArray([...events, ...withLearningPersona.mindState.recentEvents], 80),
+      recentEvents: boundedArray([...events, ...withLearningPersona.mindState.recentEvents], 32),
       traceHead: boundedArray([...trace, ...withLearningPersona.mindState.traceHead], 40),
       contextVersion: withLearningPersona.mindState.contextVersion + 1,
       traceVersion: withLearningPersona.mindState.traceVersion + trace.length,

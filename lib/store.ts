@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -26,6 +26,9 @@ const uploadsDir =
   process.env.PERSONA_UPLOAD_DIR ?? path.join(process.cwd(), "public", "uploads");
 
 let pendingWrite = Promise.resolve();
+
+let cachedStore: DataStore | null = null;
+let cachedMtimeMs = 0;
 
 const seededHouseVoiceMap = {
   "persona-mom": houseVoicePresets[0].id,
@@ -359,6 +362,17 @@ async function ensureStore() {
 
 async function readStore(): Promise<DataStore> {
   await ensureStore();
+
+  // Return cached store if file hasn't changed since last read
+  try {
+    const mtimeMs = statSync(storeFile).mtimeMs;
+    if (cachedStore && mtimeMs === cachedMtimeMs) {
+      return cachedStore;
+    }
+  } catch {
+    // stat failed — fall through to full read
+  }
+
   const raw = await readFile(storeFile, "utf8");
   const rawParsed = JSON.parse(raw) as {
     personas?: Array<Record<string, unknown>>;
@@ -489,6 +503,14 @@ async function readStore(): Promise<DataStore> {
     await writeStore(migrated);
   }
 
+  // Populate the read cache
+  try {
+    cachedMtimeMs = statSync(storeFile).mtimeMs;
+  } catch {
+    cachedMtimeMs = 0;
+  }
+  cachedStore = migrated;
+
   return migrated;
 }
 
@@ -498,6 +520,14 @@ async function writeStore(store: DataStore) {
   const tempFile = `${storeFile}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tempFile, nextContent, "utf8");
   await rename(tempFile, storeFile);
+
+  // Update cache after successful write
+  cachedStore = validated;
+  try {
+    cachedMtimeMs = statSync(storeFile).mtimeMs;
+  } catch {
+    cachedMtimeMs = 0;
+  }
 }
 
 async function withStoreLock<T>(operation: () => Promise<T>) {
@@ -883,6 +913,8 @@ export async function savePublicFile(
 }
 
 export async function resetStoreForTests(store?: DataStore) {
+  cachedStore = null;
+  cachedMtimeMs = 0;
   await mkdir(path.dirname(storeFile), { recursive: true });
   await writeStore(store ?? createSeedStore());
 }

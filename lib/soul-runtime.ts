@@ -78,56 +78,32 @@ function openingFor(persona: Persona) {
   }
 }
 
-function activeProcessFor(persona: Persona, messages: MessageEntry[], feedbackNotes: string[]) {
+function harnessFor(persona: Persona, messages: MessageEntry[], feedbackNotes: string[]) {
+  const lastUserMessage = messages
+    .slice()
+    .reverse()
+    .find((message) => message.role === "user");
+
   return buildSoulHarness({
     persona,
     messages,
     feedbackNotes,
     perception: {
       kind: "user_message",
-      content:
-        messages
-          .slice()
-          .reverse()
-          .find((message) => message.role === "user")
-          ?.body ?? "",
-      channel:
-        messages
-          .slice()
-          .reverse()
-          .find((message) => message.role === "user")
-          ?.channel,
-      createdAt: messages.at(-1)?.createdAt ?? new Date().toISOString(),
-      internal: false,
-    },
-  }).activeProcess;
-}
-
-function baseMemories(persona: Persona, messages: MessageEntry[], feedbackNotes: string[]) {
-  const snapshot = buildSoulHarness({
-    persona,
-    messages,
-    feedbackNotes,
-    perception: {
-      kind: "user_message",
-      content:
-        messages
-          .slice()
-          .reverse()
-          .find((message) => message.role === "user")
-          ?.body ?? "",
-      channel:
-        messages
-          .slice()
-          .reverse()
-          .find((message) => message.role === "user")
-          ?.channel,
+      content: lastUserMessage?.body ?? "",
+      channel: lastUserMessage?.channel,
       createdAt: messages.at(-1)?.createdAt ?? new Date().toISOString(),
       internal: false,
     },
   });
+}
 
-  return snapshot.memories;
+function activeProcessFor(persona: Persona, messages: MessageEntry[], feedbackNotes: string[]) {
+  return harnessFor(persona, messages, feedbackNotes).activeProcess;
+}
+
+function baseMemories(persona: Persona, messages: MessageEntry[], feedbackNotes: string[]) {
+  return harnessFor(persona, messages, feedbackNotes).memories;
 }
 
 function renderMemories(memories: SoulMemory[]) {

@@ -11,13 +11,17 @@ import { planConversationSoul, renderMockConversationReply } from "@/lib/soul-ru
 import {
   addPersonaFeedback,
   appendLiveTranscriptTurn,
+  compareVisualObservation,
   createPersonaFromForm,
+  detectMeaningfulTransition,
   executeQueuedShadowTurn,
   executeSoulInternalEvent,
   finalizeLiveSession,
   getLiveContextUpdate,
   observeLiveVisualPerception,
   processTelegramWebhook,
+  reduceLiveUserState,
+  resetServiceRuntimeStateForTests,
   runHeartbeat,
   sendPersonaMessage,
 } from "@/lib/services";
@@ -64,6 +68,7 @@ function withoutReasoningProviders<T>(operation: () => Promise<T>) {
 describe("persona workflows", () => {
   beforeEach(async () => {
     vi.useRealTimers();
+    await resetServiceRuntimeStateForTests();
     await resetStoreForTests();
   });
 
@@ -466,7 +471,8 @@ describe("persona workflows", () => {
 
   it("does not ship a live context update for every ordinary live turn", async () => {
     await withoutReasoningProviders(async () => {
-      // First live turn will shift process from arrival to attunement, triggering delivery
+      // First live turn will be enqueued (first in session) — drain its
+      // shadow processing before testing the ordinary-turn contract.
       await appendLiveTranscriptTurn("persona-mom", {
         role: "user",
         body: "hello.",
@@ -474,6 +480,15 @@ describe("persona workflows", () => {
         sessionId: "live-ordinary-1",
       });
 
+      // Process first turn's shadow through polling so the baseline is stable
+      await getLiveContextUpdate("persona-mom", {
+        sessionId: "live-ordinary-1",
+        afterVersion: 0,
+      });
+
+      // Second ordinary turn should be deferred — no shadow turn enqueued, no
+      // session frame returned. The turn is persisted and will be consolidated
+      // at the end of the call.
       const result = await appendLiveTranscriptTurn("persona-mom", {
         role: "user",
         body: "go ahead.",
@@ -487,15 +502,38 @@ describe("persona workflows", () => {
       const queuedJob = queuedPersona?.mindState.pendingShadowTurns.find(
         (job) => job.sessionId === "live-ordinary-1" && job.perception.causationId === result.message.id,
       );
-      expect(queuedJob?.status).toBe("pending");
 
-      await executeQueuedShadowTurn("persona-mom", queuedJob!.id);
+      // Routine turns are deferred to post-call consolidation — no shadow turn
+      expect(queuedJob).toBeUndefined();
+
+      // Context polling should not return a delivery since no new shadow was enqueued
       const context = await getLiveContextUpdate("persona-mom", {
         sessionId: "live-ordinary-1",
         afterVersion: queuedPersona!.mindState.liveDeliveryVersion,
       });
-
       expect(context.sessionFrame).toBeUndefined();
+    });
+  });
+
+  it("skips shadow turns for live assistant transcript turns", async () => {
+    await withoutReasoningProviders(async () => {
+      const before = await getPersona("persona-mom");
+      const beforeShadowCount = before!.mindState.pendingShadowTurns.length;
+
+      await appendLiveTranscriptTurn("persona-mom", {
+        role: "assistant",
+        body: "hey sweetie, how are you?",
+        eventId: "evt-assistant-live-1",
+        sessionId: "live-assistant-1",
+      });
+
+      const after = await getPersona("persona-mom");
+      // Assistant turns should NOT enqueue shadow turns — Hume drives those
+      expect(after!.mindState.pendingShadowTurns.length).toBe(beforeShadowCount);
+
+      // But the message should still be persisted
+      const messages = await listMessages("persona-mom");
+      expect(messages.some((m) => m.body === "hey sweetie, how are you?")).toBe(true);
     });
   });
 
@@ -518,6 +556,20 @@ describe("persona workflows", () => {
 
   it("queues a post-call consolidation turn when the live session ends", async () => {
     await withoutReasoningProviders(async () => {
+      // Seed a few live turns so consolidation has session evidence
+      await appendLiveTranscriptTurn("persona-mom", {
+        role: "user",
+        body: "hey mom, just checking in.",
+        eventId: "evt-consolidation-1",
+        sessionId: "live-ended-1",
+      });
+      await appendLiveTranscriptTurn("persona-mom", {
+        role: "assistant",
+        body: "sweetie! so good to hear from you.",
+        eventId: "evt-consolidation-2",
+        sessionId: "live-ended-1",
+      });
+
       const result = await finalizeLiveSession("persona-mom", {
         sessionId: "live-ended-1",
         mode: "voice",
@@ -532,6 +584,176 @@ describe("persona workflows", () => {
       expect(queuedJob?.perception.kind).toBe("memory_consolidation");
       expect(queuedJob?.sessionId).toBe("live-ended-1");
       expect(queuedJob?.status).toBe("pending");
+      // Consolidation perception should include rich session evidence
+      expect(queuedJob?.perception.content).toContain("Session Summary");
+      expect(queuedJob?.perception.content).toContain("Consolidation Directives");
+      expect(queuedJob?.perception.content).toContain("Episodic memory");
+      expect(queuedJob?.perception.content).toContain("Learned user notes");
+      expect(queuedJob?.perception.content).toContain("Open loops");
+      expect(queuedJob?.perception.metadata?.sessionTurnCount).toBeGreaterThan(0);
+      expect(queuedJob?.perception.metadata?.repairWarning).toBeDefined();
+    });
+  });
+
+  it("detects meaningful transitions using smoothed deltas instead of raw thresholds", () => {
+    const base: Parameters<typeof detectMeaningfulTransition>[0] = {
+      id: "state-1",
+      modality: "live_voice",
+      topSignals: [],
+      valence: 0.5,
+      arousal: 0.5,
+      activation: 0.5,
+      certainty: 0.5,
+      vulnerability: 0.5,
+      desireForCloseness: 0.5,
+      desireForSpace: 0.5,
+      repairRisk: 0.3,
+      boundaryPressure: 0.3,
+      taskFocus: 0.5,
+      griefLoad: 0.3,
+      playfulness: 0.5,
+      frustration: 0.3,
+      environmentPressure: 0.5,
+      situationalSignals: [],
+      summary: "calm",
+      confidence: 0.7,
+      provenance: ["heuristic"],
+      createdAt: new Date().toISOString(),
+    };
+
+    // Small jitter should NOT trigger in normal process
+    const jitter = { ...base, id: "state-2", frustration: 0.35 };
+    expect(detectMeaningfulTransition(base, jitter).meaningful).toBe(false);
+
+    // Large jump SHOULD trigger
+    const spike = { ...base, id: "state-3", frustration: 0.7 };
+    const result = detectMeaningfulTransition(base, spike);
+    expect(result.meaningful).toBe(true);
+    expect(result.reason).toContain("frustration");
+
+    // No previous state always triggers
+    expect(detectMeaningfulTransition(undefined, base).meaningful).toBe(true);
+
+    // Process-sensitivity: during "repair", lower thresholds catch subtler shifts
+    const subtleShift = { ...base, id: "state-4", repairRisk: 0.48 };
+    // Normal process: delta = |0.3 + 0.35*(0.48-0.3) - 0.3| = 0.063, threshold 0.10 → NOT triggered
+    expect(detectMeaningfulTransition(base, subtleShift, "attunement").meaningful).toBe(false);
+    // Repair process: sensitiveThreshold 0.06 → triggered
+    expect(detectMeaningfulTransition(base, subtleShift, "repair").meaningful).toBe(true);
+  });
+
+  it("smooths user state via reduceLiveUserState instead of storing raw heuristic", () => {
+    const previous: Parameters<typeof reduceLiveUserState>[0] = {
+      id: "state-prev",
+      modality: "live_voice",
+      topSignals: [],
+      valence: 0.5,
+      arousal: 0.5,
+      activation: 0.5,
+      certainty: 0.5,
+      vulnerability: 0.3,
+      desireForCloseness: 0.5,
+      desireForSpace: 0.5,
+      repairRisk: 0.2,
+      boundaryPressure: 0.2,
+      taskFocus: 0.5,
+      griefLoad: 0.2,
+      playfulness: 0.5,
+      frustration: 0.2,
+      environmentPressure: 0.5,
+      situationalSignals: [],
+      summary: "calm",
+      confidence: 0.7,
+      provenance: ["heuristic"],
+      createdAt: new Date().toISOString(),
+    };
+
+    // A sudden spike to 0.8 should be dampened by the EMA
+    const candidate = { ...previous, id: "state-next", frustration: 0.8 };
+    const reduced = reduceLiveUserState(previous, candidate);
+
+    // With alpha=0.35: smoothed = 0.2 + 0.35 * (0.8 - 0.2) = 0.41
+    expect(reduced.frustration).toBeCloseTo(0.41, 1);
+    // Non-reducible fields should pass through unchanged
+    expect(reduced.summary).toBe(candidate.summary);
+    expect(reduced.id).toBe(candidate.id);
+
+    // No previous → returns candidate as-is
+    const fresh = reduceLiveUserState(undefined, candidate);
+    expect(fresh.frustration).toBe(0.8);
+  });
+
+  it("compares visual observations for scene changes instead of scalar thresholds", () => {
+    const base = {
+      id: "obs-1",
+      personaId: "p-1",
+      kind: "screen_observation" as const,
+      mode: "screen" as const,
+      summary: "User is coding in VS Code",
+      situationalSignals: ["focused", "coding"],
+      environmentPressure: 0.4,
+      taskContext: "writing code",
+      attentionTarget: "VS Code editor",
+      createdAt: new Date().toISOString(),
+    };
+
+    // Same scene — should NOT escalate
+    const same = { ...base, id: "obs-2" };
+    expect(compareVisualObservation(base, same).escalate).toBe(false);
+
+    // Task context changed — SHOULD escalate
+    const taskChanged = { ...base, id: "obs-3", taskContext: "reading email" };
+    const r1 = compareVisualObservation(base, taskChanged);
+    expect(r1.escalate).toBe(true);
+    expect(r1.reason).toBe("task_context_changed");
+
+    // Attention target changed — SHOULD escalate
+    const attentionChanged = { ...base, id: "obs-4", attentionTarget: "Slack window" };
+    const r2 = compareVisualObservation(base, attentionChanged);
+    expect(r2.escalate).toBe(true);
+    expect(r2.reason).toBe("attention_target_changed");
+
+    // Distress signal — always escalates
+    const distress = { ...base, id: "obs-5", situationalSignals: ["distress", "crying"] };
+    expect(compareVisualObservation(base, distress).escalate).toBe(true);
+
+    // No previous — first observation always escalates
+    expect(compareVisualObservation(undefined, base).escalate).toBe(true);
+  });
+
+  it("includes repair notes in consolidation when user gave feedback during the call", async () => {
+    await withoutReasoningProviders(async () => {
+      // Seed a live turn then leave feedback — feedback triggers repairWarning
+      const turnResult = await appendLiveTranscriptTurn("persona-mom", {
+        role: "user",
+        body: "that doesn't sound like something you'd say.",
+        eventId: "evt-repair-1",
+        sessionId: "live-repair-1",
+      });
+      await addPersonaFeedback("persona-mom", {
+        messageId: turnResult.message.id,
+        note: "too formal, my mom wouldn't talk like this",
+      });
+
+      await appendLiveTranscriptTurn("persona-mom", {
+        role: "assistant",
+        body: "you're right, let me try again.",
+        eventId: "evt-repair-2",
+        sessionId: "live-repair-1",
+      });
+
+      const result = await finalizeLiveSession("persona-mom", {
+        sessionId: "live-repair-1",
+        mode: "voice",
+        reason: "user_end",
+      });
+
+      const persona = await getPersona("persona-mom");
+      const job = persona?.mindState.pendingShadowTurns.find((j) => j.id === result.jobId);
+      // Should contain repair notes directive because of feedback
+      expect(job?.perception.content).toContain("Repair");
+      expect(job?.perception.metadata?.repairWarning).toBe(true);
+      expect(job?.perception.metadata?.sessionFeedbackCount).toBeGreaterThan(0);
     });
   });
 
@@ -566,8 +788,22 @@ describe("persona workflows", () => {
       channel: "web",
     });
 
-    const before = await getPersona("persona-mom");
-    const eventId = before?.mindState.pendingInternalEvents[0]?.id;
+    let before = await getPersona("persona-mom");
+    let eventId = before?.mindState.pendingInternalEvents[0]?.id;
+
+    if (!eventId) {
+      const queuedJobIds =
+        before?.mindState.pendingShadowTurns
+          .filter((job) => job.status === "pending" || job.status === "processing")
+          .map((job) => job.id) ?? [];
+
+      for (const jobId of queuedJobIds) {
+        await executeQueuedShadowTurn("persona-mom", jobId);
+      }
+
+      before = await getPersona("persona-mom");
+      eventId = before?.mindState.pendingInternalEvents[0]?.id;
+    }
 
     expect(eventId).toBeTruthy();
 

@@ -588,7 +588,7 @@ function ConversationPanelInner({
     void poll();
     const interval = setInterval(() => {
       void poll();
-    }, 1800);
+    }, 3000);
 
     return () => {
       cancelled = true;
