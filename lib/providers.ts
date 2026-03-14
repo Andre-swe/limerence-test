@@ -269,6 +269,7 @@ export type InternalMonologueResult = {
   warmthTowardUser: number;
   engagementDrive: number;
   shouldReply: boolean;
+  replyFormat: "text" | "voice_note";
 };
 
 /** Structured reasoning adapter — implemented by Gemini, OpenAI, Anthropic, and a mock fallback. */
@@ -711,6 +712,7 @@ class MockReasoningProvider implements ReasoningProvider {
       warmthTowardUser: 0.7,
       engagementDrive: 0.65,
       shouldReply: true,
+      replyFormat: "text",
     };
   }
 
@@ -1415,6 +1417,7 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         warmthTowardUser: typeof parsed.warmthTowardUser === "number" ? parsed.warmthTowardUser : 0.7,
         engagementDrive: typeof parsed.engagementDrive === "number" ? parsed.engagementDrive : 0.65,
         shouldReply: typeof parsed.shouldReply === "boolean" ? parsed.shouldReply : true,
+        replyFormat: parsed.replyFormat === "voice_note" ? "voice_note" : "text",
       };
     } catch (error) {
       logProviderFailure("gemini", "generateInternalMonologue", error);

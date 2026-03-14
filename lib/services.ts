@@ -24,7 +24,7 @@ import {
   updatePersonaShadowTurn,
 } from "@/lib/store";
 import { getProviders, getProviderStatus } from "@/lib/providers";
-import { executeFastMessageTurn, executeSoulTurn, type TurnExecutionResult } from "@/lib/soul-engine";
+import { executeFastMessageTurn, executeSoulTurn } from "@/lib/soul-engine";
 import {
   isInngestExecutionEnabled,
   publishPersonaShadowTurns,
@@ -56,7 +56,6 @@ import {
   type LiveTranscriptRequest,
   type MessageAttachment,
   type MessageEntry,
-  type MindProcess,
   type PendingShadowTurn,
   type PerceptionObservation,
   type Persona,
@@ -435,56 +434,6 @@ function detectPreferenceUpdate(persona: Persona, text: string): PreferenceUpdat
 // a voice message based on personality, relationship, and emotional context.
 // A real person doesn't always type — sometimes they just hit record.
 // ---------------------------------------------------------------------------
-
-const VOICE_NOTE_PROCESSES = new Set<MindProcess>([
-  "comfort",
-  "grief_presence",
-  "celebration",
-  "protective_check_in",
-  "repair",
-]);
-
-function shouldPersonaChooseVoiceNote(
-  persona: Persona,
-  turnResult: TurnExecutionResult,
-): boolean {
-  // Only if the persona has a working voice
-  if (persona.voice.status === "unavailable" || persona.voice.provider !== "hume") {
-    return false;
-  }
-
-  // Don't voice-note if the relationship model doesn't include it
-  if (!persona.relationshipModel.favoriteModes.includes("voice_note")) {
-    return false;
-  }
-
-  const constitution = persona.personalityConstitution;
-  const process = turnResult.persona.mindState.activeProcess;
-  const userState = turnResult.userState;
-
-  // Base probability from personality: warmer/more tender personas send more VNs
-  let probability = 0.0;
-  probability += constitution.warmth * 0.08;
-  probability += constitution.tenderness * 0.1;
-  if (constitution.affectionStyle === "verbal") probability += 0.06;
-
-  // Process boost: emotional processes feel more natural as voice
-  if (VOICE_NOTE_PROCESSES.has(process)) {
-    probability += 0.15;
-  }
-
-  // User state boost: high vulnerability or grief → voice feels more present
-  if (userState) {
-    if (userState.vulnerability >= 0.65) probability += 0.1;
-    if (userState.griefLoad >= 0.6) probability += 0.12;
-    if (userState.valence <= 0.3) probability += 0.08;
-  }
-
-  // Cap at reasonable maximum — voice notes should feel occasional, not constant
-  probability = Math.min(probability, 0.35);
-
-  return Math.random() < probability;
-}
 
 function composePreferenceReply(persona: Persona, update: PreferenceUpdate) {
   const signature = persona.dossier.signaturePhrases[0]
@@ -2564,10 +2513,14 @@ export async function sendPersonaMessage(
   const replyText = preferenceUpdate
     ? composePreferenceReply(activePersona, preferenceUpdate)
     : soulTurnResult.replyText ?? "";
+  // The monologue decides the reply format — text or voice note.
+  // The persona reasons about this based on mood, energy, and context.
   const shouldReplyWithVoiceNote =
     payload.channel === "telegram" ||
     Boolean(audioAttachment) ||
-    shouldPersonaChooseVoiceNote(activePersona, soulTurnResult);
+    (monologue.replyFormat === "voice_note" &&
+      activePersona.voice.provider === "hume" &&
+      activePersona.voice.status !== "unavailable");
   const synthesized = shouldReplyWithVoiceNote
     ? await providers.voice.synthesize({
         personaName: activePersona.name,
