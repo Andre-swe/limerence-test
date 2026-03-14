@@ -870,6 +870,9 @@ function ConversationPanelInner({
       setSessionContextText(session.sessionSettings.context?.text ?? "");
       setSessionContextVersion(session.soulFrame.liveDeliveryVersion);
 
+      // Connect with only auth — full session settings are too large
+      // for WebSocket URL query parameters (~5KB+ of context). Send
+      // them as the first WebSocket message instead.
       await connect({
         auth: {
           type: "accessToken",
@@ -877,7 +880,12 @@ function ConversationPanelInner({
         },
         hostname: session.hostname,
         verboseTranscription: false,
-        sessionSettings: session.sessionSettings,
+      });
+
+      // Bootstrap the session with full settings including systemPrompt
+      // and voiceId. Mid-call updates will omit these (Hume preserves them).
+      sendSessionSettings({
+        ...session.sessionSettings,
       });
 
       if (preparedVisualStream && session.mode !== "voice") {
