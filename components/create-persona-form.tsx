@@ -21,6 +21,7 @@ export function CreatePersonaForm() {
   const [recordedSamples, setRecordedSamples] = useState<RecordedSample[]>([]);
   const [recorderError, setRecorderError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const sampleUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -50,8 +51,14 @@ export function CreatePersonaForm() {
             method: "POST",
             body: formData,
           });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({})) as { error?: string };
+            throw new Error(body.error ?? "Unable to create persona.");
+          }
           const payload = (await response.json()) as { personaId: string };
           router.push(`/personas/${payload.personaId}`);
+        } catch (error) {
+          setCreateError(error instanceof Error ? error.message : "Something went wrong.");
         } finally {
           setIsSubmitting(false);
         }
@@ -408,6 +415,9 @@ export function CreatePersonaForm() {
               This creates the persona and starts from the selected voice. Your recordings will be
               used when voice shaping becomes available.
             </p>
+            {createError ? (
+              <p className="mt-3 text-sm text-[rgba(190,80,70,0.9)]">{createError}</p>
+            ) : null}
             <button
               type="submit"
               disabled={isSubmitting}
@@ -418,7 +428,7 @@ export function CreatePersonaForm() {
               ) : (
                 <Wand2 className="h-4 w-4" />
               )}
-              {isSubmitting ? "Creating..." : "Create preview"}
+              {isSubmitting ? "Creating..." : "Create persona"}
             </button>
           </div>
         </div>

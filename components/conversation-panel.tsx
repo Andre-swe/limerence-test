@@ -500,6 +500,11 @@ function ConversationPanelInner({
     unmute,
     unmuteAudio,
   } = useVoice();
+  // Ref mirrors sessionContextVersion so the polling effect can read the
+  // latest value without being in its dependency array (which would tear
+  // down and recreate the interval on every delivery).
+  const contextVersionRef = useRef(sessionContextVersion);
+  contextVersionRef.current = sessionContextVersion;
   const hiddenVideoRef = useRef<HTMLVideoElement | null>(null);
   const visualStreamRef = useRef<MediaStream | null>(null);
   const captureIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -572,7 +577,7 @@ function ConversationPanelInner({
         const response = await fetch(
           `/api/personas/${personaId}/live/context?sessionId=${encodeURIComponent(
             sessionId,
-          )}&afterVersion=${sessionContextVersion}`,
+          )}&afterVersion=${contextVersionRef.current}`,
         );
 
         if (!response.ok || cancelled) {
@@ -602,7 +607,7 @@ function ConversationPanelInner({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [liveConnected, personaId, sessionContextVersion, sessionId, setPendingSessionFrame]);
+  }, [liveConnected, personaId, sessionId, setPendingSessionFrame]);
 
   useEffect(() => {
     return () => {

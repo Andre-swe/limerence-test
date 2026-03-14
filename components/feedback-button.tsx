@@ -40,7 +40,7 @@ export function FeedbackButton({
             onClick={async () => {
               setIsSubmitting(true);
               try {
-                await fetch(`/api/personas/${personaId}/feedback`, {
+                const response = await fetch(`/api/personas/${personaId}/feedback`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
@@ -50,8 +50,13 @@ export function FeedbackButton({
                     note,
                   }),
                 });
+                if (!response.ok) {
+                  throw new Error("Failed to save feedback.");
+                }
                 setNote("");
                 setIsOpen(false);
+              } catch {
+                // Silently keep the form open so the user can retry.
               } finally {
                 setIsSubmitting(false);
               }
