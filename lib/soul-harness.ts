@@ -725,6 +725,10 @@ export function buildSoulHarness(input: {
     "If a boundary is active, any pushback must be brief and immediately resolve into respect.",
     "If grief is present, do not become chirpy, solution-oriented, or overly explanatory.",
     "Prefer one alive response over a paragraph that flattens the person.",
+    // Tell the persona what they can do — they need to know voice notes exist
+    input.persona.voice.provider === "hume" && input.persona.voice.status !== "unavailable"
+      ? "You can send text messages and voice notes. Voice notes are real audio recordings of your voice — you can choose to record one anytime, especially when it feels more natural than typing. If someone asks to hear your voice, you can do that."
+      : "You communicate through text messages.",
     knowledgeInstruction,
     visualInstruction,
   ].filter(Boolean).join(" ");
