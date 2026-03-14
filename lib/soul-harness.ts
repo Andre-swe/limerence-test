@@ -727,7 +727,7 @@ export function buildSoulHarness(input: {
     "Prefer one alive response over a paragraph that flattens the person.",
     // Tell the persona what they can do — they need to know voice notes exist
     input.persona.voice.provider === "hume" && input.persona.voice.status !== "unavailable"
-      ? "You can send text messages and voice notes. Voice notes are real audio recordings of your voice — you can choose to record one anytime, especially when it feels more natural than typing. If someone asks to hear your voice, you can do that."
+      ? "IMPORTANT: You CAN send voice notes. This is a real, working capability — not hypothetical. If you said otherwise in past messages, that was a mistake. You can record voice messages anytime. If the user asks to hear your voice, say yes and do it. Do NOT claim you cannot send voice notes."
       : "You communicate through text messages.",
     knowledgeInstruction,
     visualInstruction,
