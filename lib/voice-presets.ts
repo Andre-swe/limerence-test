@@ -1,17 +1,17 @@
 export const houseVoicePresets = [
   {
-    id: "a7ecc00a-6fc0-4546-8126-e12cfd8de3bf",
-    name: "Ava",
+    id: "dbe14cac-f477-4114-8a62-2b482ff10f69",
+    name: "Soft",
     tone: "Warm female",
     description: "Soft, steady, and intimate. Good for a calm, emotionally present default.",
-    humeVoiceProvider: "HUME_AI" as const,
+    humeVoiceProvider: "CUSTOM_VOICE" as const,
   },
   {
-    id: "f60ecf9e-ff1e-4bae-9206-dba7c653a69e",
-    name: "Mark",
+    id: "65d2f293-f116-48d8-be96-01a263e2f9b8",
+    name: "Steady",
     tone: "Grounded male",
     description: "Warm, direct, and low-drama. Good for a steadier presence.",
-    humeVoiceProvider: "HUME_AI" as const,
+    humeVoiceProvider: "CUSTOM_VOICE" as const,
   },
 ] as const;
 
