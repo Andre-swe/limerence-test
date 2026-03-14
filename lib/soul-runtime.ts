@@ -443,6 +443,7 @@ function inWorkHours(persona: Persona, now: Date) {
   );
 }
 
+/** Plan a full conversation reply — selects process and builds the prompt for Gemini. */
 export function planConversationSoul(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -479,6 +480,7 @@ export function renderMockConversationReply(plan: SoulConversationPlan, persona:
   return fallbackReplyForProcess(plan.process, persona);
 }
 
+/** Plan a heartbeat message — routes to boundary hold, open loop follow-up, grief, celebration, or gentle presence. */
 export function planHeartbeatSoul(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -650,6 +652,7 @@ export function renderMockHeartbeatContent(plan: SoulHeartbeatPlan, persona: Per
   return `${opening}${content}`.trim();
 }
 
+/** Plan the intent deliberation step — determines what the persona is trying to do within the active process. */
 export function planIntentDeliberation(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -677,6 +680,7 @@ export function renderIntentPrompt(plan: SoulIntentPlan) {
   return `${plan.systemInstruction}\n\n${renderMemories(plan.memories)}\n\n${plan.userPrompt}\n\n${plan.stylePrompt}`;
 }
 
+/** Plan a compressed single-pass fast turn — appraise + select + deliberate + reply in one Gemini call. */
 export function planFastTurnResponse(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -770,6 +774,7 @@ export function renderFastTurnPrompt(plan: SoulFastTurnPlan) {
   return `${plan.systemInstruction}\n\n${renderMemories(plan.memories)}\n\n${plan.userPrompt}\n\n${plan.stylePrompt}`;
 }
 
+/** Plan learning artifact extraction — reviews the turn and extracts durable memories. */
 export function planLearningExtraction(input: {
   persona: Persona;
   messages: MessageEntry[];
