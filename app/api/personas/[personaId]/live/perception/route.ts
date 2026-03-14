@@ -4,6 +4,7 @@ import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+/** Processes a visual perception frame (screen or camera image) during a live session and returns the updated session frame. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

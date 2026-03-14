@@ -4,6 +4,7 @@ import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+/** Finalizes an active live session, persisting the transcript and updating persona memory. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

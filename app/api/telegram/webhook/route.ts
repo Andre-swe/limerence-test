@@ -3,6 +3,7 @@ import { processTelegramWebhook } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Receives an inbound Telegram Bot API update and routes it to the bound persona for processing. */
 export async function POST(request: Request) {
   try {
     const payload = await request.json();

@@ -3,6 +3,7 @@ import { createPersonaFromForm } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Creates a new persona from multipart form data and returns the new persona's id and status. */
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();

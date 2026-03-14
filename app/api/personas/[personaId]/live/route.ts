@@ -5,6 +5,7 @@ import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 
+/** Provisions a new Hume EVI live session for the persona in the requested mode (voice, screen, or camera). */
 async function handleSessionRequest(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

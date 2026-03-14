@@ -3,6 +3,7 @@ import { synthesizeStoredReply } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Synthesizes TTS audio for a previously stored persona reply and returns the updated message with an audio URL. */
 export async function POST(
   _request: Request,
   {

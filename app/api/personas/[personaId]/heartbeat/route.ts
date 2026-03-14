@@ -3,6 +3,7 @@ import { runHeartbeat } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Triggers a single heartbeat cycle for a persona, returning the autonomous decision it produced. */
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ personaId: string }> },

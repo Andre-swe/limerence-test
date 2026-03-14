@@ -3,6 +3,7 @@ import { addPersonaFeedback } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Records user feedback (e.g. thumbs-up/down or freeform notes) for a persona interaction. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

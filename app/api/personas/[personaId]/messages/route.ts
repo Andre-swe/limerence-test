@@ -3,6 +3,7 @@ import { sendPersonaMessage } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Sends an async message (text, audio, and/or images) to a persona and returns the updated persona state with reply messages. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

@@ -3,6 +3,7 @@ import { getLiveContextUpdate } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Returns the latest session frame and pending background jobs for the live overlay, supporting incremental polling via `afterVersion`. */
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

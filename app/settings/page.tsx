@@ -14,6 +14,7 @@ import { getSupabaseStatus } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+/** Renders the settings and diagnostics page showing provider status, storage configuration, and Telegram bridge setup. */
 export default function SettingsPage() {
   const providerStatus = getProviderStatus();
   const supabaseStatus = getSupabaseStatus();

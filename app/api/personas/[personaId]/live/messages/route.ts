@@ -3,6 +3,7 @@ import { appendLiveTranscriptTurn } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Appends a transcript turn to the active live session and returns any contextual update plus the current session frame. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ personaId: string }> },

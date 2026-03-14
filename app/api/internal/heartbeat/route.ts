@@ -3,6 +3,7 @@ import { flushPendingTelegramMessages, runDueHeartbeats } from "@/lib/services";
 
 export const runtime = "nodejs";
 
+/** Cron-style endpoint that runs all due persona heartbeats and flushes any pending Telegram outbound messages. */
 export async function POST() {
   try {
     const results = await runDueHeartbeats();
