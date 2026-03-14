@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import { useRef, useState } from "react";
-import { ImagePlus, Loader2, SendHorizontal, Upload } from "lucide-react";
+import { ImagePlus, Loader2, SendHorizontal } from "lucide-react";
 import { FeedbackButton } from "@/components/feedback-button";
+import { VoiceRecorder } from "@/components/voice-recorder";
 import { formatDateTime } from "@/lib/utils";
 import type { MessageAttachment, MessageEntry, PersonaStatus } from "@/lib/types";
 
@@ -195,7 +196,6 @@ export function MessagesPanel({
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const voiceInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const isLocked = personaStatus !== "active";
 
@@ -407,14 +407,15 @@ export function MessagesPanel({
                 Send
               </button>
 
-              <button
-                type="button"
-                onClick={() => voiceInputRef.current?.click()}
-                className="btn-pill"
-              >
-                <Upload className="h-4 w-4" />
-                Voice note
-              </button>
+              <VoiceRecorder
+                disabled={isSending}
+                onRecorded={async (file) => {
+                  await submit({ file, text });
+                }}
+                onError={(message) => {
+                  console.error("Voice recording error:", message);
+                }}
+              />
 
               <button
                 type="button"
@@ -425,19 +426,6 @@ export function MessagesPanel({
                 Image
               </button>
 
-              <input
-                ref={voiceInputRef}
-                type="file"
-                accept="audio/*"
-                className="hidden"
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    await submit({ file, text });
-                    event.target.value = "";
-                  }
-                }}
-              />
 
               <input
                 ref={imageInputRef}
