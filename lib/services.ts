@@ -36,6 +36,7 @@ import {
   seedBootstrapClaims,
 } from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
+import { planInternalMonologue, renderInternalMonologuePrompt } from "@/lib/soul-runtime";
 import {
   applySoulArchetypeToConstitution,
   applySoulArchetypeToRelationship,
@@ -483,62 +484,6 @@ function shouldPersonaChooseVoiceNote(
   probability = Math.min(probability, 0.35);
 
   return Math.random() < probability;
-}
-
-// ---------------------------------------------------------------------------
-// "Leave on read" decision — lets the persona choose not to reply right now.
-// The message is still processed and learned from. A future heartbeat can
-// pick up the thread when the persona feels ready.
-// ---------------------------------------------------------------------------
-
-/** Messages that don't demand a response — acknowledgements, reactions, etc. */
-const LOW_REPLY_PATTERNS = [
-  /^(ok|okay|k|kk|alright|sure|yep|yea|yeah|ya|mhm|mm|hmm|hm|ah|oh|lol|lmao|haha|hahaha|❤️|👍|😊|😂|🙏|💛|🥺|ty|thx|thanks|thank you|gn|gnight|good night|night|nite|ttyl|brb)$/i,
-  /^(sounds good|got it|bet|cool|nice|word|facts|true|right|totally|same|mood|felt that|fair enough)$/i,
-];
-
-function shouldPersonaLeaveOnRead(
-  persona: Persona,
-  turnResult: TurnExecutionResult,
-  userText: string,
-): { skip: boolean; reason: string } {
-  const process = turnResult.persona.mindState.activeProcess;
-  const constitution = persona.personalityConstitution;
-
-  // Always reply to boundaries, repair, and high-vulnerability moments
-  if (process === "boundary_negotiation" || process === "repair") {
-    return { skip: false, reason: "" };
-  }
-  const userState = turnResult.userState;
-  if (userState && (userState.vulnerability >= 0.6 || userState.griefLoad >= 0.5)) {
-    return { skip: false, reason: "" };
-  }
-
-  // Check if the message is a low-content acknowledgement
-  const isLowContent = LOW_REPLY_PATTERNS.some((pattern) => pattern.test(userText.trim()));
-  if (!isLowContent) {
-    return { skip: false, reason: "" };
-  }
-
-  // Personality-based probability of leaving on read
-  let skipProbability = 0.0;
-  skipProbability += constitution.reserve * 0.15;
-  skipProbability += (1 - constitution.warmth) * 0.1;
-  if (constitution.speechCadence === "brief") skipProbability += 0.08;
-  if (process === "silence_holding") skipProbability += 0.25;
-  if (process === "attunement") skipProbability += 0.05;
-
-  // Cap — even reserved personas usually reply sometimes
-  skipProbability = Math.min(skipProbability, 0.45);
-
-  if (Math.random() < skipProbability) {
-    return {
-      skip: true,
-      reason: `Left "${userText.trim()}" on read — felt like an acknowledgement, not a question.`,
-    };
-  }
-
-  return { skip: false, reason: "" };
 }
 
 function composePreferenceReply(persona: Persona, update: PreferenceUpdate) {
@@ -2518,6 +2463,45 @@ export async function sendPersonaMessage(
   const allMessages = await listMessages(personaId);
   const allObservations = await listPerceptionObservations(personaId);
 
+  // Step 0: Internal monologue — the persona thinks privately before acting.
+  // This is the OpenSouls-inspired "think before you speak" pattern.
+  const monologuePlan = planInternalMonologue({
+    persona: activePersona,
+    messages: allMessages,
+    feedbackNotes,
+    latestUserText: userText,
+    channel: (payload.channel ?? "web") as "web" | "telegram" | "live",
+  });
+  const monologue = await providers.reasoning.generateInternalMonologue(
+    renderInternalMonologuePrompt(monologuePlan),
+  );
+
+  // Update the persona's internal state with the monologue result
+  const now = new Date().toISOString();
+  activePersona = await updatePersona(personaId, (current) => ({
+    ...current,
+    mindState: {
+      ...current.mindState,
+      internalState: {
+        currentThought: monologue.thought,
+        mood: monologue.mood,
+        energy: monologue.energy,
+        patience: monologue.patience,
+        warmthTowardUser: monologue.warmthTowardUser,
+        engagementDrive: monologue.engagementDrive,
+        recentThoughts: [
+          { thought: monologue.thought, createdAt: now },
+          ...current.mindState.internalState.recentThoughts.slice(0, 7),
+        ],
+        updatedAt: now,
+      },
+    },
+  }));
+
+  // Check if the persona wants to reply based on their internal state
+  const leaveOnRead = !preferenceUpdate && !monologue.shouldReply;
+
+  // Step 1+: Full cognitive turn — appraise → deliberate → reply → learn
   const soulTurnResult = await executeSoulTurn({
     persona: activePersona,
     messages: allMessages,
@@ -2527,7 +2511,7 @@ export async function sendPersonaMessage(
     latestUserText: userText,
     reasoning: providers.reasoning,
     replyChannel: payload.channel === "telegram" ? "telegram" : "web",
-    renderReply: !preferenceUpdate,
+    renderReply: !preferenceUpdate && !leaveOnRead,
     boundaryTriggered: Boolean(preferenceUpdate),
   });
   fastTurnMs = Date.now() - cognitiveStartedAt;
@@ -2542,16 +2526,12 @@ export async function sendPersonaMessage(
     }));
   }
 
-  // Check if the persona decides to leave the message on read
-  const leaveOnRead = !preferenceUpdate
-    ? shouldPersonaLeaveOnRead(activePersona, soulTurnResult, userText)
-    : { skip: false, reason: "" };
-
   // Commit the cognitive turn (learning applied) regardless of reply decision
   const updatedAt = new Date().toISOString();
 
-  if (leaveOnRead.skip) {
-    // Persona read but chose not to reply — commit state + write a memory about why
+  if (leaveOnRead) {
+    // Persona read but chose not to reply — commit cognitive turn (learning still happens)
+    const updatedAt = new Date().toISOString();
     const committed = await replacePersonaIfRevision(personaId, activePersona.revision, (current) => ({
       ...soulTurnResult.persona,
       updatedAt,
@@ -2560,35 +2540,13 @@ export async function sendPersonaMessage(
     }));
     activePersona = committed.persona;
 
-    // Remember the decision so the persona can reference it later
-    await updatePersona(personaId, (current) => ({
-      ...current,
-      mindState: {
-        ...current.mindState,
-        recentChangedClaims: [
-          {
-            id: randomUUID(),
-            kind: "relationship_note" as const,
-            summary: leaveOnRead.reason,
-            scope: "session" as const,
-            status: "tentative" as const,
-            confidence: 0.6,
-            importance: 0.5,
-            sourceIds: [userMessage.id],
-            reinforcementCount: 1,
-            firstObservedAt: updatedAt,
-            lastObservedAt: updatedAt,
-            tags: ["left_on_read"],
-          },
-          ...current.mindState.recentChangedClaims.slice(0, 11),
-        ],
-      },
-    }));
-
+    // The internal monologue thought already explains why they didn't reply
     soulLogger.debug(
       {
         personaId,
-        reason: leaveOnRead.reason,
+        thought: monologue.thought,
+        mood: monologue.mood,
+        engagementDrive: monologue.engagementDrive,
         process: soulTurnResult.persona.mindState.activeProcess,
         event: "left_on_read",
       },
