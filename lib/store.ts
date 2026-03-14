@@ -730,6 +730,12 @@ async function mutateStore<T>(
   throw new Error("Supabase runtime store write conflicted too many times.");
 }
 
+// ---------------------------------------------------------------------------
+// Persona CRUD — reads/writes go through the shared runtime store (Supabase
+// or local file), with optimistic-concurrency revision checks on mutations.
+// ---------------------------------------------------------------------------
+
+/** List all personas sorted by most recently updated. */
 export async function listPersonas() {
   const store = await readStore();
   return [...store.personas].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -776,6 +782,7 @@ export async function updatePersona(personaId: string, updater: (persona: Person
   });
 }
 
+/** Atomically replace a persona only if the revision matches (optimistic concurrency). */
 export async function replacePersonaIfRevision(
   personaId: string,
   expectedRevision: number,
@@ -1062,6 +1069,11 @@ export async function updatePersonaShadowTurn(
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Messages, observations, and feedback — append-only collections.
+// ---------------------------------------------------------------------------
+
+/** List messages for a persona, sorted by creation time. */
 export async function listMessages(personaId: string) {
   const store = await readStore();
   return store.messages
@@ -1163,6 +1175,7 @@ export async function listPendingTelegramMessages() {
   );
 }
 
+/** Persist a file to Supabase Storage or the local uploads directory. Returns the public URL. */
 export async function savePublicFile(
   buffer: Buffer,
   fileName: string,

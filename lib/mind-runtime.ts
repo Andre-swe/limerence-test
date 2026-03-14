@@ -463,6 +463,12 @@ function determineRepairRisk(text: string, prosodySignals: string[]) {
   return clamp(score);
 }
 
+/**
+ * Infer a user emotional state from text, prosody, and visual context using
+ * heuristic scoring. Blends keyword detection, prosody signals, and visual
+ * cues into a normalized UserStateSnapshot. Used as fallback when Gemini
+ * inference is unavailable or as a fast pre-pass.
+ */
 export function inferHeuristicUserState(input: {
   text: string;
   channel: MessageEntry["channel"];
@@ -842,6 +848,7 @@ function defaultConstitutionForRelationship(relationship: string) {
   };
 }
 
+/** Derive a personality constitution from source material (description, texts, interview answers). */
 export function createPersonalityConstitution(input: PersonaMindLike): PersonalityConstitution {
   if (input.personalityConstitution) {
     return input.personalityConstitution;
@@ -902,6 +909,7 @@ export function createPersonalityConstitution(input: PersonaMindLike): Personali
   };
 }
 
+/** Derive a relationship model from source material and personality constitution. */
 export function createRelationshipModel(input: PersonaMindLike): RelationshipModel {
   if (input.relationshipModel) {
     return input.relationshipModel;
@@ -1576,6 +1584,7 @@ function buildStateFromMessages(input: {
   } satisfies MindState;
 }
 
+/** Build the initial mind state for a persona from messages, observations, and user state. */
 export function createInitialMindState(input: {
   persona: PersonaMindLike;
   messages?: MessageEntry[];

@@ -260,6 +260,7 @@ function inferKnowledgeProfileFromRelationship(
   return { domains, deflectionStyle, deflectionExamples };
 }
 
+/** Structured reasoning adapter — implemented by Gemini, OpenAI, Anthropic, and a mock fallback. */
 export interface ReasoningProvider {
   buildPersonaDossier(input: PersonaAssemblyInput): Promise<PersonaDossier>;
   extractTextFromScreenshot(input: { buffer: Buffer; fileName: string; mimeType: string }): Promise<string>;
@@ -272,6 +273,7 @@ export interface ReasoningProvider {
   runHeartbeatDecision(input: HeartbeatRequest): Promise<HeartbeatDecision>;
 }
 
+/** Audio transcription adapter — implemented by Deepgram and a mock fallback. */
 export interface TranscriptionProvider {
   transcribeAudio(input: { buffer: Buffer; mimeType: string; fileName: string }): Promise<string>;
 }
@@ -1809,6 +1811,7 @@ class DeepgramTranscriptionProvider extends MockTranscriptionProvider {
   }
 }
 
+/** Resolve the active provider set from environment variables (Gemini > Anthropic > OpenAI > Mock). */
 export function getProviders() {
   return {
     reasoning: process.env.GEMINI_API_KEY
@@ -1825,6 +1828,7 @@ export function getProviders() {
   };
 }
 
+/** Return the current provider configuration for diagnostics. */
 export function getProviderStatus(): ProviderStatus {
   const supabase = getSupabaseStatus();
 
