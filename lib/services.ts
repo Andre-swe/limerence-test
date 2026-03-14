@@ -2296,31 +2296,48 @@ export async function sendPersonaMessage(
   const observations: PerceptionObservation[] = [];
   const imageObservationStartedAt = imageFiles.length > 0 ? Date.now() : 0;
 
-  for (const imageFile of imageFiles) {
-    const buffer = Buffer.from(await imageFile.arrayBuffer());
-    const observation = await createDerivedVisualObservation({
-      persona,
-      messages: existingMessages,
-      mode: "camera",
-      source: "message_image",
-      fileName: imageFile.name,
-      mimeType: imageFile.type || "image/png",
-      buffer,
-      createdAt: userMessageCreatedAt,
-      sourceMessageId: userMessage.id,
-    });
-    const attachment = await persistMessageAttachment(imageFile, "image", {
-      visualSummary: observation.summary,
-    });
-
-    imageAttachments.push(attachment);
-    observations.push(observation);
+  // Process images in parallel — each Gemini vision call is independent.
+  const imageResults = await Promise.all(
+    imageFiles.map(async (imageFile) => {
+      const buffer = Buffer.from(await imageFile.arrayBuffer());
+      const observation = await createDerivedVisualObservation({
+        persona,
+        messages: existingMessages,
+        mode: "camera",
+        source: "message_image",
+        fileName: imageFile.name,
+        mimeType: imageFile.type || "image/png",
+        buffer,
+        createdAt: userMessageCreatedAt,
+        sourceMessageId: userMessage.id,
+      });
+      const attachment = await persistMessageAttachment(imageFile, "image", {
+        visualSummary: observation.summary,
+      });
+      return { observation, attachment };
+    }),
+  );
+  for (const result of imageResults) {
+    imageAttachments.push(result.attachment);
+    observations.push(result.observation);
   }
   if (imageObservationStartedAt > 0) {
     imageObservationMs = Date.now() - imageObservationStartedAt;
   }
 
   userMessage.attachments = [...userMessage.attachments, ...imageAttachments];
+
+  // Enrich the text the fast-turn sees with visual summaries so the persona
+  // can respond to what's actually in the images, not just "Shared an image."
+  if (observations.length > 0 && !originalText) {
+    const visualSummaries = observations
+      .map((o) => o.summary)
+      .filter(Boolean)
+      .join(" ");
+    if (visualSummaries) {
+      userText = `${userText} Visual context: ${visualSummaries}`;
+    }
+  }
 
   await appendMessages([userMessage]);
   if (observations.length > 0) {
