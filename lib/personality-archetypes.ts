@@ -269,6 +269,7 @@ export function getSoulArchetypeSeed(id: SoulArchetypeId) {
   return archetypeSeeds[id];
 }
 
+/** Infer the best-matching archetype from relationship description and source material. */
 export function inferSoulArchetypeSeed(input: {
   relationship: string;
   description: string;
@@ -310,6 +311,7 @@ export function inferSoulArchetypeSeed(input: {
   return null;
 }
 
+/** Blend an archetype's personality adjustments into a base constitution. */
 export function applySoulArchetypeToConstitution(
   base: PersonalityConstitution,
   archetype: SoulArchetypeSeed | null,
@@ -384,6 +386,7 @@ export function applySoulArchetypeToConstitution(
   };
 }
 
+/** Blend an archetype's relationship adjustments into a base relationship model. */
 export function applySoulArchetypeToRelationship(
   base: RelationshipModel,
   archetype: SoulArchetypeSeed | null,

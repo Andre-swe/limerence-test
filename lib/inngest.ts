@@ -4,10 +4,12 @@ import type { InternalScheduledEvent, PendingShadowTurn } from "@/lib/types";
 
 export const inngest = new Inngest({ id: "limerence" });
 
+/** Check if Inngest is configured for background job execution. */
 export function isInngestExecutionEnabled() {
   return Boolean(process.env.INNGEST_EVENT_KEY?.trim());
 }
 
+/** Publish scheduled soul events to Inngest for background execution. */
 export async function publishSoulInternalEvents(input: {
   personaId: string;
   events: InternalScheduledEvent[];
@@ -49,6 +51,7 @@ export async function publishSoulInternalEvents(input: {
   }
 }
 
+/** Publish pending shadow turns to Inngest for background cognitive processing. */
 export async function publishPersonaShadowTurns(input: {
   personaId: string;
   jobs: PendingShadowTurn[];
