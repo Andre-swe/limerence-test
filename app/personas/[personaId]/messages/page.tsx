@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { MessagesPanel } from "@/components/messages-panel";
+import { DebugPanel } from "@/components/debug-panel";
 import { LogoMark } from "@/components/logo-mark";
 import { getPersona, listMessages } from "@/lib/store";
 
@@ -55,6 +56,7 @@ export default async function PersonaMessagesPage({
           personaName={persona.name}
           personaStatus={persona.status}
         />
+        <DebugPanel personaId={persona.id} />
       </main>
     </div>
   );

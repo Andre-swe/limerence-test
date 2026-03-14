@@ -17,8 +17,11 @@ export async function GET(
 
     return NextResponse.json({
       personaId: persona.id,
+      personaName: persona.name,
       activeProcess: persona.mindState.activeProcess,
       currentProcessInstanceId: persona.mindState.currentProcessInstanceId,
+      // Persona's inner life — private thoughts and emotional state
+      internalState: persona.mindState.internalState,
       learningState: persona.mindState.learningState,
       liveSessionMetrics: persona.mindState.liveSessionMetrics,
       memoryClaims: persona.mindState.memoryClaims.slice(0, 12),
