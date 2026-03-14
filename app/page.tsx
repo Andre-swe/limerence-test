@@ -15,10 +15,10 @@ export default async function Home() {
         <header className="flex items-center justify-between pb-10 pt-2">
           <LogoMark />
           <div className="flex items-center gap-5 text-sm text-[rgba(29,38,34,0.48)]">
-            <Link href="/create" className="transition-colors hover:text-[var(--sage-deep)]">
+            <Link href="/create" className="link-warm">
               Create
             </Link>
-            <Link href="/settings" className="transition-colors hover:text-[var(--sage-deep)]">
+            <Link href="/settings" className="link-warm">
               How it works
             </Link>
           </div>
@@ -28,7 +28,7 @@ export default async function Home() {
           <h1 className="serif-title text-5xl leading-[0.96] text-[var(--sage-deep)] sm:text-6xl">
             Choose someone.
           </h1>
-          <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-[rgba(29,38,34,0.56)]">
+          <p className="meta-quiet mx-auto mt-4 max-w-xl text-base leading-7">
             Speak live, or leave a quieter note.
           </p>
         </section>
@@ -53,7 +53,7 @@ export default async function Home() {
           </Link>
         </section>
 
-        <footer className="mx-auto mt-8 pb-4 text-center text-xs leading-6 text-[rgba(29,38,34,0.4)]">
+        <footer className="meta-quiet mx-auto mt-8 pb-4 text-center">
           Built from voice, memory, and relationship history.
         </footer>
       </main>

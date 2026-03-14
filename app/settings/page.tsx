@@ -55,7 +55,7 @@ export default function SettingsPage() {
             </div>
             <Link
               href="/"
-              className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--sage-deep)]"
+              className="btn-pill"
             >
               <ArrowLeft className="h-4 w-4" />
               Back home

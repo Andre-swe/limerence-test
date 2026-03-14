@@ -30,7 +30,7 @@ export default async function PersonaMessagesPage({
             <div className="space-y-3">
               <Link
                 href={`/personas/${persona.id}`}
-                className="inline-flex items-center gap-2 text-sm font-medium text-[var(--sage)]"
+                className="link-warm inline-flex items-center gap-2 text-sm font-medium text-[var(--sage)]"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
@@ -43,7 +43,7 @@ export default async function PersonaMessagesPage({
 
           <Link
             href={`/personas/${persona.id}`}
-            className="inline-flex items-center rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.76)] px-4 py-2 text-sm font-medium text-[var(--sage-deep)]"
+            className="btn-pill"
           >
             Call
           </Link>

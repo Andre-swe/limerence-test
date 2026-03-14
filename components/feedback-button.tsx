@@ -32,7 +32,7 @@ export function FeedbackButton({
             onChange={(event) => setNote(event.target.value)}
             placeholder="Describe what felt off."
             rows={3}
-            className="w-full rounded-2xl border border-[var(--border)] bg-white px-3 py-2 text-sm outline-none"
+            className="input-quiet w-full text-sm"
           />
           <button
             type="button"
@@ -61,7 +61,7 @@ export function FeedbackButton({
                 setIsSubmitting(false);
               }
             }}
-            className="rounded-full bg-[var(--sage-deep)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            className="btn-solid text-xs"
           >
             {isSubmitting ? "Saving..." : "Save feedback"}
           </button>

@@ -90,7 +90,7 @@ export function CreatePersonaForm() {
             <input
               name="name"
               required
-              className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+              className="input-quiet w-full"
               placeholder="Mom"
             />
           </label>
@@ -99,7 +99,7 @@ export function CreatePersonaForm() {
             <input
               name="relationship"
               required
-              className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+              className="input-quiet w-full"
               placeholder="Mother"
             />
           </label>
@@ -109,7 +109,7 @@ export function CreatePersonaForm() {
               name="avatar"
               type="file"
               accept="image/*"
-              className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+              className="input-quiet w-full"
             />
           </label>
         </div>
@@ -120,7 +120,7 @@ export function CreatePersonaForm() {
             name="description"
             required
             rows={4}
-            className="w-full rounded-[24px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+            className="input-quiet w-full"
             placeholder="How they sounded, what made them distinct, what kind of emotional weather they carried."
           />
         </label>
@@ -229,7 +229,7 @@ export function CreatePersonaForm() {
                           return current.filter((entry) => entry.id !== sample.id);
                         });
                       }}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.82)] text-[var(--sage-deep)]"
+                      className="btn-pill h-10 w-10 justify-center p-0"
                       aria-label={`Delete recording ${index + 1}`}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -249,7 +249,7 @@ export function CreatePersonaForm() {
               type="file"
               accept="audio/*,video/*"
               multiple
-              className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+              className="input-quiet w-full"
             />
           </label>
           <label className="space-y-2">
@@ -259,7 +259,7 @@ export function CreatePersonaForm() {
               type="file"
               accept="image/*"
               multiple
-              className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+              className="input-quiet w-full"
             />
           </label>
         </div>
@@ -271,7 +271,7 @@ export function CreatePersonaForm() {
           <div className="mt-4 space-y-2">
             <input
               name="existingVoiceId"
-              className="w-full rounded-[20px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+              className="input-quiet w-full"
               placeholder="Paste an existing voice or character id"
             />
             <p className="text-xs leading-6 text-[rgba(29,38,34,0.5)]">
@@ -291,7 +291,7 @@ export function CreatePersonaForm() {
           <textarea
             name="pastedText"
             rows={5}
-            className="w-full rounded-[24px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+            className="input-quiet w-full"
             placeholder="Paste messages, notes, or voice-mail transcripts here."
           />
         </label>
@@ -389,7 +389,7 @@ export function CreatePersonaForm() {
               <textarea
                 name={`interview-${prompt}`}
                 rows={3}
-                className="w-full rounded-[22px] border border-[var(--border)] bg-white px-4 py-3 outline-none"
+                className="input-quiet w-full"
                 placeholder="Answer in detail."
               />
             </label>
@@ -421,7 +421,7 @@ export function CreatePersonaForm() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-[var(--gold)] px-4 py-3 text-sm font-semibold text-[var(--sage-deep)]"
+              className="btn-gold mt-5 inline-flex items-center gap-2 text-sm"
             >
               {isSubmitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

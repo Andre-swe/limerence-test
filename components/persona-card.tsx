@@ -30,21 +30,22 @@ export function PersonaCard({ persona }: { persona: Persona }) {
               </h3>
               <StatusBadge status={persona.status} />
             </div>
-            <p className="mt-1 text-sm text-[rgba(28,37,32,0.52)]">{persona.relationship}</p>
+            <p className="meta-quiet mt-1">{persona.relationship}</p>
           </div>
         </div>
       </div>
 
-      <div className="mt-8 border-t border-[var(--line)] pt-4">
+      <div className="mt-8 pt-4">
+        <div className="divider-soft -mt-4 mb-4" />
         <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-[rgba(28,37,32,0.42)]">
+          <p className="eyebrow">
             Carrying
           </p>
           <p className="mt-2 text-sm text-[var(--sage-deep)]">
             {persona.mindState.openLoops[0]?.title ?? describePresence(persona.heartbeatPolicy)}
           </p>
         </div>
-        <p className="mt-4 text-sm text-[rgba(28,37,32,0.44)]">{formatRelative(persona.updatedAt)}</p>
+        <p className="meta-quiet mt-4">{formatRelative(persona.updatedAt)}</p>
       </div>
     </Link>
   );

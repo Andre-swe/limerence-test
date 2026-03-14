@@ -1025,7 +1025,7 @@ function ConversationPanelInner({
               <p className="text-xl font-semibold tracking-[-0.03em] text-[var(--sage-deep)]">
                 {isLocked ? "Quiet for now" : "Something shifted"}
               </p>
-              <p className="text-sm leading-7 text-[rgba(29,38,34,0.58)]">
+              <p className="meta-quiet leading-7">
                 {isLocked ? "This person is not available yet." : callIssue}
               </p>
             </div>
@@ -1044,11 +1044,7 @@ function ConversationPanelInner({
                   onClick={() => {
                     void switchMode(mode);
                   }}
-                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-medium transition ${
-                    active
-                      ? "border-transparent bg-[var(--sage-deep)] text-white"
-                      : "border-[var(--line)] bg-[rgba(255,255,255,0.8)] text-[var(--sage-deep)]"
-                  }`}
+                  className={active ? "btn-solid" : "btn-pill"}
                 >
                   <Icon className="h-4 w-4" />
                   {mode === "voice" ? "Talk" : mode === "screen" ? "Share screen" : "Use camera"}
@@ -1092,7 +1088,7 @@ function ConversationPanelInner({
             className={`call-control ${
               liveConnected
                 ? "border-[rgba(122,63,58,0.18)] bg-[rgba(122,63,58,0.08)] text-[var(--danger)]"
-                : "bg-[var(--sage-deep)] text-white"
+                : "call-control-primary"
             }`}
           >
             {liveConnecting ? (
