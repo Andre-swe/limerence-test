@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Loader2, SendHorizontal } from "lucide-react";
+import { Check, CheckCheck, ImagePlus, Loader2, SendHorizontal } from "lucide-react";
 import { FeedbackButton } from "@/components/feedback-button";
 import { VoiceRecorder } from "@/components/voice-recorder";
 import { formatDateTime } from "@/lib/utils";
@@ -10,6 +10,7 @@ import type { MessageAttachment, MessageEntry, PersonaStatus } from "@/lib/types
 
 type ConversationResponse = {
   messages: MessageEntry[];
+  leftOnRead?: boolean;
   error?: string;
 };
 
@@ -80,12 +81,18 @@ function ReceiptLifecycle({
   return null;
 }
 
-function ReceiptText({ phase }: { phase: "sent" | "delivered" | "read" | "typing" }) {
-  const label = phase === "sent" ? "Sent" : phase === "delivered" ? "Delivered" : "Read";
+function ReceiptIndicator({ phase }: { phase: "sent" | "delivered" | "read" | "typing" }) {
+  // WhatsApp-style: single check = sent, double check = delivered, blue double check = read
   return (
-    <p className="mt-1 pr-1 text-right text-[10px] tracking-wide text-[rgba(29,38,34,0.34)]">
-      {label}
-    </p>
+    <div className="mt-0.5 flex items-center justify-end gap-1 pr-0.5">
+      {phase === "sent" ? (
+        <Check className="h-3.5 w-3.5 text-[rgba(29,38,34,0.3)]" />
+      ) : phase === "delivered" ? (
+        <CheckCheck className="h-3.5 w-3.5 text-[rgba(29,38,34,0.3)]" />
+      ) : (
+        <CheckCheck className="h-3.5 w-3.5 text-[rgba(110,140,90,0.7)]" />
+      )}
+    </div>
   );
 }
 
@@ -319,6 +326,14 @@ export function MessagesPanel({
         throw new Error(data.error || "Unable to send message.");
       }
 
+      if (data.leftOnRead) {
+        // Persona read the message but chose not to reply — keep the "Read" receipt
+        setMessages(data.messages);
+        optimisticAudio.dispose();
+        optimisticImages.dispose();
+        return;
+      }
+
       const floor = revealFloorMs({
         text: trimmedText,
         hasAudio: Boolean(payload.file),
@@ -415,9 +430,9 @@ export function MessagesPanel({
                 {/* Receipt — live phase when sending, static when settled */}
                 {isLastUser ? (
                   isSending ? (
-                    <ReceiptText phase={receiptPhase} />
+                    <ReceiptIndicator phase={receiptPhase} />
                   ) : lastUserRead ? (
-                    <p className="mt-1 pr-1 text-right text-[10px] tracking-wide text-[rgba(29,38,34,0.34)]">Read</p>
+                    <ReceiptIndicator phase="read" />
                   ) : null
                 ) : null}
 

@@ -26,8 +26,8 @@ export async function POST(
     });
 
     return NextResponse.json({
-      persona: result.persona,
       messages: result.messages,
+      leftOnRead: "leftOnRead" in result ? result.leftOnRead : false,
     });
   } catch (error) {
     return NextResponse.json(
