@@ -1,6 +1,6 @@
 # Limerence
 
-Limerence is a call-first personal-memory persona prototype. It lets someone create a remembered or synthetic presence, talk to that presence live, and continue the relationship asynchronously through messages, voice notes, and image sharing. The current build is intentionally honest about what is real, what is mocked, and what is still being shaped.
+Limerence is a call-first personal-memory persona product. It lets someone create an AI persona with personality, memory, and voice — then talk to that persona live and continue the relationship asynchronously through messages, voice notes, and image sharing.
 
 ## ✨ What It Is
 
@@ -27,7 +27,7 @@ Limerence is built around three layered ideas:
 - **Gemini is the reasoning and perception sidecar**  
   Gemini is the default structured reasoning provider for text-side behavior, user-state inference, and visual observations when images or live visual frames are involved.
 
-  The `ai` and `@ai-sdk/google` packages are installed in the repo, but the current provider layer is still mostly custom adapter code rather than a fully AI-SDK-driven runtime.
+  The provider layer uses direct API calls with timeout protection and structured failure logging.
 
 - **The OpenSouls-inspired kernel is the mind**  
   The local soul runtime carries personality constitution, relationship memory, user state, active mental process, open loops, and scheduled internal events between interactions.
@@ -67,8 +67,8 @@ These are the folders that matter most:
 - [`tests/`](/Users/syekel/Documents/limerance/tests)  
   Vitest coverage for persona workflows, soul behavior, live session building, and multimodal flows.
 
-- [`supabase/`](/Users/syekel/Documents/limerance/supabase)  
-  Intended production schema for a future Supabase-backed deployment.
+- [`supabase/`](/Users/syekel/Documents/limerance/supabase)
+  Supabase schema, migrations, and configuration for the shared runtime store.
 
 - [`vendor/opensouls-main/`](/Users/syekel/Documents/limerance/vendor/opensouls-main)  
   Vendored reference material. This repo is **not** used as a runtime dependency; it is kept here for architecture study and future cross-checking.
