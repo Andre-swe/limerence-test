@@ -1037,6 +1037,7 @@ async function processNextShadowTurn(personaId: string, sessionId?: string) {
   return processClaimedShadowTurn(personaId, claimed, sessionId);
 }
 
+/** Execute a specific queued shadow turn by job ID (called from Inngest or polling fallback). */
 export async function executeQueuedShadowTurn(personaId: string, jobId: string) {
   const claimed = await claimPersonaShadowTurnById(personaId, jobId);
   if (!claimed) {
@@ -1369,6 +1370,7 @@ const PROSODY_SHIFT_SENSITIVE_THRESHOLD = 0.08;
  * Compute a prosody-derived valence from raw Hume emotion scores.
  * Range: roughly -0.5 to +0.5 (average positive minus average negative).
  */
+/** Compute a single valence score from Hume prosody (positive emotions − negative). */
 export function computeProsodyValence(scores: Record<string, number>): number {
   const avg = (keys: string[]) => {
     const vals = keys.map((k) => scores[k] ?? 0);
@@ -1398,6 +1400,7 @@ const REDUCIBLE_FIELDS: Array<keyof UserStateSnapshot> = [
  * `previous` using exponential moving average. This dampens per-turn jitter
  * while preserving momentum when a score moves consistently in one direction.
  */
+/** EMA-smooth a new user state candidate into the running live state (α = 0.35). */
 export function reduceLiveUserState(
   previous: UserStateSnapshot | undefined,
   candidate: UserStateSnapshot,
@@ -1517,6 +1520,7 @@ const COMPOSITE_PATTERNS: Array<{
  * boundary_negotiation, protective_check_in) salience thresholds are lowered
  * to catch subtler shifts that matter in those contexts.
  */
+/** Detect whether the user's emotional state shifted enough to warrant a live soul intervention. */
 export function detectMeaningfulTransition(
   previous: UserStateSnapshot | undefined,
   next: UserStateSnapshot | undefined,
@@ -1744,6 +1748,7 @@ function clearLiveSessionState(sessionId?: string) {
 
 const DISTRESS_SIGNALS = /\b(distress|crying|urgent|emergency|panic|injury|blood|accident)\b/i;
 
+/** Compare two visual observations and determine if the scene changed meaningfully. */
 export function compareVisualObservation(
   previous: PerceptionObservation | undefined,
   next: PerceptionObservation,
@@ -1893,6 +1898,7 @@ async function executeReadyInternalEvents(input: {
   return activePersona;
 }
 
+/** Execute a scheduled internal event (timer, silence detection, heartbeat tick). */
 export async function executeSoulInternalEvent(
   personaId: string,
   eventId: string,
@@ -2041,6 +2047,7 @@ async function createDerivedVisualObservation(input: {
   } satisfies PerceptionObservation;
 }
 
+/** Create a new persona from the onboarding form — builds dossier, personality, and bootstrap claims. */
 export async function createPersonaFromForm(formData: FormData) {
   const providers = getProviders();
   const now = new Date().toISOString();
@@ -2272,6 +2279,11 @@ export async function createPersonaFromForm(formData: FormData) {
   return persona;
 }
 
+/**
+ * Send a message to a persona and get a reply. Runs the full cognitive pipeline:
+ * transcribe (if voice) → observe images (if any) → appraise → deliberate → reply → learn.
+ * The persona may choose to reply with a voice note based on personality and emotional context.
+ */
 export async function sendPersonaMessage(
   personaId: string,
   payload: {
@@ -2649,6 +2661,7 @@ function resolveLivePerceptionForSession(
   } satisfies SoulPerception;
 }
 
+/** Poll for live context updates — returns a session frame if a delivery is pending and not coalesced. */
 export async function getLiveContextUpdate(
   personaId: string,
   input: {
@@ -2790,6 +2803,7 @@ export async function getLiveContextUpdate(
   };
 }
 
+/** Append a live transcript turn (user or assistant) and decide whether to queue shadow cognition. */
 export async function appendLiveTranscriptTurn(personaId: string, payload: unknown) {
   const parsed = liveTranscriptRequestSchema.parse(payload) as LiveTranscriptRequest;
   const persona = await getPersona(personaId);
@@ -2997,6 +3011,7 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   };
 }
 
+/** Process a live visual frame (screen/camera) and decide whether to escalate to shadow cognition. */
 export async function observeLiveVisualPerception(
   personaId: string,
   payload: {
@@ -3182,6 +3197,7 @@ export async function observeLiveVisualPerception(
   };
 }
 
+/** End a live session — queue post-call consolidation with full session evidence. */
 export async function finalizeLiveSession(
   personaId: string,
   payload: {
@@ -3355,6 +3371,7 @@ export async function finalizeLiveSession(
   };
 }
 
+/** Record user feedback on a message — contradicts matching claims and creates a repair note. */
 export async function addPersonaFeedback(personaId: string, payload: unknown) {
   const parsed = feedbackRequestSchema.parse(payload);
   const persona = await getPersona(personaId);
@@ -3403,6 +3420,7 @@ export async function addPersonaFeedback(personaId: string, payload: unknown) {
   return feedback;
 }
 
+/** Run a heartbeat check for a persona — may produce a text or voice note message. */
 export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision> {
   const persona = await getPersona(personaId);
 

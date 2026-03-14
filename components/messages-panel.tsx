@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Loader2, SendHorizontal } from "lucide-react";
 import { FeedbackButton } from "@/components/feedback-button";
 import { VoiceRecorder } from "@/components/voice-recorder";
@@ -29,7 +29,6 @@ function TypingIndicator() {
     <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[rgba(111,123,105,0.08)] px-3 py-2">
       {[0, 1, 2].map((index) => (
         <span
-          // Staggered bounce feels closer to iMessage than a pulse on the whole line.
           key={index}
           className="typing-dot h-2 w-2 rounded-full bg-[rgba(75,85,67,0.62)]"
           style={{ animationDelay: `${index * 140}ms` }}
@@ -37,6 +36,32 @@ function TypingIndicator() {
       ))}
     </div>
   );
+}
+
+/**
+ * Shows "Delivered" first, then transitions to typing indicator after a
+ * human-like pause. Real people don't start typing the instant they see
+ * your message — they read it first.
+ */
+function DeliveredThenTyping() {
+  const [phase, setPhase] = useState<"delivered" | "typing">("delivered");
+
+  useEffect(() => {
+    // Random pause between 1.5–3.5s before "typing" appears
+    const delay = 1500 + Math.random() * 2000;
+    const timer = setTimeout(() => setPhase("typing"), delay);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (phase === "delivered") {
+    return (
+      <p className="mt-3 text-xs tracking-wide text-[rgba(29,38,34,0.38)]">
+        Delivered
+      </p>
+    );
+  }
+
+  return <TypingIndicator />;
 }
 
 function summarizeImageShare(count: number) {
@@ -357,7 +382,7 @@ export function MessagesPanel({
                   </p>
                 ) : null}
                 {message.optimistic && message.role === "assistant" && !showBody ? (
-                  <TypingIndicator />
+                  <DeliveredThenTyping />
                 ) : null}
                 <AttachmentStrip attachments={images} />
                 <AudioStrip message={message} />
