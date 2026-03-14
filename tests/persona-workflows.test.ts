@@ -1,3 +1,12 @@
+/**
+ * Persona workflow integration tests — covers the full product surface:
+ * persona creation, messages, live calls, memory, learning, heartbeats,
+ * prosody, visual perception, and the soul cognitive pipeline.
+ *
+ * Tests run against the mock provider layer so they execute instantly
+ * without hitting Gemini/Hume/Deepgram. The seed store provides two
+ * demo personas (Mom and Alex) with pre-existing conversation history.
+ */
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
