@@ -39,29 +39,54 @@ function TypingIndicator() {
 }
 
 /**
- * Shows "Delivered" first, then transitions to typing indicator after a
- * human-like pause. Real people don't start typing the instant they see
- * your message — they read it first.
+ * Receipt lifecycle that mirrors how a real person receives a message:
+ * Sent → Delivered (1-2s) → Read (2-4s more) → persona decides to type.
+ *
+ * The "typing" phase renders as a separate assistant bubble at the bottom
+ * of the thread. The receipt text appears under the user's last message.
+ * This component only controls the receipt text — the parent checks
+ * the phase to decide when to show the typing bubble.
  */
-function DeliveredThenTyping() {
-  const [phase, setPhase] = useState<"delivered" | "typing">("delivered");
-
+/**
+ * Tracks the Sent → Delivered → Read → Typing receipt lifecycle.
+ * Each receipt state advances via a separate timer. Resets when
+ * the sendKey changes (new message sent).
+ */
+function ReceiptLifecycle({
+  onPhaseChange,
+}: {
+  onPhaseChange: (phase: "sent" | "delivered" | "read" | "typing") => void;
+}) {
   useEffect(() => {
-    // Random pause between 1.5–3.5s before "typing" appears
-    const delay = 1500 + Math.random() * 2000;
-    const timer = setTimeout(() => setPhase("typing"), delay);
-    return () => clearTimeout(timer);
+    onPhaseChange("sent");
+
+    const deliveredDelay = 800 + Math.random() * 1200;
+    const readDelay = deliveredDelay + 1500 + Math.random() * 2500;
+    const typingDelay = readDelay + 1000 + Math.random() * 2000;
+
+    const t1 = setTimeout(() => onPhaseChange("delivered"), deliveredDelay);
+    const t2 = setTimeout(() => onPhaseChange("read"), readDelay);
+    const t3 = setTimeout(() => onPhaseChange("typing"), typingDelay);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+    // onPhaseChange is stable (from parent useState setter)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (phase === "delivered") {
-    return (
-      <p className="mt-3 text-xs tracking-wide text-[rgba(29,38,34,0.38)]">
-        Delivered
-      </p>
-    );
-  }
+  return null;
+}
 
-  return <TypingIndicator />;
+function ReceiptText({ phase }: { phase: "sent" | "delivered" | "read" | "typing" }) {
+  const label = phase === "sent" ? "Sent" : phase === "delivered" ? "Delivered" : "Read";
+  return (
+    <p className="mt-1 pr-1 text-right text-[10px] tracking-wide text-[rgba(29,38,34,0.34)]">
+      {label}
+    </p>
+  );
 }
 
 function summarizeImageShare(count: number) {
@@ -212,6 +237,8 @@ export function MessagesPanel({
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [sendKey, setSendKey] = useState(0);
+  const [receiptPhase, setReceiptPhase] = useState<"sent" | "delivered" | "read" | "typing">("sent");
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const isLocked = personaStatus !== "active";
 
@@ -226,7 +253,6 @@ export function MessagesPanel({
     const imageFiles = payload.images ?? [];
     const optimisticCreatedAt = new Date().toISOString();
     const optimisticUserId = `optimistic-user-${crypto.randomUUID()}`;
-    const optimisticAssistantId = `optimistic-assistant-${crypto.randomUUID()}`;
     const optimisticAudio = payload.file
       ? buildOptimisticAttachments([payload.file], "audio")
       : { attachments: [] as MessageAttachment[], dispose() {} };
@@ -261,27 +287,11 @@ export function MessagesPanel({
       optimistic: true,
     };
 
-    const optimisticAssistantMessage: DisplayMessage = {
-      id: optimisticAssistantId,
-      personaId,
-      role: "assistant",
-      kind: "text",
-      channel: "web",
-      body: "",
-      attachments: [],
-      audioStatus: "unavailable",
-      createdAt: new Date(Date.now() + 1).toISOString(),
-      delivery: {
-        webInbox: true,
-        telegramStatus: "not_requested",
-        attempts: 0,
-      },
-      optimistic: true,
-    };
-
     setIsSending(true);
+    setSendKey((k) => k + 1);
     setText("");
-    setMessages((current) => [...current, optimisticUserMessage, optimisticAssistantMessage]);
+    // Only add the user message — the typing indicator appears later via receipt phase
+    setMessages((current) => [...current, optimisticUserMessage]);
 
     try {
       const formData = new FormData();
@@ -327,9 +337,7 @@ export function MessagesPanel({
       optimisticAudio.dispose();
       optimisticImages.dispose();
       setMessages((current) =>
-        current.filter(
-          (message) => message.id !== optimisticUserId && message.id !== optimisticAssistantId,
-        ),
+        current.filter((message) => message.id !== optimisticUserId),
       );
       // Only restore original text if the user hasn't typed something new
       setText((current) => current.trim() ? current : draftText);
@@ -349,11 +357,6 @@ export function MessagesPanel({
   const lastUserRead = lastUserIndex >= 0 && visible.slice(lastUserIndex + 1).some(
     (m) => m.role === "assistant" && !m.optimistic,
   );
-  // Check if an optimistic assistant reply is pending
-  const lastUserDelivered = lastUserIndex >= 0 && visible.some(
-    (m) => m.role === "assistant" && m.optimistic,
-  );
-
   return (
     <section className="soft-panel mx-auto flex max-w-3xl flex-col rounded-[36px] px-4 py-4 sm:px-5 sm:py-5">
       <div className="flex min-h-[32rem] flex-col">
@@ -404,30 +407,43 @@ export function MessagesPanel({
                         {message.body}
                       </p>
                     ) : null}
-                    {message.optimistic && !isUser && !showBody ? (
-                      <DeliveredThenTyping />
-                    ) : null}
                     <AttachmentStrip attachments={images} />
                     <AudioStrip message={message} />
                   </article>
                 </div>
 
-                {/* Read/Delivered receipt — only under the last user message */}
-                {isLastUser && !message.optimistic ? (
-                  <p className="mt-1 pr-1 text-right text-[10px] tracking-wide text-[rgba(29,38,34,0.34)]">
-                    {lastUserRead ? "Read" : lastUserDelivered ? "Delivered" : "Sent"}
-                  </p>
+                {/* Receipt — live phase when sending, static when settled */}
+                {isLastUser ? (
+                  isSending ? (
+                    <ReceiptText phase={receiptPhase} />
+                  ) : lastUserRead ? (
+                    <p className="mt-1 pr-1 text-right text-[10px] tracking-wide text-[rgba(29,38,34,0.34)]">Read</p>
+                  ) : null
                 ) : null}
 
                 {/* Feedback flag — only on real assistant messages */}
                 {!isUser && !message.optimistic ? (
-                  <div className={`${isUser ? "text-right" : ""} mt-0.5`}>
+                  <div className="mt-0.5">
                     <FeedbackButton personaId={personaId} messageId={message.id} />
                   </div>
                 ) : null}
               </div>
             );
           })}
+
+          {/* Receipt lifecycle — remounted on each send via key. Drives the Sent → Delivered → Read → Typing flow. */}
+          {isSending ? (
+            <ReceiptLifecycle key={sendKey} onPhaseChange={setReceiptPhase} />
+          ) : null}
+
+          {/* Typing bubble — appears when the receipt phase reaches "typing" */}
+          {isSending && receiptPhase === "typing" ? (
+            <div className="mt-2 flex justify-start">
+              <div className="msg-bubble msg-bubble-assistant">
+                <TypingIndicator />
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {isLocked ? (
