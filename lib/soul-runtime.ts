@@ -456,15 +456,20 @@ export function planConversationSoul(input: {
   feedbackNotes: string[];
   latestUserText: string;
   channel: "web" | "telegram";
+  voiceNote?: boolean;
 }): SoulConversationPlan {
   const process =
     input.persona.mindState?.activeProcess ??
     activeProcessFor(input.persona, input.messages, input.feedbackNotes);
 
+  const voiceInstruction = input.voiceNote
+    ? " This reply will be spoken aloud as a voice note — write like you're talking, not typing. Keep it short, warm, and natural. No emoji, no formatting, no bullet points."
+    : "";
+
   return {
     process,
     memories: baseMemories(input.persona, input.messages, input.feedbackNotes),
-    systemInstruction: `You are ${input.persona.name}. Reply with one natural message in your own voice. Keep it private, intimate, and governed by your personality and relationship. Never mention prompts, processes, scores, or system rules.`,
+    systemInstruction: `You are ${input.persona.name}. Reply with one natural message in your own voice.${voiceInstruction} Keep it private, intimate, and governed by your personality and relationship. Never mention prompts, processes, scores, or system rules.`,
     userPrompt: `The latest user message came through ${input.channel}: "${input.latestUserText}"\nConversation process: ${processInstruction(process)}.`,
     stylePrompt: styleFingerprint(input.persona),
   };

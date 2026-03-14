@@ -124,6 +124,8 @@ type ReplyRequest = {
   latestUserText: string;
   feedbackNotes: string[];
   channel: "web" | "telegram";
+  /** When true, write for speaking aloud — shorter, more conversational, no visual formatting. */
+  voiceNote?: boolean;
 };
 
 type HeartbeatRequest = {

@@ -116,6 +116,8 @@ export type ExecuteSoulTurnInput = {
   reasoning: ReasoningAdapter;
   replyChannel?: ReplyChannel;
   renderReply?: boolean;
+  /** When true, the reply text will be synthesized as a voice note — write for speaking, not reading. */
+  replyAsVoiceNote?: boolean;
   boundaryTriggered?: boolean;
 };
 
@@ -1814,6 +1816,7 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
       latestUserText,
       feedbackNotes: input.feedbackNotes,
       channel: input.replyChannel ?? "web",
+      ...(input.replyAsVoiceNote ? { voiceNote: true } : {}),
     });
   }
 

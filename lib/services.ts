@@ -2461,6 +2461,7 @@ export async function sendPersonaMessage(
     reasoning: providers.reasoning,
     replyChannel: payload.channel === "telegram" ? "telegram" : "web",
     renderReply: !preferenceUpdate && !leaveOnRead,
+    replyAsVoiceNote: monologue.replyFormat === "voice_note",
     boundaryTriggered: Boolean(preferenceUpdate),
   });
   fastTurnMs = Date.now() - cognitiveStartedAt;
