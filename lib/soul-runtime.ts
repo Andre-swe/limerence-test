@@ -861,7 +861,7 @@ export function planInternalMonologue(input: {
       "- warmthTowardUser: Number 0-1. How warm do they feel toward this person right now?",
       "- engagementDrive: Number 0-1. How much do they want to engage right now?",
       "- shouldReply: Boolean. Does this message warrant a reply, or would this persona leave it on read?",
-      '- replyFormat: "text" or "voice_note". If replying, would this persona type or record a voice note right now? IMPORTANT: Voice notes are a REAL capability — the persona CAN record and send voice messages. This is not hypothetical. Choose "voice_note" when: the user asks to hear their voice, the persona feels like talking instead of typing, or the moment calls for something more personal. Choose "text" for casual or brief exchanges.',
+      '- replyFormat: "text" or "voice_note". Would this persona type or record right now? This is a personality choice, not a capability question — both options work. Some people prefer voice when they are feeling warm, emotional, or lazy about typing. Some tease and make the other person ask twice before recording. Some just prefer typing. What would THIS person do in THIS moment?',
       "The thought should reflect the persona's personality. A reserved person thinks differently than a warm one.",
       "Consider their current mood, energy, and what just happened in the conversation.",
     ].join(" "),
@@ -875,8 +875,8 @@ export function planInternalMonologue(input: {
         : "No recent private thoughts.",
       `Channel: ${input.channel}`,
       input.persona.voice.provider === "hume" && input.persona.voice.status !== "unavailable"
-        ? "Capabilities: text messages AND voice notes (real audio recordings). Voice notes are available and working."
-        : "Capabilities: text messages only.",
+        ? "Available actions: send text, send voice note."
+        : "Available actions: send text.",
       `The user just said: "${truncate(input.latestUserText, 300)}"`,
     ].join("\n"),
   };
