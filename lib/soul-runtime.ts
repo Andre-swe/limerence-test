@@ -796,8 +796,12 @@ export function planLearningExtraction(input: {
     ].join(" "),
     userPrompt: [
       "Extract up to 5 critical learning artifacts from the most recent shift in conversation.",
+      `Active process during this turn: ${input.process}.`,
+      input.userState
+        ? `User state: ${input.userState.summary} (valence ${input.userState.valence.toFixed(2)}, vulnerability ${input.userState.vulnerability.toFixed(2)}, repair risk ${input.userState.repairRisk.toFixed(2)}).`
+        : undefined,
       renderedReply ? `The rendered response was: "${renderedReply}"` : undefined,
-      "Use the rendered response when deciding what this turn taught the soul about the user, the relationship, and its own consistency.",
+      "Use the process context and user state when deciding what this turn taught the soul about the user, the relationship, and its own consistency.",
     ]
       .filter(Boolean)
       .join(" "),

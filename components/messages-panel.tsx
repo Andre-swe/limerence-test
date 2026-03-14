@@ -315,7 +315,8 @@ export function MessagesPanel({
           (message) => message.id !== optimisticUserId && message.id !== optimisticAssistantId,
         ),
       );
-      setText((current) => current || draftText);
+      // Only restore original text if the user hasn't typed something new
+      setText((current) => current.trim() ? current : draftText);
       console.error(error);
     } finally {
       setIsSending(false);

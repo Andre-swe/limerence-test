@@ -563,6 +563,7 @@ function ConversationPanelInner({
     if (!liveConnected || !sessionId) {
       return;
     }
+    let consecutiveFailures = 0;
 
     let cancelled = false;
 
@@ -575,20 +576,25 @@ function ConversationPanelInner({
         );
 
         if (!response.ok || cancelled) {
+          consecutiveFailures++;
           return;
         }
 
+        consecutiveFailures = 0;
         const payload = (await response.json()) as LiveContextResponse;
         if (payload.sessionFrame && !cancelled) {
           setPendingSessionFrame(payload.sessionFrame);
         }
       } catch {
+        consecutiveFailures++;
         // Keep the live experience steady if a poll misses.
       }
     };
 
     void poll();
     const interval = setInterval(() => {
+      // Back off if polls are consistently failing (max ~24s between polls)
+      if (consecutiveFailures >= 8) return;
       void poll();
     }, 3000);
 

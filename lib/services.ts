@@ -3164,7 +3164,7 @@ export async function finalizeLiveSession(
     (m) => m.channel === "live" && (!payload.sessionId || m.metadata?.sessionId === payload.sessionId),
   );
   const sessionObservations = observations.filter(
-    (o) => payload.sessionId && o.sessionId === payload.sessionId,
+    (o) => !payload.sessionId || o.sessionId === payload.sessionId,
   );
   const userTurns = sessionMessages.filter((m) => m.role === "user");
   const assistantTurns = sessionMessages.filter((m) => m.role === "assistant");
