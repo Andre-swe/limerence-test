@@ -795,6 +795,8 @@ async function runVersionedSoulTurn(input: {
   throw new Error("Unable to commit soul turn after revision retries.");
 }
 
+// Retained for channels where latency matters more than depth (e.g. Telegram).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function runVersionedFastMessageTurn(input: {
   personaId: string;
   basePersona?: Persona;
@@ -2243,7 +2245,6 @@ export async function sendPersonaMessage(
   let imageObservationMs = 0;
   let fastTurnMs = 0;
   let assistantAppendMs = 0;
-  let shadowEnqueueMs = 0;
 
   if (payload.audioFile && payload.audioFile.size > 0) {
     audioAttachment = await persistMessageAttachment(payload.audioFile, "audio");
@@ -2383,36 +2384,42 @@ export async function sendPersonaMessage(
     },
   };
 
-  const fastTurnStartedAt = Date.now();
-  const userTurnExecution = await runVersionedFastMessageTurn({
-    personaId,
-    basePersona: activePersona,
-    build: async () => ({
-      messages: await listMessages(personaId),
-      observations: await listPerceptionObservations(personaId),
-      feedbackNotes,
-      perception,
-      latestUserText: userText,
-      reasoning: providers.reasoning,
-      replyChannel: payload.channel === "telegram" ? "telegram" : "web",
-      boundaryTriggered: Boolean(preferenceUpdate),
-    }),
+  // -----------------------------------------------------------------------
+  // Full cognitive turn — no shallow fast-turn + shadow split.
+  // The persona thinks before replying: appraise → deliberate → reply → learn.
+  // The latency feels human — like being left on "delivered" then seeing typing.
+  // -----------------------------------------------------------------------
+  const cognitiveStartedAt = Date.now();
+  const allMessages = await listMessages(personaId);
+  const allObservations = await listPerceptionObservations(personaId);
+
+  const soulTurnResult = await executeSoulTurn({
+    persona: activePersona,
+    messages: allMessages,
+    observations: allObservations,
+    feedbackNotes,
+    perception,
+    latestUserText: userText,
+    reasoning: providers.reasoning,
+    replyChannel: payload.channel === "telegram" ? "telegram" : "web",
+    renderReply: !preferenceUpdate,
+    boundaryTriggered: Boolean(preferenceUpdate),
   });
-  fastTurnMs = Date.now() - fastTurnStartedAt;
+  fastTurnMs = Date.now() - cognitiveStartedAt;
 
-  const userTurnResult = userTurnExecution.turnResult;
-  const inferredUserState = userTurnResult.userState;
-  activePersona = userTurnExecution.persona;
-  userMessage.userState = inferredUserState;
-
-  await updateMessage(userMessage.id, (current) => ({
-    ...current,
-    userState: inferredUserState,
-  }));
+  const inferredUserState = soulTurnResult.userState ?? soulTurnResult.persona.mindState.lastUserState;
+  activePersona = soulTurnResult.persona;
+  if (inferredUserState) {
+    userMessage.userState = inferredUserState;
+    await updateMessage(userMessage.id, (current) => ({
+      ...current,
+      userState: inferredUserState,
+    }));
+  }
 
   const replyText = preferenceUpdate
     ? composePreferenceReply(activePersona, preferenceUpdate)
-    : userTurnResult.replyText ?? "";
+    : soulTurnResult.replyText ?? "";
   const shouldReplyWithVoiceNote = payload.channel === "telegram" || Boolean(audioAttachment);
   const synthesized = shouldReplyWithVoiceNote
     ? await providers.voice.synthesize({
@@ -2453,41 +2460,17 @@ export async function sendPersonaMessage(
   await appendMessages([assistantMessage]);
   assistantAppendMs = Date.now() - assistantAppendStartedAt;
 
-  const messagesWithReply = await listMessages(personaId);
-  const shadowEnqueueStartedAt = Date.now();
-  const userLearningTurn = buildPendingShadowTurn({
-    persona: activePersona,
-    perception: {
-      ...perception,
-      userStateId: inferredUserState.id,
-    },
-    providedUserState: inferredUserState,
-  });
-  activePersona = await enqueueShadowTurnForExecution(activePersona.id, userLearningTurn, {
-    backgroundFallback: true,
-  });
+  // Commit the full soul turn result (with learning already applied).
+  const updatedAt = new Date().toISOString();
+  const committed = await replacePersonaIfRevision(personaId, activePersona.revision, (current) => ({
+    ...soulTurnResult.persona,
+    updatedAt,
+    lastActiveAt: updatedAt,
+    lastHeartbeatAt: current.lastHeartbeatAt,
+  }));
+  activePersona = committed.persona;
 
-  const assistantReflectionTurn = buildPendingShadowTurn({
-    persona: activePersona,
-    perception: {
-      kind: "assistant_message",
-      channel: payload.channel ?? "web",
-      modality: synthesized.audioUrl ? "voice_note" : "text",
-      content: assistantMessage.body,
-      createdAt: assistantMessage.createdAt,
-      internal: true,
-      causationId: userMessage.id,
-      correlationId: userMessage.id,
-      metadata: {
-        messageId: assistantMessage.id,
-        replyMode: assistantMessage.replyMode,
-      },
-    },
-  });
-  activePersona = await enqueueShadowTurnForExecution(activePersona.id, assistantReflectionTurn, {
-    backgroundFallback: true,
-  });
-  shadowEnqueueMs = Date.now() - shadowEnqueueStartedAt;
+  const messagesWithReply = await listMessages(personaId);
 
   soulLogger.debug(
     {
@@ -2498,11 +2481,12 @@ export async function sendPersonaMessage(
       totalDurationMs: Date.now() - requestStartedAt,
       transcriptionMs,
       imageObservationMs,
-      fastTurnMs,
+      cognitiveTurnMs: fastTurnMs,
       assistantAppendMs,
-      shadowEnqueueMs,
+      learningArtifacts: soulTurnResult.learningArtifacts.length,
+      process: soulTurnResult.persona.mindState.activeProcess,
     },
-    "message send completed",
+    "message send completed (full cognitive turn)",
   );
 
   return {

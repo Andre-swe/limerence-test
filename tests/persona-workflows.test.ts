@@ -393,41 +393,23 @@ describe("persona workflows", () => {
     expect(alexReply.toLowerCase()).toMatch(/lmao|you got this|don't overthink it/);
   });
 
-  it("queues assistant reflection as a shadow turn instead of blocking the web reply", async () => {
-    const previousInngestKey = process.env.INNGEST_EVENT_KEY;
-    process.env.INNGEST_EVENT_KEY = "test-inngest-key";
-    const sendSpy = vi.spyOn(inngest, "send").mockResolvedValue({ ids: ["mock-id"] });
-
-    try {
-      await withoutReasoningProviders(async () => {
-        const result = await sendPersonaMessage("persona-mom", {
-          text: "hello there",
-          channel: "web",
-        });
-
-        const persona = await getPersona("persona-mom");
-        const assistantShadowTurn = persona?.mindState.pendingShadowTurns.find(
-          (job) =>
-            job.perception.kind === "assistant_message" &&
-            job.perception.metadata?.messageId === result.appended[1].id,
-        );
-
-        expect(assistantShadowTurn?.status).toBe("pending");
-
-        const events = sendSpy.mock.calls.flatMap(([payload]) =>
-          Array.isArray(payload) ? payload : [payload],
-        );
-
-        expect(events.some((event) => event.name === "soul/shadow-turn")).toBe(true);
+  it("runs full cognitive turn with inline learning for web messages", async () => {
+    await withoutReasoningProviders(async () => {
+      const result = await sendPersonaMessage("persona-mom", {
+        text: "hello there",
+        channel: "web",
       });
-    } finally {
-      sendSpy.mockRestore();
-      if (previousInngestKey === undefined) {
-        delete process.env.INNGEST_EVENT_KEY;
-      } else {
-        process.env.INNGEST_EVENT_KEY = previousInngestKey;
-      }
-    }
+
+      // The reply should exist (full cognitive turn produces one)
+      expect(result.appended.length).toBe(2);
+      expect(result.appended[1].role).toBe("assistant");
+      expect(result.appended[1].body.length).toBeGreaterThan(0);
+
+      // Learning happens inline — no shadow turns queued for the web path
+      const persona = await getPersona("persona-mom");
+      expect(persona?.mindState.traceHead.length).toBeGreaterThan(0);
+      expect(persona?.mindState.recentEvents.length).toBeGreaterThan(0);
+    });
   });
 
   it("learns work-hour boundaries from natural language", async () => {
