@@ -991,7 +991,15 @@ function ConversationPanelInner({
             <div className="call-orb-ring" />
             <div className="call-orb-ring call-orb-ring-soft" />
             <div
-              className={`call-orb-core ${liveConnected || liveConnecting ? "orb-breathe" : ""}`}
+              className={`call-orb-core ${
+                liveState === "listening"
+                  ? "orb-listen"
+                  : liveState === "replying"
+                    ? "orb-speak"
+                    : liveConnected || liveConnecting
+                      ? "orb-breathe"
+                      : ""
+              }`}
               style={{ transform: `scale(${orbScale})` }}
             />
           </div>
