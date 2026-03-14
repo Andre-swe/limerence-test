@@ -144,11 +144,6 @@ function AttachmentStrip({ attachments }: { attachments: MessageAttachment[] }) 
             className="block max-h-[22rem] w-full object-cover"
             unoptimized
           />
-          {attachment.visualSummary ? (
-            <figcaption className="px-3 py-2 text-xs leading-6 text-[rgba(29,38,34,0.56)]">
-              {attachment.visualSummary}
-            </figcaption>
-          ) : null}
         </figure>
       ))}
     </div>
