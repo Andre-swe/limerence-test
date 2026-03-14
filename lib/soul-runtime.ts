@@ -55,6 +55,12 @@ export type SoulFastTurnPlan = {
   stylePrompt: string;
 };
 
+export type SoulInternalMonologuePlan = {
+  memories: SoulMemory[];
+  systemInstruction: string;
+  userPrompt: string;
+};
+
 function joins(values: Array<string | undefined | null>, separator = " ") {
   return values.filter(Boolean).join(separator).trim();
 }
@@ -816,4 +822,58 @@ export function planLearningExtraction(input: {
 
 export function renderLearningPrompt(plan: SoulLearningPlan) {
   return `${plan.systemInstruction}\n\n${renderMemories(plan.memories)}\n\n${plan.userPrompt}\n\n${plan.stylePrompt}`;
+}
+
+// ---------------------------------------------------------------------------
+// Internal monologue — the persona's private thought before acting.
+// Inspired by OpenSouls' internalMonologue cognitiveStep: the persona
+// thinks before speaking, and that thought persists in working memory
+// to shape the response and all future decisions.
+// ---------------------------------------------------------------------------
+
+/** Plan the persona's internal monologue — a private thought about how they feel. */
+export function planInternalMonologue(input: {
+  persona: Persona;
+  messages: MessageEntry[];
+  feedbackNotes: string[];
+  latestUserText: string;
+  channel: "web" | "telegram" | "live";
+}): SoulInternalMonologuePlan {
+  const memories = baseMemories(input.persona, input.messages, input.feedbackNotes);
+  const internalState = input.persona.mindState.internalState;
+  const constitution = input.persona.personalityConstitution;
+
+  return {
+    memories,
+    systemInstruction: [
+      `You are modeling the private inner experience of ${input.persona.name}.`,
+      "This is NOT a response to the user. This is what the persona is privately thinking and feeling right now.",
+      "Return ONLY strict JSON with these keys:",
+      "- thought: A 1-2 sentence private thought in the persona's own inner voice. What are they feeling? What's their gut reaction?",
+      "- mood: A short phrase describing their current emotional weather (e.g. 'warm but tired', 'guarded', 'genuinely happy', 'irritated but hiding it').",
+      "- energy: Number 0-1. How much energy do they have right now?",
+      "- patience: Number 0-1. How patient are they feeling?",
+      "- warmthTowardUser: Number 0-1. How warm do they feel toward this person right now?",
+      "- engagementDrive: Number 0-1. How much do they want to engage right now?",
+      "- shouldReply: Boolean. Does this message warrant a reply, or would this persona leave it on read?",
+      "The thought should reflect the persona's personality. A reserved person thinks differently than a warm one.",
+      "Consider their current mood, energy, and what just happened in the conversation.",
+    ].join(" "),
+    userPrompt: [
+      `Current mood: ${internalState.mood}`,
+      `Current energy: ${internalState.energy.toFixed(2)}`,
+      `Current patience: ${internalState.patience.toFixed(2)}`,
+      `Personality: warmth ${constitution.warmth.toFixed(2)}, reserve ${constitution.reserve.toFixed(2)}, directness ${constitution.directness.toFixed(2)}`,
+      internalState.recentThoughts.length > 0
+        ? `Recent thoughts: ${internalState.recentThoughts.slice(0, 3).map((t) => `"${t.thought}"`).join(" → ")}`
+        : "No recent private thoughts.",
+      `Channel: ${input.channel}`,
+      `The user just said: "${truncate(input.latestUserText, 300)}"`,
+    ].join("\n"),
+  };
+}
+
+/** Render the internal monologue prompt for the reasoning provider. */
+export function renderInternalMonologuePrompt(plan: SoulInternalMonologuePlan) {
+  return `${plan.systemInstruction}\n\n${renderMemories(plan.memories)}\n\n${plan.userPrompt}`;
 }

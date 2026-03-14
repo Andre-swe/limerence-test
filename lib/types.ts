@@ -568,6 +568,34 @@ export const liveSessionMetricsSchema = z.object({
   periodicSyncEnqueues: z.number().int().min(0).default(0),
 });
 
+// ---------------------------------------------------------------------------
+// Persona internal state — the soul's own emotional experience.
+// Inspired by OpenSouls' internalMonologue pattern: the persona has private
+// thoughts that persist in working memory and shape every subsequent action.
+// ---------------------------------------------------------------------------
+
+export const personaInternalStateSchema = z.object({
+  /** The persona's current private thought — what they're feeling right now. */
+  currentThought: z.string().default(""),
+  /** Narrative summary of the persona's emotional weather. */
+  mood: z.string().default("present and steady"),
+  /** Energy level — low means shorter/quieter responses, high means more initiative. */
+  energy: z.number().min(0).max(1).default(0.6),
+  /** Patience — drops with repeated low-content messages or frustrating exchanges. */
+  patience: z.number().min(0).max(1).default(0.8),
+  /** Warmth toward the user right now — affected by recent interaction quality. */
+  warmthTowardUser: z.number().min(0).max(1).default(0.7),
+  /** How much the persona wants to engage right now. */
+  engagementDrive: z.number().min(0).max(1).default(0.6),
+  /** Recent internal monologue entries — private thoughts that shape responses. */
+  recentThoughts: z.array(z.object({
+    thought: z.string(),
+    createdAt: z.string(),
+  })).default([]),
+  /** When the internal state was last updated. */
+  updatedAt: z.string().optional(),
+});
+
 export const soulStateSchema = z.object({
   activeProcess: soulProcessSchema.default("arrival"),
   currentProcessInstanceId: z.string().optional(),
@@ -601,6 +629,15 @@ export const soulStateSchema = z.object({
   episodes: z.array(episodeRecordSchema).default([]),
   recentChangedClaims: z.array(memoryClaimSchema).default([]),
   lastRetrievalPack: memoryRetrievalPackSchema.optional(),
+  internalState: personaInternalStateSchema.default({
+    currentThought: "",
+    mood: "present and steady",
+    energy: 0.6,
+    patience: 0.8,
+    warmthTowardUser: 0.7,
+    engagementDrive: 0.6,
+    recentThoughts: [],
+  }),
   recentEvents: z.array(soulEventSchema).default([]),
   traceHead: z.array(soulTraceEntrySchema).default([]),
   lastReflectionAt: z.string().optional(),
@@ -850,6 +887,7 @@ export type MemoryClaim = z.infer<typeof memoryClaimSchema>;
 export type ClaimSource = z.infer<typeof claimSourceSchema>;
 export type EpisodeRecord = z.infer<typeof episodeRecordSchema>;
 export type MemoryRetrievalPack = z.infer<typeof memoryRetrievalPackSchema>;
+export type PersonaInternalState = z.infer<typeof personaInternalStateSchema>;
 export type ClaimConflictResolution = z.infer<typeof claimConflictResolutionSchema>;
 export type ClaimWriteResult = z.infer<typeof claimWriteResultSchema>;
 export type ProcessInstanceState = z.infer<typeof processInstanceStateSchema>;

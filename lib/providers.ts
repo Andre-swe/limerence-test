@@ -260,12 +260,24 @@ function inferKnowledgeProfileFromRelationship(
   return { domains, deflectionStyle, deflectionExamples };
 }
 
+/** The persona's private inner thought — produced by the internalMonologue cognitive step. */
+export type InternalMonologueResult = {
+  thought: string;
+  mood: string;
+  energy: number;
+  patience: number;
+  warmthTowardUser: number;
+  engagementDrive: number;
+  shouldReply: boolean;
+};
+
 /** Structured reasoning adapter — implemented by Gemini, OpenAI, Anthropic, and a mock fallback. */
 export interface ReasoningProvider {
   buildPersonaDossier(input: PersonaAssemblyInput): Promise<PersonaDossier>;
   extractTextFromScreenshot(input: { buffer: Buffer; fileName: string; mimeType: string }): Promise<string>;
   observeVisualContext(input: VisualPerceptionRequest): Promise<VisualPerceptionResult>;
   inferUserState(input: UserStateRequest): Promise<UserStateSnapshot>;
+  generateInternalMonologue(prompt: string): Promise<InternalMonologueResult>;
   respondToUserTurn(input: FastTurnRequest): Promise<FastTurnResult>;
   deliberateIntent(input: IntentRequest): Promise<IntentResult>;
   extractLearningArtifacts(input: LearningExtractionRequest): Promise<LearningArtifact[]>;
@@ -687,6 +699,19 @@ class MockReasoningProvider implements ReasoningProvider {
       prosodyScores: input.prosodyScores,
       visualContext: input.visualContext,
     });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async generateInternalMonologue(_prompt: string): Promise<InternalMonologueResult> {
+    return {
+      thought: "I'm here. Let me think about what they said.",
+      mood: "present and steady",
+      energy: 0.6,
+      patience: 0.8,
+      warmthTowardUser: 0.7,
+      engagementDrive: 0.65,
+      shouldReply: true,
+    };
   }
 
   async respondToUserTurn(input: FastTurnRequest) {
@@ -1364,6 +1389,36 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         ...plan.decision,
         content: renderMockHeartbeatContent(plan, input.persona),
       };
+    }
+  }
+
+  override async generateInternalMonologue(prompt: string): Promise<InternalMonologueResult> {
+    try {
+      const response = await this.callGenerateContent({
+        generationConfig: {
+          responseMimeType: "application/json",
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(this.extractText(response), {});
+      return {
+        thought: typeof parsed.thought === "string" ? parsed.thought : "I'm here.",
+        mood: typeof parsed.mood === "string" ? parsed.mood : "present",
+        energy: typeof parsed.energy === "number" ? parsed.energy : 0.6,
+        patience: typeof parsed.patience === "number" ? parsed.patience : 0.8,
+        warmthTowardUser: typeof parsed.warmthTowardUser === "number" ? parsed.warmthTowardUser : 0.7,
+        engagementDrive: typeof parsed.engagementDrive === "number" ? parsed.engagementDrive : 0.65,
+        shouldReply: typeof parsed.shouldReply === "boolean" ? parsed.shouldReply : true,
+      };
+    } catch (error) {
+      logProviderFailure("gemini", "generateInternalMonologue", error);
+      return super.generateInternalMonologue(prompt);
     }
   }
 

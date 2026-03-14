@@ -684,6 +684,21 @@ export function buildSoulHarness(input: {
       role: "reflection",
       content: `Memory retrieval: ${retrievalPack.summary}`,
     },
+    // Persona's internal emotional state — their own feelings, not a model of the user
+    ...(mindState.internalState.currentThought
+      ? [
+          {
+            region: "working" as const,
+            role: "reflection" as const,
+            content: `${input.persona.name} privately thinks: "${mindState.internalState.currentThought}"`,
+          },
+        ]
+      : []),
+    {
+      region: "working" as const,
+      role: "reflection" as const,
+      content: `Internal mood: ${mindState.internalState.mood}. Energy: ${mindState.internalState.energy.toFixed(2)}. Patience: ${mindState.internalState.patience.toFixed(2)}. Engagement: ${mindState.internalState.engagementDrive.toFixed(2)}.`,
+    },
   ];
 
   const knowledgeProfile = input.persona.dossier.knowledgeProfile;
