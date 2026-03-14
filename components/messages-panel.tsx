@@ -117,26 +117,6 @@ function visibleMessages(messages: DisplayMessage[]) {
   return messages.filter((message) => message.channel !== "live" && message.role !== "system");
 }
 
-function channelLabel(message: MessageEntry) {
-  if (message.role === "user") {
-    return "You";
-  }
-
-  if (message.channel === "heartbeat") {
-    return "Arrival";
-  }
-
-  if (message.kind === "audio") {
-    return "Voice note";
-  }
-
-  if (message.kind === "image") {
-    return "Image";
-  }
-
-  return "Message";
-}
-
 function bodyIsJustImagePlaceholder(message: MessageEntry) {
   return (
     message.kind === "image" &&
@@ -146,6 +126,22 @@ function bodyIsJustImagePlaceholder(message: MessageEntry) {
 
 function imageAttachments(message: MessageEntry) {
   return message.attachments.filter((attachment) => attachment.type === "image");
+}
+
+/** Returns true if two messages are more than 5 minutes apart. */
+function isTimeGap(a: string, b: string) {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) > 5 * 60 * 1000;
+}
+
+/** Format a timestamp as a short time like "7:42 PM" or include the date if older than today. */
+function shortTime(iso: string) {
+  const date = new Date(iso);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  return formatDateTime(iso);
 }
 
 function audioAttachments(message: MessageEntry) {
@@ -343,56 +339,93 @@ export function MessagesPanel({
     }
   }
 
-  return (
-    <section className="soft-panel mx-auto flex max-w-3xl flex-col rounded-[36px] px-5 py-5 sm:px-6 sm:py-6">
-      <div className="pb-4">
-        <p className="eyebrow">Messages</p>
-        <div className="divider-soft mt-4" />
-      </div>
+  const visible = visibleMessages(messages);
+  // Find the last user message index for receipt placement
+  const lastUserIndex = visible.reduce(
+    (last, msg, i) => (msg.role === "user" ? i : last),
+    -1,
+  );
+  // Check if the persona has "read" (replied after) the last user message
+  const lastUserRead = lastUserIndex >= 0 && visible.slice(lastUserIndex + 1).some(
+    (m) => m.role === "assistant" && !m.optimistic,
+  );
+  // Check if an optimistic assistant reply is pending
+  const lastUserDelivered = lastUserIndex >= 0 && visible.some(
+    (m) => m.role === "assistant" && m.optimistic,
+  );
 
-      <div className="mt-5 flex min-h-[28rem] flex-col">
-        <div className="flex-1 space-y-3">
-          {visibleMessages(messages).map((message) => {
+  return (
+    <section className="soft-panel mx-auto flex max-w-3xl flex-col rounded-[36px] px-4 py-4 sm:px-5 sm:py-5">
+      <div className="flex min-h-[32rem] flex-col">
+        <div className="flex-1 space-y-0.5 pb-2">
+          {visible.map((message, index) => {
             const images = imageAttachments(message);
             const showBody = message.body.trim().length > 0 && !bodyIsJustImagePlaceholder(message);
+            const isUser = message.role === "user";
+            const prev = visible[index - 1];
+            const next = visible[index + 1];
+            const sameSenderAsPrev = prev && prev.role === message.role;
+            const sameSenderAsNext = next && next.role === message.role;
+            const showTimeGap = !prev || isTimeGap(prev.createdAt, message.createdAt);
+            const isLastUser = index === lastUserIndex;
 
             return (
-              <article
-                key={message.id}
-                className={`msg-bubble ${
-                  message.role === "assistant"
-                    ? "msg-bubble-assistant mr-auto"
-                    : "msg-bubble-user ml-auto"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-[11px] uppercase tracking-[0.18em] opacity-60">
-                    {message.role === "assistant" ? personaName : channelLabel(message)}
+              <div key={message.id}>
+                {/* Time separator — only shown between messages >5min apart */}
+                {showTimeGap ? (
+                  <p className="py-3 text-center text-[11px] text-[rgba(29,38,34,0.36)]">
+                    {shortTime(message.createdAt)}
                   </p>
-                  <p className="text-[11px] opacity-55">{formatDateTime(message.createdAt)}</p>
+                ) : null}
+
+                <div
+                  className={`flex ${isUser ? "justify-end" : "justify-start"} ${
+                    sameSenderAsPrev && !showTimeGap ? "mt-0.5" : "mt-2"
+                  }`}
+                >
+                  <article
+                    className={`msg-bubble ${
+                      isUser ? "msg-bubble-user" : "msg-bubble-assistant"
+                    }`}
+                    style={{
+                      // Tighter corners between consecutive same-sender messages
+                      borderTopLeftRadius: !isUser && sameSenderAsPrev && !showTimeGap ? "6px" : undefined,
+                      borderTopRightRadius: isUser && sameSenderAsPrev && !showTimeGap ? "6px" : undefined,
+                      borderBottomLeftRadius: !isUser && sameSenderAsNext ? "6px" : undefined,
+                      borderBottomRightRadius: isUser && sameSenderAsNext ? "6px" : undefined,
+                    }}
+                  >
+                    {showBody ? (
+                      <p
+                        className={`text-[0.9375rem] leading-relaxed ${
+                          message.optimistic && !isUser ? "animate-pulse opacity-70" : ""
+                        }`}
+                      >
+                        {message.body}
+                      </p>
+                    ) : null}
+                    {message.optimistic && !isUser && !showBody ? (
+                      <DeliveredThenTyping />
+                    ) : null}
+                    <AttachmentStrip attachments={images} />
+                    <AudioStrip message={message} />
+                  </article>
                 </div>
 
-                {showBody ? (
-                  <p
-                    className={`mt-3 text-sm leading-7 ${
-                      message.optimistic && message.role === "assistant" ? "animate-pulse opacity-70" : ""
-                    }`}
-                  >
-                    {message.body}
+                {/* Read/Delivered receipt — only under the last user message */}
+                {isLastUser && !message.optimistic ? (
+                  <p className="mt-1 pr-1 text-right text-[10px] tracking-wide text-[rgba(29,38,34,0.34)]">
+                    {lastUserRead ? "Read" : lastUserDelivered ? "Delivered" : "Sent"}
                   </p>
                 ) : null}
-                {message.optimistic && message.role === "assistant" && !showBody ? (
-                  <DeliveredThenTyping />
-                ) : null}
-                <AttachmentStrip attachments={images} />
-                <AudioStrip message={message} />
 
-                {message.role === "assistant" && !message.optimistic ? (
-                  <div className="mt-4">
+                {/* Feedback flag — only on real assistant messages */}
+                {!isUser && !message.optimistic ? (
+                  <div className={`${isUser ? "text-right" : ""} mt-0.5`}>
                     <FeedbackButton personaId={personaId} messageId={message.id} />
                   </div>
                 ) : null}
-              </article>
+              </div>
             );
           })}
         </div>
