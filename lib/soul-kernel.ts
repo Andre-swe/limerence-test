@@ -378,6 +378,7 @@ function scheduleFromSilence(input: {
 
 export const soulProcessDefinitions = Object.values(processDefinitions);
 
+/** Look up the definition for one of the 14 soul processes. */
 export function getSoulProcessDefinition(process: MindProcess) {
   return processDefinitions[process];
 }
@@ -392,6 +393,7 @@ export function buildSoulPerception(
   };
 }
 
+/** Schedule future perceptions from open loops, user state, and silence detection. */
 export function scheduleSoulPerceptions(input: {
   messages: MessageEntry[];
   openLoops: OpenLoop[];
@@ -420,6 +422,7 @@ export function scheduleSoulPerceptions(input: {
   ).slice(0, 12);
 }
 
+/** Return all pending scheduled perceptions whose readyAt has passed. */
 export function getReadyScheduledPerceptions(
   perceptions: ScheduledPerception[],
   now: Date,
@@ -432,6 +435,7 @@ export function getReadyScheduledPerceptions(
     .sort((left, right) => left.readyAt.localeCompare(right.readyAt));
 }
 
+/** Mark a scheduled perception as consumed so it won't fire again. */
 export function consumeScheduledPerception(
   perceptions: ScheduledPerception[],
   perceptionId: string,

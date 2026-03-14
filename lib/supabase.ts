@@ -10,6 +10,7 @@ type RuntimeStoreConfig = {
 
 let adminClient: SupabaseClient | null = null;
 
+/** Check which Supabase features are configured via environment variables. */
 export function getSupabaseStatus() {
   const urlConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   const anonKeyConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -28,6 +29,7 @@ export function getSupabaseStatus() {
   };
 }
 
+/** Return the runtime store config if Supabase is configured, null otherwise. */
 export function getSupabaseRuntimeConfig(): RuntimeStoreConfig | null {
   if (process.env.NODE_ENV === "test") {
     return null;
@@ -49,6 +51,7 @@ export function getSupabaseRuntimeConfig(): RuntimeStoreConfig | null {
   };
 }
 
+/** Get or create a Supabase admin client (service role). Returns null if not configured. */
 export function getSupabaseAdminClient() {
   const config = getSupabaseRuntimeConfig();
 

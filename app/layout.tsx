@@ -20,7 +20,7 @@ const jetBrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "Limerence",
-  description: "A calmer way to hear from someone you miss.",
+  description: "AI personas with memory, personality, and voice.",
 };
 
 export default function RootLayout({

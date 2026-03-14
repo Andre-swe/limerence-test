@@ -90,6 +90,7 @@ type ReasoningAdapter = {
   }): Promise<LearningArtifact[]>;
 };
 
+/** Result of a full cognitive soul turn — includes the updated persona, reply, trace, and learning. */
 export type TurnExecutionResult = {
   perception: SoulPerception;
   persona: Persona;
@@ -1009,6 +1010,12 @@ function modelName() {
   );
 }
 
+/**
+ * Execute a compressed single-pass cognitive turn for fast message replies.
+ * Collapses appraise → select → deliberate → render into one Gemini call.
+ * Used for channels where latency matters more than depth (e.g. Telegram).
+ * For web messages, prefer executeSoulTurn which runs the full pipeline.
+ */
 export async function executeFastMessageTurn(
   input: ExecuteFastMessageTurnInput,
 ): Promise<FastMessageTurnExecutionResult> {
@@ -1433,6 +1440,12 @@ export async function executeFastMessageTurn(
   };
 }
 
+/**
+ * Execute the full OpenSouls-inspired cognitive pipeline:
+ * encode perception → appraise user state → retrieve memory → select process →
+ * deliberate intent → render response → extract learning → schedule events.
+ * Each step is a separate Gemini call. Learning is committed inline.
+ */
 export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<TurnExecutionResult> {
   const startedAt = Date.now();
   const provider = providerName();

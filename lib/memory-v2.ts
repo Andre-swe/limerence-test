@@ -46,6 +46,7 @@ type RetrievalInput = {
   };
 };
 
+// Capacity limits — prevent unbounded growth in the persona JSONB blob.
 const MAX_CLAIMS = 96;
 const MAX_CLAIM_SOURCES = 192;
 const MAX_EPISODES = 48;
@@ -277,6 +278,7 @@ function upsertClaim(input: {
   };
 }
 
+/** Create a high-confidence boundary claim from an explicit user statement. */
 export function buildConfirmedBoundaryClaim(input: {
   summary: string;
   detail?: string;
@@ -303,6 +305,7 @@ export function buildConfirmedBoundaryClaim(input: {
   } satisfies ClaimCandidate;
 }
 
+/** Upsert a confirmed boundary claim and return updated claims + sources. */
 export function applyBoundaryClaimUpdate(input: {
   claims: MemoryClaim[];
   claimSources: ClaimSource[];
@@ -320,6 +323,7 @@ export function applyBoundaryClaimUpdate(input: {
   });
 }
 
+/** Convert learning artifacts from a soul turn into durable memory claims and episodes. */
 export function applyLearningArtifactsToMemoryClaims(input: {
   persona: Persona;
   artifacts: LearningArtifact[];
@@ -464,6 +468,7 @@ export function applyLearningArtifactsToMemoryClaims(input: {
   };
 }
 
+/** Mark matching claims as contradicted and create a repair-note claim from user feedback. */
 export function applyFeedbackToMemoryClaims(input: {
   claims: MemoryClaim[];
   claimSources: ClaimSource[];
@@ -597,6 +602,11 @@ function modalityBonus(claim: MemoryClaim, perceptionKind?: string) {
   return 0;
 }
 
+/**
+ * Build a retrieval pack: select the most relevant claims and episodes for the
+ * current perception context. Returns always-loaded (high-importance confirmed)
+ * claims, contextually scored claims, and topic-matched episodes.
+ */
 export function buildMemoryRetrievalPack(input: RetrievalInput) {
   const { persona } = input;
   const now = new Date();
@@ -814,6 +824,7 @@ type BootstrapInput = {
   createdAt: string;
 };
 
+/** Seed tentative claims from source material so a new persona feels like a reunion. */
 export function seedBootstrapClaims(input: BootstrapInput) {
   let claims: MemoryClaim[] = [];
   let sources: ClaimSource[] = [];
@@ -910,6 +921,7 @@ export function seedBootstrapClaims(input: BootstrapInput) {
   return { claims, sources };
 }
 
+/** Render a claim as a single line for inclusion in the soul harness context. */
 export function renderClaimForContext(claim: MemoryClaim) {
   const prefix =
     claim.status === "confirmed"
@@ -920,6 +932,7 @@ export function renderClaimForContext(claim: MemoryClaim) {
   return `- [${prefix}/${claim.kind}] ${truncate(claim.summary, 180)}`;
 }
 
+/** Render an episode as a single line for inclusion in the soul harness context. */
 export function renderEpisodeForContext(episode: EpisodeRecord) {
   return `- ${truncate(episode.summary, 180)}${episode.keyPhrases.length > 0 ? ` Key phrases: ${episode.keyPhrases.slice(0, 4).join(", ")}.` : ""}`;
 }

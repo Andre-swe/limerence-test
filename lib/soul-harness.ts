@@ -438,6 +438,12 @@ function intentionsFor(input: {
   return dedupeIntentions(intentions).slice(0, 6);
 }
 
+/**
+ * Build the complete soul harness snapshot — the full cognitive context
+ * for a single perception. Assembles personality, relationship, memory
+ * retrieval, intentions, visual context, and process state into the
+ * structure that feeds every cognitive step and Hume session update.
+ */
 export function buildSoulHarness(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -793,6 +799,7 @@ export function buildSoulHarness(input: {
   } satisfies SoulHarnessSnapshot;
 }
 
+/** Render all memory regions into the full context text (used for bootstrap and text messages). */
 export function renderSoulHarnessContext(snapshot: SoulHarnessSnapshot) {
   const sections = new Map<SoulMemoryRegion, string[]>();
   const visualContext = visualContextFor(snapshot.perception);
@@ -829,6 +836,7 @@ export function renderSoulHarnessContext(snapshot: SoulHarnessSnapshot) {
   ].join("\n\n");
 }
 
+/** Convenience: build harness and render the full context text in one call. */
 export function buildSoulContext(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -845,6 +853,7 @@ export function buildSoulContext(input: {
   );
 }
 
+/** Build the base system prompt with persona identity, process, and relationship context. */
 export function buildSoulSystemPrompt(snapshot: SoulHarnessSnapshot) {
   return [
     snapshot.sessionFrame.systemPrompt,
@@ -927,6 +936,11 @@ const VOLATILE_REGIONS: SoulMemoryRegion[] = [
  * Render a compact context overlay containing only volatile soul state.
  * Used for mid-call `sendSessionSettings` updates where the stable memory
  * content is preserved in the system prompt from bootstrap.
+ */
+/**
+ * Render the compact volatile overlay for mid-call Hume delivery.
+ * Only includes sections that can change during a live call — stable
+ * personality/memory stays in the bootstrap systemPrompt.
  */
 export function renderLiveContextOverlay(snapshot: SoulHarnessSnapshot) {
   const sections = new Map<SoulMemoryRegion, string[]>();

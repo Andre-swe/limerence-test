@@ -25,6 +25,7 @@ export type HumeLiveSession = {
 
 const humeHostname = process.env.HUME_EVI_HOST?.trim() || "api.hume.ai";
 
+/** Build the combined system prompt + context for testing/debugging live sessions. */
 export function buildPersonaLivePrompt(input: {
   persona: Persona;
   messages: MessageEntry[];
@@ -74,6 +75,11 @@ async function resolveAccessToken() {
   });
 }
 
+/**
+ * Create a Hume EVI live session with the persona's stable system prompt,
+ * full context, voice, and variables. The client sends these as the first
+ * WebSocket message after connecting.
+ */
 export async function createPersonaLiveSession(
   persona: Persona,
   mode: LiveSessionMode = "voice",
