@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { getLiveContextUpdate } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -21,10 +22,12 @@ export async function GET(
     const sessionId = url.searchParams.get("sessionId")?.trim() || undefined;
     const afterVersion = Number(url.searchParams.get("afterVersion") ?? "0");
 
-    const result = await getLiveContextUpdate(personaId, {
-      sessionId,
-      afterVersion: Number.isFinite(afterVersion) ? afterVersion : 0,
-    });
+    const result = await withUserStore(ownership.userId, () =>
+      getLiveContextUpdate(personaId, {
+        sessionId,
+        afterVersion: Number.isFinite(afterVersion) ? afterVersion : 0,
+      })
+    );
 
     // Only return what the client needs — avoid sending the full persona
     // (with all mind state, memories, etc.) on every 3-second poll.

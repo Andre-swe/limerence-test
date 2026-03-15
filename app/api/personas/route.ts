@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUserId } from "@/lib/auth";
 import { createPersonaFromForm } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,9 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const persona = await createPersonaFromForm(formData, userId);
+    const persona = await withUserStore(userId, () =>
+      createPersonaFromForm(formData, userId)
+    );
 
     return NextResponse.json({
       personaId: persona.id,

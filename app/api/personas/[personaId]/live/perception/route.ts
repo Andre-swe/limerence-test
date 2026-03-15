@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { observeLiveVisualPerception } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -29,13 +30,15 @@ export async function POST(
       return NextResponse.json({ error: "Unsupported live mode." }, { status: 400 });
     }
 
-    const result = await observeLiveVisualPerception(personaId, {
-      mode,
-      sessionId,
-      event,
-      imageFile: image instanceof File ? image : null,
-      timestamp,
-    });
+    const result = await withUserStore(ownership.userId, () =>
+      observeLiveVisualPerception(personaId, {
+        mode,
+        sessionId,
+        event,
+        imageFile: image instanceof File ? image : null,
+        timestamp,
+      })
+    );
 
     return NextResponse.json({
       sessionFrame: result.sessionFrame,

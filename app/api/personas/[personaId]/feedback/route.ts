@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { addPersonaFeedback } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,9 @@ export async function POST(
     }
 
     const payload = await request.json();
-    const feedback = await addPersonaFeedback(personaId, payload);
+    const feedback = await withUserStore(ownership.userId, () =>
+      addPersonaFeedback(personaId, payload)
+    );
 
     return NextResponse.json({
       feedback,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { runHeartbeat } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,9 @@ export async function POST(
       return NextResponse.json({ error: ownership.error }, { status: ownership.status });
     }
 
-    const decision = await runHeartbeat(personaId);
+    const decision = await withUserStore(ownership.userId, () =>
+      runHeartbeat(personaId)
+    );
 
     return NextResponse.json({
       decision,

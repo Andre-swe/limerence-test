@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { finalizeLiveSession } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -24,11 +25,13 @@ export async function POST(
       reason?: "user_end" | "disconnect";
     };
 
-    const result = await finalizeLiveSession(personaId, {
-      sessionId: payload.sessionId?.trim() || undefined,
-      mode: payload.mode,
-      reason: payload.reason,
-    });
+    const result = await withUserStore(ownership.userId, () =>
+      finalizeLiveSession(personaId, {
+        sessionId: payload.sessionId?.trim() || undefined,
+        mode: payload.mode,
+        reason: payload.reason,
+      })
+    );
 
     return NextResponse.json(result);
   } catch (error) {

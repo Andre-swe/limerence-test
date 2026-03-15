@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { synthesizeStoredReply } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,9 @@ export async function POST(
       return NextResponse.json({ error: ownership.error }, { status: ownership.status });
     }
 
-    const message = await synthesizeStoredReply(personaId, messageId);
+    const message = await withUserStore(ownership.userId, () =>
+      synthesizeStoredReply(personaId, messageId)
+    );
 
     return NextResponse.json({ message });
   } catch (error) {

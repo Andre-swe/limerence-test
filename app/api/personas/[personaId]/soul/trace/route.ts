@@ -1,7 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
-import { verifyPersonaOwnership } from "@/lib/auth";
+import { getAuthenticatedUserId, verifyPersonaOwnership } from "@/lib/auth";
 import { getPersona } from "@/lib/store";
+import { withUserStore } from "@/lib/store-context";
 import { buildMemoryRetrievalPack } from "@/lib/memory-v2";
 
 /** Debug route: returns the persona's cognitive state, memory claims, and trace. */
@@ -62,7 +63,11 @@ export async function GET(
       }
     }
 
-    const persona = await getPersona(personaId);
+    // Get userId from ownership check or from request header
+    const userId = getAuthenticatedUserId(request);
+    const persona = userId
+      ? await withUserStore(userId, () => getPersona(personaId))
+      : await getPersona(personaId);
 
     if (!persona) {
       return NextResponse.json({ error: "Persona not found." }, { status: 404 });

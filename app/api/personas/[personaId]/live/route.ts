@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { createPersonaLiveSession } from "@/lib/hume-evi";
+import { withUserStore } from "@/lib/store-context";
 import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -35,7 +36,9 @@ async function handleSessionRequest(
       }
     }
 
-    const session = await createPersonaLiveSession(persona, mode);
+    const session = await withUserStore(ownership.userId, () =>
+      createPersonaLiveSession(persona, mode)
+    );
     return NextResponse.json(session);
   } catch (error) {
     return NextResponse.json(

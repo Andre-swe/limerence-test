@@ -19,6 +19,7 @@ import {
   createRelationshipModel,
 } from "@/lib/mind-runtime";
 import { getSupabaseAdminClient, getSupabaseRuntimeConfig } from "@/lib/supabase";
+import { getCurrentUserId } from "@/lib/store-context";
 import { houseVoicePresets } from "@/lib/voice-presets";
 import { slugify } from "@/lib/utils";
 
@@ -522,7 +523,8 @@ function hydrateStore(rawStore: unknown): DataStore {
 }
 
 async function ensureRemoteStore() {
-  const config = getSupabaseRuntimeConfig();
+  const userId = getCurrentUserId();
+  const config = getSupabaseRuntimeConfig(userId);
   const client = getSupabaseAdminClient();
 
   if (!config || !client) {
@@ -550,7 +552,8 @@ async function ensureRemoteStore() {
 }
 
 async function readRemoteStore(): Promise<StoreSnapshot> {
-  const config = getSupabaseRuntimeConfig();
+  const userId = getCurrentUserId();
+  const config = getSupabaseRuntimeConfig(userId);
   const client = getSupabaseAdminClient();
 
   if (!config || !client) {
@@ -579,7 +582,8 @@ async function writeRemoteStore(
   snapshot: StoreSnapshot,
   expectedRevision: number,
 ): Promise<StoreSnapshot | null> {
-  const config = getSupabaseRuntimeConfig();
+  const userId = getCurrentUserId();
+  const config = getSupabaseRuntimeConfig(userId);
   const client = getSupabaseAdminClient();
 
   if (!config || !client) {

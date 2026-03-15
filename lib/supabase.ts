@@ -23,14 +23,20 @@ export function getSupabaseStatus() {
     anonKeyConfigured,
     serviceRoleConfigured,
     runtimeStoreConfigured,
-    runtimeStoreTable: process.env.SUPABASE_RUNTIME_STORE_TABLE ?? "runtime_store",
+    runtimeStoreTable:
+      process.env.SUPABASE_RUNTIME_STORE_TABLE ?? "runtime_store",
     runtimeStoreKey: process.env.SUPABASE_RUNTIME_STORE_KEY ?? "default",
     storageBucket: process.env.SUPABASE_STORAGE_BUCKET ?? "limerence-uploads",
   };
 }
 
-/** Return the runtime store config if Supabase is configured, null otherwise. */
-export function getSupabaseRuntimeConfig(): RuntimeStoreConfig | null {
+/** Return the runtime store config if Supabase is configured, null otherwise.
+ * If userId is provided, it becomes the store key (per-user isolation).
+ * Otherwise falls back to env var or "default".
+ */
+export function getSupabaseRuntimeConfig(
+  userId?: string,
+): RuntimeStoreConfig | null {
   if (process.env.NODE_ENV === "test") {
     return null;
   }
@@ -42,11 +48,15 @@ export function getSupabaseRuntimeConfig(): RuntimeStoreConfig | null {
     return null;
   }
 
+  // Use userId as the key for per-user store isolation
+  const key =
+    userId || process.env.SUPABASE_RUNTIME_STORE_KEY?.trim() || "default";
+
   return {
     url,
     serviceRoleKey,
     table: process.env.SUPABASE_RUNTIME_STORE_TABLE?.trim() || "runtime_store",
-    key: process.env.SUPABASE_RUNTIME_STORE_KEY?.trim() || "default",
+    key,
     bucket: process.env.SUPABASE_STORAGE_BUCKET?.trim() || "limerence-uploads",
   };
 }

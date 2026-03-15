@@ -5,18 +5,18 @@ import { PersonaCard } from "@/components/persona-card";
 import { UserMenu } from "@/components/user-menu";
 import { createClient } from "@/lib/supabase-server";
 import { listPersonas } from "@/lib/store";
+import { withUserStore } from "@/lib/store-context";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const allPersonas = await listPersonas();
   
-  // Filter personas to only show those owned by the current user
+  // Use per-user store when user is authenticated
   const personas = user
-    ? allPersonas.filter((p) => p.userId === user.id)
-    : allPersonas;
+    ? await withUserStore(user.id, () => listPersonas())
+    : await listPersonas();
 
   return (
     <div className="app-shell min-h-screen px-4 py-6 text-[var(--foreground)] sm:px-6 lg:px-10">

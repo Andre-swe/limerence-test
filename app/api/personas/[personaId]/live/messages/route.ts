@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { appendLiveTranscriptTurn } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,9 @@ export async function POST(
     }
 
     const payload = await request.json();
-    const result = await appendLiveTranscriptTurn(personaId, payload);
+    const result = await withUserStore(ownership.userId, () =>
+      appendLiveTranscriptTurn(personaId, payload)
+    );
 
     return NextResponse.json({
       contextualUpdate: result.contextualUpdate,

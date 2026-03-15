@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { sendPersonaMessage } from "@/lib/services";
+import { withUserStore } from "@/lib/store-context";
 
 export const runtime = "nodejs";
 
@@ -25,12 +26,15 @@ export async function POST(
       .getAll("images")
       .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
-    const result = await sendPersonaMessage(personaId, {
-      text,
-      channel: channel === "telegram" ? "telegram" : "web",
-      audioFile: audio instanceof File ? audio : null,
-      images,
-    });
+    // Run store operations within user's store context
+    const result = await withUserStore(ownership.userId, () =>
+      sendPersonaMessage(personaId, {
+        text,
+        channel: channel === "telegram" ? "telegram" : "web",
+        audioFile: audio instanceof File ? audio : null,
+        images,
+      })
+    );
 
     return NextResponse.json({
       messages: result.messages,
