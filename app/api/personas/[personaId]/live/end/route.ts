@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { finalizeLiveSession } from "@/lib/services";
 import type { LiveSessionMode } from "@/lib/types";
 
@@ -11,6 +12,12 @@ export async function POST(
 ) {
   try {
     const { personaId } = await params;
+
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
     const payload = (await request.json().catch(() => ({}))) as {
       sessionId?: string;
       mode?: LiveSessionMode;

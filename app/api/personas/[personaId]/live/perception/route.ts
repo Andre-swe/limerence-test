@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { observeLiveVisualPerception } from "@/lib/services";
 import type { LiveSessionMode } from "@/lib/types";
 
@@ -11,6 +12,12 @@ export async function POST(
 ) {
   try {
     const { personaId } = await params;
+
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
     const formData = await request.formData();
     const mode = String(formData.get("mode") ?? "voice") as LiveSessionMode;
     const sessionId = String(formData.get("sessionId") ?? "").trim() || undefined;

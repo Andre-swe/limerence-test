@@ -100,7 +100,7 @@ describe("persona workflows", () => {
       new File([Buffer.from("sample")], "nina-sample.webm", { type: "audio/webm" }),
     );
 
-    const persona = await createPersonaFromForm(formData);
+    const persona = await createPersonaFromForm(formData, "test-user-id");
     expect(persona.status).toBe("active");
     expect(persona.voice.status).toBe("preview_only");
     expect(persona.voice.cloneState).toBe("pending_mockup");
@@ -198,7 +198,7 @@ describe("persona workflows", () => {
       formData.append("attestedRights", "on");
       formData.append("existingVoiceId", "voice-ready-123");
 
-      const persona = await createPersonaFromForm(formData);
+      const persona = await createPersonaFromForm(formData, "test-user-id");
       expect(persona.voice.status).toBe("ready");
       expect(persona.voice.voiceId).toBe("voice-ready-123");
       expect(persona.voice.cloneState).toBe("ready");

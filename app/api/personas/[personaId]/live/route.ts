@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { createPersonaLiveSession } from "@/lib/hume-evi";
-import { getPersona } from "@/lib/store";
 import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -12,11 +12,13 @@ async function handleSessionRequest(
 ) {
   try {
     const { personaId } = await params;
-    const persona = await getPersona(personaId);
 
-    if (!persona) {
-      return NextResponse.json({ error: "Persona not found." }, { status: 404 });
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
     }
+
+    const persona = ownership.persona;
 
     if (persona.status !== "active") {
       return NextResponse.json(

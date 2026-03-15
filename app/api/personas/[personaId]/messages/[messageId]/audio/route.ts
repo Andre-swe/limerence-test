@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { synthesizeStoredReply } from "@/lib/services";
 
 export const runtime = "nodejs";
 
 /** Synthesizes TTS audio for a previously stored persona reply and returns the updated message with an audio URL. */
 export async function POST(
-  _request: Request,
+  request: Request,
   {
     params,
   }: {
@@ -14,6 +15,12 @@ export async function POST(
 ) {
   try {
     const { personaId, messageId } = await params;
+
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
     const message = await synthesizeStoredReply(personaId, messageId);
 
     return NextResponse.json({ message });

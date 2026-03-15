@@ -71,11 +71,19 @@ export async function middleware(request: NextRequest) {
     );
   }
 
-  Object.entries(corsHeaders).forEach(([key, value]) => {
-    response.headers.set(key, value);
+  // Pass authenticated user ID to route handlers
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-user-id", user.id);
+
+  const authenticatedResponse = NextResponse.next({
+    request: { headers: requestHeaders },
   });
 
-  return response;
+  Object.entries(corsHeaders).forEach(([key, value]) => {
+    authenticatedResponse.headers.set(key, value);
+  });
+
+  return authenticatedResponse;
 }
 
 export const config = {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { getLiveContextUpdate } from "@/lib/services";
 
 export const runtime = "nodejs";
@@ -10,6 +11,12 @@ export async function GET(
 ) {
   try {
     const { personaId } = await params;
+
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
     const url = new URL(request.url);
     const sessionId = url.searchParams.get("sessionId")?.trim() || undefined;
     const afterVersion = Number(url.searchParams.get("afterVersion") ?? "0");

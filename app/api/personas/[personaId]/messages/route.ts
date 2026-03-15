@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { sendPersonaMessage } from "@/lib/services";
 
 export const runtime = "nodejs";
@@ -10,6 +11,12 @@ export async function POST(
 ) {
   try {
     const { personaId } = await params;
+
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
     const formData = await request.formData();
     const text = String(formData.get("text") ?? "").trim();
     const channel = String(formData.get("channel") ?? "web");

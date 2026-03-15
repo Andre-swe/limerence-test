@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { getPersona } from "@/lib/store";
 import { buildMemoryRetrievalPack } from "@/lib/memory-v2";
 
@@ -52,6 +53,15 @@ export async function GET(
 
   try {
     const { personaId } = await context.params;
+
+    // In production, also verify ownership (unless admin already passed)
+    if (!isDev) {
+      const ownership = await verifyPersonaOwnership(request, personaId);
+      if (!ownership.authorized) {
+        return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+      }
+    }
+
     const persona = await getPersona(personaId);
 
     if (!persona) {

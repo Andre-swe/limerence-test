@@ -1998,7 +1998,7 @@ async function createDerivedVisualObservation(input: {
 }
 
 /** Create a new persona from the onboarding form — builds dossier, personality, and bootstrap claims. */
-export async function createPersonaFromForm(formData: FormData) {
+export async function createPersonaFromForm(formData: FormData, userId: string) {
   const providers = getProviders();
   const now = new Date().toISOString();
 
@@ -2102,7 +2102,7 @@ export async function createPersonaFromForm(formData: FormData) {
 
   const personaBaseCore: Omit<Persona, "mindState" | "personalityConstitution" | "relationshipModel"> = {
     id: randomUUID(),
-    userId: "user-demo",
+    userId,
     name,
     relationship,
     source,
