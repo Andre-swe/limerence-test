@@ -47,8 +47,8 @@ type RetrievalInput = {
 };
 
 // Capacity limits — prevent unbounded growth in the persona JSONB blob.
-const MAX_CLAIMS = 96;
-const MAX_CLAIM_SOURCES = 192;
+const MAX_CLAIMS = 100;
+const MAX_CLAIM_SOURCES = 100;
 const MAX_EPISODES = 48;
 const MAX_RECENT_CHANGED_CLAIMS = 12;
 
@@ -57,6 +57,61 @@ function clamp(value: number, min = 0, max = 1) {
     return min;
   }
   return Math.max(min, Math.min(max, value));
+}
+
+/**
+ * Calculate weight score for a claim. Higher = more important to keep.
+ * Combines importance, confidence, reinforcement count, and recency.
+ */
+function calculateClaimWeight(claim: MemoryClaim): number {
+  const now = Date.now();
+  const lastObserved = new Date(claim.lastObservedAt).getTime();
+  const ageMs = now - lastObserved;
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  
+  // Recency decay: claims lose value over time (half-life of ~30 days)
+  const recencyFactor = Math.exp(-ageDays / 30);
+  
+  // Reinforcement bonus: claims that are reinforced multiple times are more valuable
+  const reinforcementBonus = Math.min(claim.reinforcementCount * 0.05, 0.25);
+  
+  // Base weight from importance and confidence
+  const baseWeight = (claim.importance * 0.6) + (claim.confidence * 0.4);
+  
+  // Combine factors
+  return (baseWeight + reinforcementBonus) * (0.5 + 0.5 * recencyFactor);
+}
+
+/**
+ * Evict lowest-weight claims to stay within capacity limit.
+ * Returns claims sorted by weight (highest first), capped at maxCount.
+ */
+function evictLowestWeightClaims(claims: MemoryClaim[], maxCount: number): MemoryClaim[] {
+  if (claims.length <= maxCount) {
+    return claims;
+  }
+  
+  // Sort by weight descending (highest weight first)
+  const sorted = [...claims].sort((a, b) => calculateClaimWeight(b) - calculateClaimWeight(a));
+  
+  return sorted.slice(0, maxCount);
+}
+
+/**
+ * Evict oldest claim sources to stay within capacity limit.
+ * Sources are evicted by creation date (oldest first).
+ */
+function evictOldestSources(sources: ClaimSource[], maxCount: number): ClaimSource[] {
+  if (sources.length <= maxCount) {
+    return sources;
+  }
+  
+  // Sort by createdAt descending (newest first)
+  const sorted = [...sources].sort((a, b) => 
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  
+  return sorted.slice(0, maxCount);
 }
 
 function normalizeText(value: string) {
@@ -208,8 +263,8 @@ function upsertClaim(input: {
     );
 
     return {
-      claims: [claim, ...claims].slice(0, MAX_CLAIMS),
-      sources: sources.slice(0, MAX_CLAIM_SOURCES),
+      claims: evictLowestWeightClaims([claim, ...claims], MAX_CLAIMS),
+      sources: evictOldestSources(sources, MAX_CLAIM_SOURCES),
       result: {
         claim,
         resolution: "created",
@@ -265,8 +320,8 @@ function upsertClaim(input: {
   );
 
   return {
-    claims: claims.slice(0, MAX_CLAIMS),
-    sources: sources.slice(0, MAX_CLAIM_SOURCES),
+    claims: evictLowestWeightClaims(claims, MAX_CLAIMS),
+    sources: evictOldestSources(sources, MAX_CLAIM_SOURCES),
     result: {
       claim: nextClaim,
       resolution:
@@ -460,8 +515,8 @@ export function applyLearningArtifactsToMemoryClaims(input: {
   const changedClaims = changedResults.map((result) => result.claim).slice(0, MAX_RECENT_CHANGED_CLAIMS);
 
   return {
-    claims: claims.slice(0, MAX_CLAIMS),
-    claimSources: claimSources.slice(0, MAX_CLAIM_SOURCES),
+    claims: evictLowestWeightClaims(claims, MAX_CLAIMS),
+    claimSources: evictOldestSources(claimSources, MAX_CLAIM_SOURCES),
     episodes: episodes.slice(0, MAX_EPISODES),
     changedClaims,
     writeResults: changedResults,
@@ -538,8 +593,8 @@ export function applyFeedbackToMemoryClaims(input: {
   changedClaims.unshift(repairWrite.result.claim);
 
   return {
-    claims: claims.slice(0, MAX_CLAIMS),
-    claimSources: claimSources.slice(0, MAX_CLAIM_SOURCES),
+    claims: evictLowestWeightClaims(claims, MAX_CLAIMS),
+    claimSources: evictOldestSources(claimSources, MAX_CLAIM_SOURCES),
     changedClaims: changedClaims.slice(0, MAX_RECENT_CHANGED_CLAIMS),
   };
 }
