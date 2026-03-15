@@ -1,9 +1,35 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const ALLOWED_ORIGINS = [
+  "https://limerance.vercel.app",
+  "http://localhost:3000",
+];
+
+function getCorsHeaders(origin: string | null) {
+  const isAllowed = origin && ALLOWED_ORIGINS.includes(origin);
+  return {
+    "Access-Control-Allow-Origin": isAllowed ? origin : "",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+  };
+}
+
 export async function middleware(request: NextRequest) {
+  const origin = request.headers.get("origin");
+  const corsHeaders = getCorsHeaders(origin);
+
+  if (request.method === "OPTIONS") {
+    return new NextResponse(null, { status: 204, headers: corsHeaders });
+  }
+
   if (!request.nextUrl.pathname.startsWith("/api/personas")) {
-    return NextResponse.next();
+    const response = NextResponse.next();
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   }
 
   const response = NextResponse.next({
@@ -41,13 +67,17 @@ export async function middleware(request: NextRequest) {
   if (error || !user) {
     return NextResponse.json(
       { error: "Unauthorized. Valid session required." },
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
+
+  Object.entries(corsHeaders).forEach(([key, value]) => {
+    response.headers.set(key, value);
+  });
 
   return response;
 }
 
 export const config = {
-  matcher: ["/api/personas/:path*"],
+  matcher: ["/api/:path*"],
 };
