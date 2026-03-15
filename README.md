@@ -79,7 +79,59 @@ These are the folders that matter most:
 - **Persona initiative** — personas reaching out on their own with texts, memes, images, and voice notes based on their internal emotional state
 - **Phased Supabase normalization** — per-table storage for messages, claims, and episodes
 - **Voice creation mode split** — source-material cloning vs text-designed synthetic voices
-- **Auth** — Supabase Auth or Clerk before external beta
+
+## 🔐 Authentication
+
+Limerence uses **Supabase Auth** for user authentication. Each user owns their own personas — no more shared "user-demo" accounts.
+
+### Auth Features
+
+- **Email + Password** sign-up and sign-in
+- **Magic Link** passwordless authentication
+- **Session management** via secure HTTP-only cookies
+- **Persona ownership** — users can only access personas they created
+
+### Auth Flow
+
+1. Unauthenticated users are redirected to `/login`
+2. Users can sign up with email+password or request a magic link
+3. After authentication, users are redirected to the home page
+4. The home page shows only personas owned by the logged-in user
+5. All `/api/personas/*` routes verify ownership before allowing access
+
+### Auth Files
+
+- [`app/login/page.tsx`](app/login/page.tsx) — Login/signup UI with email+password and magic link options
+- [`app/auth/callback/route.ts`](app/auth/callback/route.ts) — OAuth/magic link callback handler
+- [`app/api/auth/sign-up/route.ts`](app/api/auth/sign-up/route.ts) — Sign up endpoint
+- [`app/api/auth/sign-in/route.ts`](app/api/auth/sign-in/route.ts) — Sign in endpoint
+- [`app/api/auth/sign-out/route.ts`](app/api/auth/sign-out/route.ts) — Sign out endpoint
+- [`app/api/auth/magic-link/route.ts`](app/api/auth/magic-link/route.ts) — Magic link endpoint
+- [`lib/auth.ts`](lib/auth.ts) — Auth helpers for verifying persona ownership
+- [`lib/supabase-browser.ts`](lib/supabase-browser.ts) — Browser Supabase client
+- [`lib/supabase-server.ts`](lib/supabase-server.ts) — Server Supabase client
+- [`middleware.ts`](middleware.ts) — Auth middleware for page and API protection
+
+### Required Environment Variables for Auth
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
+```
+
+Find these in your Supabase dashboard under **Settings → API**:
+
+- **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
+- **anon public** → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### Persona Ownership
+
+Every persona has a `userId` field that links it to its creator. The middleware:
+
+1. Validates the user's session via Supabase Auth
+2. Passes the `user.id` to API routes via the `x-user-id` header
+3. Each persona route calls `verifyPersonaOwnership()` to confirm the user owns the persona
+4. Returns **401** if not authenticated, **403** if not the owner, **404** if persona not found
 
 ## 🚀 Getting Started
 
@@ -143,13 +195,13 @@ supabase link --project-ref YOUR_PROJECT_REF
 npm run supabase:push
 ```
 
-If you do not want to use the CLI, run [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) in the Supabase SQL editor instead. The same schema also lives in the migration file at [`supabase/migrations/20260313150000_initial_runtime_store.sql`](/Users/syekel/Documents/limerance/supabase/migrations/20260313150000_initial_runtime_store.sql).
-3. Copy [`.env.example`](/Users/syekel/Documents/limerance/.env.example) to `.env.local`.
-4. Fill in at minimum:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` (recommended to keep aligned with the project, even though the current runtime is server-driven)
-   - `SUPABASE_RUNTIME_STORE_KEY`
+If you do not want to use the CLI, run [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) in the Supabase SQL editor instead. The same schema also lives in the migration file at [`supabase/migrations/20260313150000_initial_runtime_store.sql`](/Users/syekel/Documents/limerance/supabase/migrations/20260313150000_initial_runtime_store.sql). 3. Copy [`.env.example`](/Users/syekel/Documents/limerance/.env.example) to `.env.local`. 4. Fill in at minimum:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` (recommended to keep aligned with the project, even though the current runtime is server-driven)
+- `SUPABASE_RUNTIME_STORE_KEY`
+
 5. Make sure both developers use the **same**:
    - Supabase project
    - `SUPABASE_RUNTIME_STORE_KEY`
@@ -161,6 +213,7 @@ npm run check:supabase
 ```
 
 Expected result:
+
 - the bucket should exist
 - the runtime row may be missing before first app boot
 
@@ -229,10 +282,12 @@ If none are set, the app still works using the local mock reasoning path and the
 
 These enable the shared runtime so multiple collaborators can point at the same personas, messages, observations, and uploaded media:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SUPABASE_URL`  
+  **Required for auth.** The Supabase project URL.
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`  
-  Optional for the current server-driven runtime, but still useful to keep aligned with the project’s Supabase environment.
+  **Required for auth.** The anon/public key from Supabase dashboard.
+- `SUPABASE_SERVICE_ROLE_KEY`  
+  Required for server-side runtime store operations.
 - `SUPABASE_RUNTIME_STORE_TABLE`  
   Optional override. Defaults to `runtime_store`.
 - `SUPABASE_RUNTIME_STORE_KEY`  
@@ -291,10 +346,10 @@ DEEPGRAM_API_KEY=
 # Telegram
 TELEGRAM_BOT_TOKEN=
 
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+# Supabase (required for auth)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # Future observability / background hooks
 SENTRY_DSN=
@@ -518,8 +573,20 @@ This is the main separation in the product:
 
 ### API routes
 
-- [`POST /api/personas`](/Users/syekel/Documents/limerance/app/api/personas/route.ts)  
-  Create a persona from form data.
+- [`POST /api/auth/sign-up`](app/api/auth/sign-up/route.ts)  
+  Create a new user account.
+
+- [`POST /api/auth/sign-in`](app/api/auth/sign-in/route.ts)  
+  Sign in with email and password.
+
+- [`POST /api/auth/sign-out`](app/api/auth/sign-out/route.ts)  
+  Sign out the current user.
+
+- [`POST /api/auth/magic-link`](app/api/auth/magic-link/route.ts)  
+  Send a magic link for passwordless sign-in.
+
+- [`POST /api/personas`](app/api/personas/route.ts)  
+  Create a persona from form data. Requires authentication.
 
 - [`POST /api/personas/[personaId]/feedback`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/feedback/route.ts)  
   Save message-level feedback.
@@ -651,4 +718,4 @@ The guiding idea is that Limerence should evolve from **someone you can talk to*
 - Near-term live cognition is intentionally split:
   - execution: `Inngest`
   - delivery: polling through `/api/personas/[personaId]/live/context`
-  The ideal end-state is queue execution fully independent of any active client, backed by a durable queue or worker, with push delivery instead of polling.
+    The ideal end-state is queue execution fully independent of any active client, backed by a durable queue or worker, with push delivery instead of polling.

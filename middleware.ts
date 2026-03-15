@@ -6,6 +6,12 @@ const ALLOWED_ORIGINS = [
   "http://localhost:3000",
 ];
 
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth/callback",
+  "/api/auth",
+];
+
 function getCorsHeaders(origin: string | null) {
   const isAllowed = origin && ALLOWED_ORIGINS.includes(origin);
   return {
@@ -16,15 +22,21 @@ function getCorsHeaders(origin: string | null) {
   };
 }
 
+function isPublicPath(pathname: string) {
+  return PUBLIC_PATHS.some((path) => pathname.startsWith(path));
+}
+
 export async function middleware(request: NextRequest) {
   const origin = request.headers.get("origin");
   const corsHeaders = getCorsHeaders(origin);
+  const pathname = request.nextUrl.pathname;
 
   if (request.method === "OPTIONS") {
     return new NextResponse(null, { status: 204, headers: corsHeaders });
   }
 
-  if (!request.nextUrl.pathname.startsWith("/api/personas")) {
+  // Allow public paths without auth
+  if (isPublicPath(pathname)) {
     const response = NextResponse.next();
     Object.entries(corsHeaders).forEach(([key, value]) => {
       response.headers.set(key, value);
@@ -32,19 +44,23 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  const response = NextResponse.next({
-    request: { headers: request.headers },
-  });
-
+  // For non-API routes that need auth protection (pages)
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+  // If Supabase is not configured, allow access (dev mode without auth)
   if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.json(
-      { error: "Server misconfiguration." },
-      { status: 500 }
-    );
+    const response = NextResponse.next();
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
   }
+
+  // Create Supabase client for session refresh
+  let response = NextResponse.next({
+    request: { headers: request.headers },
+  });
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -53,18 +69,42 @@ export async function middleware(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value, options }) => {
+          request.cookies.set(name, value);
           response.cookies.set(name, value, options);
         });
       },
     },
   });
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (error || !user) {
+  // Protected pages: redirect to login if not authenticated
+  const protectedPages = ["/", "/create", "/personas", "/settings", "/review"];
+  const isProtectedPage = protectedPages.some(
+    (path) => pathname === path || (path !== "/" && pathname.startsWith(path))
+  );
+
+  if (isProtectedPage && !user) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // Redirect logged-in users away from login page
+  if (pathname === "/login" && user) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  // API routes that don't need persona auth (non-persona API routes)
+  if (!pathname.startsWith("/api/personas")) {
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      response.headers.set(key, value);
+    });
+    return response;
+  }
+
+  // Persona API routes require authentication
+  if (!user) {
     return NextResponse.json(
       { error: "Unauthorized. Valid session required." },
       { status: 401, headers: corsHeaders }
@@ -87,5 +127,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };
