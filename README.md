@@ -73,6 +73,14 @@ These are the folders that matter most:
 - [`vendor/opensouls-main/`](/Users/syekel/Documents/limerance/vendor/opensouls-main)  
   Vendored reference material. This repo is **not** used as a runtime dependency; it is kept here for architecture study and future cross-checking.
 
+## 🔮 Future
+
+- **Live video calls** — FaceTime-style face-to-face conversations with real-time avatar generation. Breakthroughs in real-time face synthesis (ByteDance, etc.) are making this viable. The persona would have a face, expressions, and visual presence during live calls — not just a voice.
+- **Persona initiative** — personas reaching out on their own with texts, memes, images, and voice notes based on their internal emotional state
+- **Phased Supabase normalization** — per-table storage for messages, claims, and episodes
+- **Voice creation mode split** — source-material cloning vs text-designed synthetic voices
+- **Auth** — Supabase Auth or Clerk before external beta
+
 ## 🚀 Getting Started
 
 ### 1. Install dependencies
