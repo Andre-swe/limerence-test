@@ -2,11 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { expectJsonError, expectJsonResponse } from "@/tests/helpers/assertions";
 
 const {
-  flushPendingTelegramMessagesMock,
   getAuthenticatedUserIdMock,
   getSupabaseRuntimeConfigMock,
   listPersonasMock,
-  processTelegramWebhookMock,
   runDueHeartbeatsMock,
   serveMock,
   servedHandlers,
@@ -19,11 +17,9 @@ const {
   };
 
   return {
-    flushPendingTelegramMessagesMock: vi.fn(),
     getAuthenticatedUserIdMock: vi.fn(),
     getSupabaseRuntimeConfigMock: vi.fn(),
     listPersonasMock: vi.fn(),
-    processTelegramWebhookMock: vi.fn(),
     runDueHeartbeatsMock: vi.fn(),
     serveMock: vi.fn(() => servedHandlers),
     servedHandlers,
@@ -49,8 +45,6 @@ vi.mock("@/lib/supabase", () => ({
 
 vi.mock("@/lib/services", () => ({
   runDueHeartbeats: runDueHeartbeatsMock,
-  flushPendingTelegramMessages: flushPendingTelegramMessagesMock,
-  processTelegramWebhook: processTelegramWebhookMock,
 }));
 
 vi.mock("inngest/next", () => ({
@@ -64,7 +58,6 @@ vi.mock("@/lib/inngest", () => ({
 
 import { GET as healthStoreGet } from "@/app/api/health/store/route";
 import { POST as internalHeartbeatPost } from "@/app/api/internal/heartbeat/route";
-import { POST as telegramWebhookPost } from "@/app/api/telegram/webhook/route";
 
 describe("system routes", () => {
   beforeEach(() => {
@@ -72,10 +65,7 @@ describe("system routes", () => {
     getAuthenticatedUserIdMock.mockReturnValue("user-1");
     getSupabaseRuntimeConfigMock.mockReturnValue(null);
     runDueHeartbeatsMock.mockResolvedValue([{ personaId: "persona-1", action: "TEXT" }]);
-    flushPendingTelegramMessagesMock.mockResolvedValue([{ messageId: "msg-1", sent: true }]);
-    processTelegramWebhookMock.mockResolvedValue({ processed: true });
     process.env.CRON_SECRET = "cron-secret";
-    process.env.TELEGRAM_WEBHOOK_SECRET = "telegram-secret";
   });
 
   it("rejects unauthenticated store health checks", async () => {
@@ -147,7 +137,7 @@ describe("system routes", () => {
     await expectJsonError(response, 401, "Unauthorized. Valid CRON_SECRET required.");
   });
 
-  it("runs due heartbeats and flushes telegram messages", async () => {
+  it("runs due heartbeats", async () => {
     const response = await internalHeartbeatPost(
       new Request("http://localhost/api/internal/heartbeat", {
         method: "POST",
@@ -159,10 +149,8 @@ describe("system routes", () => {
 
     const body = await expectJsonResponse<{
       results: Array<{ personaId: string }>;
-      telegram: Array<{ messageId: string }>;
     }>(response);
     expect(body.results[0]?.personaId).toBe("persona-1");
-    expect(body.telegram[0]?.messageId).toBe("msg-1");
   });
 
   it("returns a 500 when heartbeat execution fails", async () => {
@@ -178,55 +166,6 @@ describe("system routes", () => {
     );
 
     await expectJsonError(response, 500, "scheduler offline");
-  });
-
-  it("rejects Telegram webhooks with the wrong secret", async () => {
-    const response = await telegramWebhookPost(
-      new Request("http://localhost/api/telegram/webhook", {
-        method: "POST",
-        headers: {
-          "x-telegram-bot-api-secret-token": "wrong-secret",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ update_id: 1 }),
-      }),
-    );
-
-    await expectJsonError(response, 401, "Unauthorized. Invalid webhook secret.");
-  });
-
-  it("processes a valid Telegram webhook", async () => {
-    const response = await telegramWebhookPost(
-      new Request("http://localhost/api/telegram/webhook", {
-        method: "POST",
-        headers: {
-          "x-telegram-bot-api-secret-token": "telegram-secret",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ update_id: 1 }),
-      }),
-    );
-
-    const body = await expectJsonResponse<{ processed: boolean }>(response);
-    expect(body.processed).toBe(true);
-    expect(processTelegramWebhookMock).toHaveBeenCalledWith({ update_id: 1 });
-  });
-
-  it("returns a 400 when webhook processing fails", async () => {
-    processTelegramWebhookMock.mockRejectedValueOnce(new Error("bad payload"));
-
-    const response = await telegramWebhookPost(
-      new Request("http://localhost/api/telegram/webhook", {
-        method: "POST",
-        headers: {
-          "x-telegram-bot-api-secret-token": "telegram-secret",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ update_id: 1 }),
-      }),
-    );
-
-    await expectJsonError(response, 500, "bad payload");
   });
 
   it("wires the Inngest route through serve()", async () => {

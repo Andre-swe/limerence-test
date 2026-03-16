@@ -461,7 +461,7 @@ describe("persona routes", () => {
   it("normalizes message attachments and channel values", async () => {
     const formData = new FormData();
     formData.set("text", "hello");
-    formData.set("channel", "telegram");
+    formData.set("channel", "web");
     formData.set("audio", new File([Buffer.from("audio")], "reply.webm", { type: "audio/webm" }));
     formData.append("images", new File([Buffer.from("img-1")], "one.png", { type: "image/png" }));
     formData.append("images", new File([Buffer.alloc(0)], "empty.png", { type: "image/png" }));
@@ -481,7 +481,7 @@ describe("persona routes", () => {
       "persona-test",
       expect.objectContaining({
         text: "hello",
-        channel: "telegram",
+        channel: "web",
         images: expect.arrayContaining([
           expect.objectContaining({ name: "one.png" }),
         ]),

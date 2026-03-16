@@ -41,7 +41,7 @@ describe("service regressions", () => {
         replyMode: "text",
         delivery: {
           webInbox: true,
-          telegramStatus: "not_requested",
+
           attempts: 0,
         },
       },
@@ -150,7 +150,7 @@ describe("service regressions", () => {
         replyMode: "text",
         delivery: {
           webInbox: true,
-          telegramStatus: "not_requested",
+
           attempts: 0,
         },
       },

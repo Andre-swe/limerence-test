@@ -20,14 +20,13 @@ describe("fast message turn regressions", () => {
       personaId: "persona-mom",
       role: "user",
       kind: "text",
-      channel: "telegram",
+      channel: "web",
       body: "i'm nervous about tomorrow's interview and could use you",
       attachments: [],
       audioStatus: "unavailable",
       createdAt: "2026-03-16T15:00:00.000Z",
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested",
         attempts: 0,
       },
     };
@@ -39,7 +38,7 @@ describe("fast message turn regressions", () => {
       feedbackNotes: [],
       perception: {
         kind: "text_message",
-        channel: "telegram",
+        channel: "web",
         modality: "text",
         content: userMessage.body,
         createdAt: userMessage.createdAt,
@@ -49,7 +48,7 @@ describe("fast message turn regressions", () => {
       },
       latestUserText: userMessage.body,
       reasoning: getProviders().reasoning,
-      replyChannel: "telegram",
+      replyChannel: "web",
     });
 
     expect(result.learningArtifacts.length).toBeGreaterThan(0);

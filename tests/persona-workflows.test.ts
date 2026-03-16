@@ -21,7 +21,6 @@ import { getReadyScheduledPerceptions } from "@/lib/soul-kernel";
 import { buildSoulHarness, buildStableSystemPrompt, renderLiveContextOverlay, renderSoulHarnessContext } from "@/lib/soul-harness";
 import { computeNextAwakeningReadyAt, inferAwakeningScheduleFromText } from "@/lib/memory-v2";
 import { planConversationSoul, renderMockConversationReply } from "@/lib/soul-runtime";
-import { buildTelegramBindCommand } from "@/lib/telegram-bind";
 import {
   addPersonaFeedback,
   appendLiveTranscriptTurn,
@@ -34,7 +33,6 @@ import {
   finalizeLiveSession,
   getLiveContextUpdate,
   observeLiveVisualPerception,
-  processTelegramWebhook,
   reduceLiveUserState,
   resetServiceRuntimeStateForTests,
   runHeartbeat,
@@ -177,7 +175,6 @@ describe("persona workflows", () => {
         messages: [],
         perceptionObservations: [],
         feedbackEvents: [],
-        processedTelegramUpdates: [],
       }),
       "utf8",
     );
@@ -327,51 +324,6 @@ describe("persona workflows", () => {
 
     expect(persona?.mindState.openLoops[0]?.title).toContain("Interview");
     expect(persona?.mindState.workingMemory.summary).toContain("open loop");
-  });
-
-  it("handles telegram binding and avoids duplicate updates", async () => {
-    const persona = await getPersona("persona-mom");
-
-    await processTelegramWebhook({
-      update_id: 100,
-      message: {
-        message_id: 1,
-        text: buildTelegramBindCommand({
-          id: "persona-mom",
-          userId: persona!.userId,
-        }),
-        chat: {
-          id: 4242,
-          username: "demo_user",
-        },
-      },
-    });
-
-    const first = await processTelegramWebhook({
-      update_id: 101,
-      message: {
-        message_id: 2,
-        text: "I have news.",
-        chat: {
-          id: 4242,
-          username: "demo_user",
-        },
-      },
-    });
-    const duplicate = await processTelegramWebhook({
-      update_id: 101,
-      message: {
-        message_id: 2,
-        text: "I have news.",
-        chat: {
-          id: 4242,
-          username: "demo_user",
-        },
-      },
-    });
-
-    expect(first.handled).toBe(true);
-    expect(duplicate.duplicate).toBe(true);
   });
 
   it("creates user and assistant messages for a web turn", async () => {
@@ -1656,7 +1608,6 @@ describe("persona workflows", () => {
       attachments: [],
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested" as const,
         attempts: 0,
       },
     };
