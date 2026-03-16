@@ -865,6 +865,62 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
       );
     });
 
+    it("allows specific one-word feedback to contradict an exact token match", () => {
+      const claim = makeClaim({
+        id: "single-token-target",
+        summary: "User lives in Toronto.",
+        status: "confirmed",
+        confidence: 0.78,
+        sourceIds: ["different-msg"],
+      });
+
+      const feedback: FeedbackEvent = {
+        id: "fb-single-token",
+        personaId: "persona-1",
+        messageId: "other-msg",
+        note: "Toronto",
+        createdAt: NOW,
+      };
+
+      const result = applyFeedbackToMemoryClaims({
+        claims: [claim],
+        claimSources: [],
+        feedback,
+      });
+
+      expect(result.claims.find((entry) => entry.id === "single-token-target")?.status).toBe(
+        "contradicted",
+      );
+    });
+
+    it("does not let generic one-word feedback contradict unrelated claims without linkage", () => {
+      const claim = makeClaim({
+        id: "generic-token-target",
+        summary: "User prefers long walks after work.",
+        status: "confirmed",
+        confidence: 0.78,
+        sourceIds: ["different-msg"],
+      });
+
+      const feedback: FeedbackEvent = {
+        id: "fb-generic-token",
+        personaId: "persona-1",
+        messageId: "other-msg",
+        note: "wrong",
+        createdAt: NOW,
+      };
+
+      const result = applyFeedbackToMemoryClaims({
+        claims: [claim],
+        claimSources: [],
+        feedback,
+      });
+
+      expect(result.claims.find((entry) => entry.id === "generic-token-target")?.status).toBe(
+        "confirmed",
+      );
+    });
+
     it("contradicts claims linked through claim sources even for terse feedback", () => {
       const claim = makeClaim({
         id: "claim-source-target",

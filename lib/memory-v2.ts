@@ -160,6 +160,8 @@ function tokenizeFeedbackMatch(value: string) {
   );
 }
 
+const genericFeedbackTokens = new Set(["wrong", "incorrect", "false", "bad", "off", "weird"]);
+
 function unique<T>(items: T[]) {
   return Array.from(new Set(items));
 }
@@ -640,13 +642,23 @@ export function applyFeedbackToMemoryClaims(input: {
       return true;
     }
 
-    if (noteTokens.length < 2) {
+    if (noteTokens.length === 0) {
       return false;
     }
 
     const claimTokens = new Set(
       tokenizeFeedbackMatch([claim.summary, claim.detail ?? "", ...claim.tags].join(" ")),
     );
+
+    if (noteTokens.length === 1) {
+      const [token] = noteTokens;
+      return (
+        token.length >= 5 &&
+        !genericFeedbackTokens.has(token) &&
+        claimTokens.has(token)
+      );
+    }
+
     let sharedTokens = 0;
 
     for (const token of noteTokens) {
