@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  appendFeedback,
   appendMessages,
   appendPerceptionObservations,
   bindTelegramChat,
@@ -12,13 +11,10 @@ import {
   hasProcessedTelegramUpdate,
   listFeedback,
   listMessages,
-  listPendingTelegramMessages,
   listPerceptionObservations,
   listPersonas,
   markTelegramUpdateProcessed,
   replacePersonaIfRevision,
-  savePersona,
-  savePublicFile,
   updateMessage,
   updatePersona,
   updatePersonaShadowTurn,
@@ -32,32 +28,24 @@ import {
 } from "@/lib/inngest";
 import {
   applyBoundaryClaimUpdate,
-  applyFeedbackToMemoryClaims,
   buildAwakeningInternalEvent,
   deactivateMatchingAwakeningClaims,
   inferAwakeningScheduleFromText,
-  seedBootstrapClaims,
 } from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
 import { computeAwakeningReliability, planInternalMonologue, renderInternalMonologuePrompt } from "@/lib/soul-runtime";
 import { resolvePersonaTimeZone } from "@/lib/persona-schedule";
 import {
-  applySoulArchetypeToConstitution,
-  applySoulArchetypeToRelationship,
-  inferSoulArchetypeSeed,
-} from "@/lib/personality-archetypes";
-import {
   buildDebugContext,
   summarizeLiveSessionMetrics,
   summarizePendingInternalEvents,
 } from "@/lib/debug-observability";
+import { createMessage, persistMessageAttachment } from "@/lib/services/assets";
 import { soulLogger } from "@/lib/soul-logger";
-import { getHouseVoicePreset, houseVoicePresets } from "@/lib/voice-presets";
+import { flushPendingTelegramMessages } from "@/lib/services/telegram";
 import {
   type ConversationChannel,
-  type FeedbackEvent,
   type LiveSessionMode,
-  feedbackRequestSchema,
   type HeartbeatPolicy,
   type HeartbeatDecision,
   type LiveSessionMetrics,
@@ -68,23 +56,21 @@ import {
   type PendingShadowTurn,
   type PerceptionObservation,
   type Persona,
-  type PersonaAssemblyInput,
   type PreferenceSignal,
-  type PersonaSource,
   type SoulEvent,
   type SoulPerception,
   type SoulSessionFrame,
-  type StoredAsset,
   type UserStateSnapshot,
-  type VoiceProfile,
 } from "@/lib/types";
 import {
-  createInitialMindState,
-  createPersonalityConstitution,
-  createRelationshipModel,
   inferHeuristicUserState,
 } from "@/lib/mind-runtime";
-import { slugify } from "@/lib/utils";
+// Preserve the historical public service entrypoints while the implementation
+// is split into narrower modules underneath this facade.
+export { createPersonaFromForm } from "@/lib/services/persona";
+export { synthesizeStoredReply } from "@/lib/services/messaging";
+export { addPersonaFeedback } from "@/lib/services/feedback";
+export { flushPendingTelegramMessages } from "@/lib/services/telegram";
 
 type PreferenceUpdate = {
   kind: "avoid_work_hours" | "prefer_text" | "prefer_voice" | "less_often" | "more_often" | "schedule_awakening" | "cancel_awakening";
@@ -101,14 +87,6 @@ const localShadowExecutionQueues = new Map<string, Promise<void>>();
 const MIN_LIVE_DELIVERY_INTERVAL_MS = 4500;
 const MAX_COMPLETED_LIVE_SESSION_METRICS = 8;
 const TELEGRAM_DELIVERY_TIMEOUT_MS = 15_000;
-
-function resolveStartingVoiceId(starterVoiceId?: string) {
-  return (
-    getHouseVoicePreset(starterVoiceId)?.id ??
-    houseVoicePresets[0]?.id ??
-    undefined
-  );
-}
 
 function scheduleLocalShadowExecution(personaId: string, jobId: string) {
   const previous = localShadowExecutionQueues.get(personaId) ?? Promise.resolve();
@@ -278,36 +256,6 @@ function currentLiveDeliveryMetricReason(persona: Persona) {
     persona.mindState.processState.live_delivery_metric_reason ??
     persona.mindState.lastLiveDeliveryReason
   );
-}
-
-function buildStartingVoiceProfile(input: {
-  personaName: string;
-  starterVoiceId?: string;
-  now: string;
-  pendingMockup: boolean;
-}): VoiceProfile {
-  const humeConfigured = Boolean(process.env.HUME_API_KEY?.trim());
-  const selectedStartingVoiceId = resolveStartingVoiceId(input.starterVoiceId);
-
-  if (humeConfigured && selectedStartingVoiceId) {
-    return {
-      provider: "hume",
-      voiceId: selectedStartingVoiceId,
-      status: "preview_only",
-      cloneState: input.pendingMockup ? "pending_mockup" : "none",
-      cloneRequestedAt: input.pendingMockup ? input.now : undefined,
-      watermarkApplied: false,
-    };
-  }
-
-  return {
-    provider: "mock",
-    voiceId: `mock-${slugify(input.personaName || "persona")}`,
-    status: "preview_only",
-    cloneState: input.pendingMockup ? "pending_mockup" : "none",
-    cloneRequestedAt: input.pendingMockup ? input.now : undefined,
-    watermarkApplied: false,
-  };
 }
 
 /**
@@ -522,6 +470,11 @@ function countOutboundToday(messages: MessageEntry[], personaId: string, now: Da
       message.channel === "heartbeat" &&
       message.createdAt.slice(0, 10) === dateKey,
   ).length;
+}
+
+function nextHeartbeatAtFor(persona: Persona, now: Date) {
+  const nextIntervalHours = calculateNextHeartbeatInterval(persona, now);
+  return new Date(now.getTime() + nextIntervalHours * 60 * 60 * 1000).toISOString();
 }
 
 function personaPushesBack(persona: Persona) {
@@ -873,81 +826,6 @@ async function applyPreferenceSignalIfNeeded(
     preferenceUpdate,
     contextualUpdate,
   };
-}
-
-function createMessage({
-  personaId,
-  role,
-  kind,
-  channel,
-  body,
-  attachments,
-  userState,
-  metadata,
-  audioUrl,
-  audioStatus,
-  replyMode,
-  delivery,
-  createdAt,
-}: Omit<MessageEntry, "id" | "createdAt" | "attachments"> & {
-  attachments?: MessageEntry["attachments"];
-  createdAt?: string;
-}): MessageEntry {
-  return {
-    id: randomUUID(),
-    personaId,
-    role,
-    kind,
-    channel,
-    body,
-    attachments: attachments ?? [],
-    userState,
-    metadata,
-    audioUrl,
-    audioStatus,
-    createdAt: createdAt ?? new Date().toISOString(),
-    replyMode,
-    delivery,
-  };
-}
-
-async function persistFileAsset(file: File, kind: StoredAsset["kind"]) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const { fileName, url } = await savePublicFile(buffer, file.name, file.type);
-
-  return {
-    id: randomUUID(),
-    kind,
-    fileName,
-    originalName: file.name,
-    url,
-    mimeType: file.type || "application/octet-stream",
-    size: file.size,
-  } satisfies StoredAsset;
-}
-
-async function persistMessageAttachment(
-  file: File,
-  type: MessageAttachment["type"],
-  options?: {
-    extractedText?: string;
-    visualSummary?: string;
-  },
-) {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const { fileName, url } = await savePublicFile(buffer, file.name, file.type);
-
-  return {
-    id: randomUUID(),
-    type,
-    fileName,
-    originalName: file.name,
-    url,
-    mimeType: file.type || "application/octet-stream",
-    size: file.size,
-    extractedText: options?.extractedText,
-    visualSummary: options?.visualSummary,
-  } satisfies MessageAttachment;
 }
 
 function visualObservationKindForMode(
@@ -2652,243 +2530,6 @@ async function createDerivedVisualObservation(input: {
   } satisfies PerceptionObservation;
 }
 
-/** Create a new persona from the onboarding form — builds dossier, personality, and bootstrap claims. */
-export async function createPersonaFromForm(formData: FormData, userId: string) {
-  const providers = getProviders();
-  const now = new Date().toISOString();
-
-  const name = String(formData.get("name") ?? "").trim();
-  const relationship = String(formData.get("relationship") ?? "").trim();
-  const source: PersonaSource = "living";
-  const description = String(formData.get("description") ?? "").trim();
-  const pastedText = String(formData.get("pastedText") ?? "").trim();
-  const existingVoiceId = String(formData.get("existingVoiceId") ?? "").trim();
-  const starterVoiceId = String(formData.get("starterVoiceId") ?? "").trim();
-  const attestedRights = formData.get("attestedRights") === "on";
-  const heartbeatIntervalHours = Number(formData.get("heartbeatIntervalHours") ?? 4);
-  const preferredMode: Persona["heartbeatPolicy"]["preferredMode"] =
-    String(formData.get("preferredMode") ?? "mixed") === "voice_note"
-      ? "voice_note"
-      : String(formData.get("preferredMode") ?? "mixed") === "text"
-        ? "text"
-        : "mixed";
-  const status: Persona["status"] = "active";
-
-  if (!name || !relationship || !description) {
-    throw new Error("Name, relationship, and description are required.");
-  }
-
-  if (!attestedRights) {
-    throw new Error("Rights attestation is required.");
-  }
-
-  const interviewAnswers = Object.fromEntries(
-    Array.from(formData.entries())
-      .filter(([key, value]) => key.startsWith("interview-") && typeof value === "string")
-      .map(([key, value]) => [key.replace("interview-", ""), String(value)]),
-  );
-
-  const avatarFile = formData.get("avatar");
-  const voiceFiles = formData.getAll("voiceSamples").filter((entry): entry is File => entry instanceof File && entry.size > 0);
-  const screenshotFiles = formData
-    .getAll("screenshots")
-    .filter((entry): entry is File => entry instanceof File && entry.size > 0);
-
-  const avatarAsset =
-    avatarFile instanceof File && avatarFile.size > 0
-      ? await persistFileAsset(avatarFile, "avatar")
-      : null;
-
-  const voiceSamples = await Promise.all(
-    voiceFiles.map((file) => persistFileAsset(file, "voice_sample")),
-  );
-
-  const screenshots = await Promise.all(
-    screenshotFiles.map(async (file) => {
-      const asset = await persistFileAsset(file, "screenshot");
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const extractedText = await providers.reasoning.extractTextFromScreenshot({
-        buffer,
-        fileName: file.name,
-        mimeType: file.type || "image/png",
-      });
-      return {
-        ...asset,
-        extractedText,
-      };
-    }),
-  );
-
-  const assemblyInput: PersonaAssemblyInput = {
-    name,
-    relationship,
-    source,
-    description,
-    pastedText,
-    interviewAnswers,
-    screenshotSummaries: screenshots.map((screenshot) => screenshot.extractedText ?? ""),
-  };
-
-  const dossier = await providers.reasoning.buildPersonaDossier(assemblyInput);
-  const voice =
-    existingVoiceId
-      ? await providers.voice.cloneVoice({
-          personaName: name,
-          voiceSamples,
-          existingVoiceId,
-          stylePrompt: [
-            description,
-            dossier.communicationStyle,
-            dossier.emotionalTendencies.join(", "),
-          ]
-            .filter(Boolean)
-            .join(" "),
-          sampleText:
-            dossier.signaturePhrases[0]
-              ? `${dossier.signaturePhrases[0]}, tell me the part that matters most right now.`
-              : undefined,
-        })
-      : buildStartingVoiceProfile({
-          personaName: name,
-          starterVoiceId,
-          now,
-          pendingMockup: voiceSamples.length > 0,
-        });
-
-  const personaBaseCore: Omit<Persona, "mindState" | "personalityConstitution" | "relationshipModel"> = {
-    id: randomUUID(),
-    userId,
-    name,
-    relationship,
-    source,
-    description,
-    status,
-    avatarUrl: avatarAsset?.url,
-    createdAt: now,
-    updatedAt: now,
-    lastActiveAt: undefined,
-    lastHeartbeatAt: undefined,
-    telegramChatId: undefined,
-    telegramUsername: undefined,
-    pastedText,
-    screenshotSummaries: assemblyInput.screenshotSummaries,
-    interviewAnswers,
-    heartbeatPolicy: {
-      enabled: true,
-      intervalHours: Number.isFinite(heartbeatIntervalHours) ? heartbeatIntervalHours : 4,
-      maxOutboundPerDay: 3,
-      quietHoursStart: 22,
-      quietHoursEnd: 8,
-      preferredMode,
-      workHoursEnabled: false,
-      workHoursStart: 9,
-      workHoursEnd: 17,
-      workDays: [1, 2, 3, 4, 5],
-      boundaryNotes: [],
-      // Variable-interval heartbeat (circadian rhythm)
-      variableInterval: true,
-      hourlyActivityCounts: Array(24).fill(0),
-      minIntervalHours: 1,
-      maxIntervalHours: 8,
-    },
-    voice,
-    consent: {
-      attestedRights,
-      createdAt: now,
-    },
-    dossier,
-    voiceSamples,
-    screenshots,
-    preferenceSignals: [],
-    revision: 1,
-  };
-
-  const inferredArchetype = inferSoulArchetypeSeed({
-    relationship,
-    description,
-    sourceSummary: dossier.sourceSummary,
-  });
-  const personalityConstitution = applySoulArchetypeToConstitution(
-    createPersonalityConstitution({
-      ...personaBaseCore,
-      source,
-    }),
-    inferredArchetype,
-  );
-  const relationshipModel = applySoulArchetypeToRelationship(
-    createRelationshipModel({
-      ...personaBaseCore,
-      source,
-      personalityConstitution,
-    }),
-    inferredArchetype,
-  );
-  const personaBase = {
-    ...personaBaseCore,
-    personalityConstitution,
-    relationshipModel,
-  } satisfies Omit<Persona, "mindState">;
-
-  // Seed bootstrap memories from source material so the persona feels like
-  // they already know the shape of the relationship. Synthetic personas
-  // (no pasted text, no interview answers, no screenshots) start blank and
-  // accumulate memories naturally through conversation.
-  const hasSourceMaterial =
-    pastedText.length > 0 ||
-    Object.values(interviewAnswers).some((answer) => answer.trim().length > 0) ||
-    screenshots.length > 0;
-
-  const baseMindState = createInitialMindState({
-    persona: personaBase,
-    messages: [],
-  });
-
-  const mindState = hasSourceMaterial
-    ? (() => {
-        const bootstrap = seedBootstrapClaims({
-          dossier,
-          interviewAnswers,
-          relationship,
-          description,
-          createdAt: now,
-        });
-        return {
-          ...baseMindState,
-          memoryClaims: bootstrap.claims,
-          claimSources: bootstrap.sources,
-        };
-      })()
-    : baseMindState;
-
-  const persona: Persona = {
-    ...personaBase,
-    mindState,
-  };
-
-  await savePersona(persona);
-
-  await appendMessages([
-    createMessage({
-      personaId: persona.id,
-      role: "assistant",
-      kind: "preview",
-      channel: "web",
-      body: hasSourceMaterial
-        ? `${name} is here, shaped from the material you shared. They already have a sense of who you are together. Start talking naturally.`
-        : `${name} is here. They're starting fresh — get to know each other, and they'll learn who you are through conversation.`,
-      audioStatus: "text_fallback",
-      replyMode: "text",
-      delivery: {
-        webInbox: true,
-        telegramStatus: "not_requested",
-        attempts: 0,
-      },
-    }),
-  ]);
-
-  return persona;
-}
-
 /**
  * Send a message to a persona and get a reply. Runs the full cognitive pipeline:
  * transcribe (if voice) → observe images (if any) → appraise → deliberate → reply → learn.
@@ -3258,57 +2899,6 @@ export async function sendPersonaMessage(
   };
 }
 
-export async function synthesizeStoredReply(personaId: string, messageId: string) {
-  const persona = await getPersona(personaId);
-
-  if (!persona) {
-    throw new Error("Persona not found.");
-  }
-
-  const message = (await listMessages(personaId)).find((entry) => entry.id === messageId);
-
-  if (!message) {
-    throw new Error("Message not found.");
-  }
-
-  if (message.role !== "assistant") {
-    throw new Error("Only assistant messages can be synthesized.");
-  }
-
-  if (message.audioUrl) {
-    return message;
-  }
-
-  if (persona.voice.status === "unavailable" || !persona.voice.voiceId) {
-    return message;
-  }
-
-  const providers = getProviders();
-  const synthesized = await providers.voice.synthesize({
-    personaName: persona.name,
-    voiceId: persona.voice.voiceId,
-    text: message.body,
-    stylePrompt: [
-      persona.dossier.communicationStyle,
-      persona.description,
-      message.channel === "heartbeat" ? "A brief voice note that feels naturally timed." : "One intimate reply.",
-    ]
-      .filter(Boolean)
-      .join(" "),
-  });
-
-  if (!synthesized.audioUrl) {
-    return message;
-  }
-
-  return updateMessage(message.id, (current) => ({
-    ...current,
-    kind: current.kind === "preview" ? "preview" : "audio",
-    audioUrl: synthesized.audioUrl,
-    audioStatus: synthesized.status,
-  }));
-}
-
 function resolveLivePerceptionForSession(
   sessionId: string | undefined,
   observations: PerceptionObservation[],
@@ -3540,6 +3130,23 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   const body = parsed.body.trim();
   if (!body) {
     throw new Error("A transcript body is required.");
+  }
+
+  const existingLiveMessage = (await listMessages(personaId)).find(
+    (message) =>
+      message.channel === "live" &&
+      message.role === parsed.role &&
+      message.metadata?.humeMessageId === parsed.eventId &&
+      message.metadata?.sessionId === parsed.sessionId,
+  );
+
+  if (existingLiveMessage) {
+    return {
+      message: existingLiveMessage,
+      persona,
+      sessionFrame: undefined,
+      contextualUpdate: undefined,
+    };
   }
 
   const isAssistant = parsed.role === "assistant";
@@ -4127,55 +3734,6 @@ export async function finalizeLiveSession(
   };
 }
 
-/** Record user feedback on a message — contradicts matching claims and creates a repair note. */
-export async function addPersonaFeedback(personaId: string, payload: unknown) {
-  const parsed = feedbackRequestSchema.parse(payload);
-  const persona = await getPersona(personaId);
-
-  if (!persona) {
-    throw new Error("Persona not found.");
-  }
-
-  const feedback: FeedbackEvent = {
-    id: randomUUID(),
-    personaId,
-    messageId: parsed.messageId,
-    note: parsed.note,
-    createdAt: new Date().toISOString(),
-  };
-
-  await appendFeedback(feedback);
-  await updatePersona(personaId, (current) => ({
-    ...current,
-    updatedAt: new Date().toISOString(),
-    dossier: {
-      ...current.dossier,
-      guidance: Array.from(new Set([...current.dossier.guidance, `Avoid: ${parsed.note}`])),
-    },
-    mindState: (() => {
-      const correction = applyFeedbackToMemoryClaims({
-        claims: current.mindState.memoryClaims,
-        claimSources: current.mindState.claimSources,
-        feedback,
-      });
-
-      return {
-        ...current.mindState,
-        memoryClaims: correction.claims,
-        claimSources: correction.claimSources,
-        recentChangedClaims: [
-          ...correction.changedClaims,
-          ...current.mindState.recentChangedClaims.filter(
-            (claim) => !correction.changedClaims.some((changed) => changed.id === claim.id),
-          ),
-        ].slice(0, 12),
-      };
-    })(),
-  }));
-
-  return feedback;
-}
-
 /** Run a heartbeat check for a persona — may produce a text or voice note message. */
 export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision> {
   const persona = await getPersona(personaId);
@@ -4200,6 +3758,15 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
   const messages = await listMessages(personaId);
 
   if (countOutboundToday(messages, personaId, now) >= persona.heartbeatPolicy.maxOutboundPerDay) {
+    const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);
+
+    await updatePersona(personaId, (current) => ({
+      ...current,
+      lastHeartbeatAt: now.toISOString(),
+      nextHeartbeatAt,
+      updatedAt: now.toISOString(),
+    }));
+
     return {
       action: "SILENT",
       reason: "Daily outbound heartbeat cap reached.",
@@ -4215,14 +3782,12 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
   });
 
   if (decision.action === "SILENT" || !decision.content) {
-    // Calculate next heartbeat time even for SILENT decisions
-    const nextInterval = calculateNextHeartbeatInterval(activePersona, now);
-    const nextHeartbeatAt = new Date(now.getTime() + nextInterval * 60 * 60 * 1000);
+    const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);
     
     await updatePersona(personaId, (current) => ({
       ...current,
       lastHeartbeatAt: now.toISOString(),
-      nextHeartbeatAt: nextHeartbeatAt.toISOString(),
+      nextHeartbeatAt,
       updatedAt: now.toISOString(),
     }));
     return decision;
@@ -4260,8 +3825,7 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
   await appendMessages([heartbeatMessage]);
   
   // Calculate next heartbeat time based on current state
-  const nextInterval = calculateNextHeartbeatInterval(activePersona, now);
-  const nextHeartbeatAt = new Date(now.getTime() + nextInterval * 60 * 60 * 1000);
+  const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);
   
   const assistantTurnExecution = await runVersionedSoulTurn({
     personaId,
@@ -4269,7 +3833,7 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
     updatedAt: now.toISOString(),
     lastActiveAt: now.toISOString(),
     lastHeartbeatAt: now.toISOString(),
-    nextHeartbeatAt: nextHeartbeatAt.toISOString(),
+    nextHeartbeatAt,
     build: async () => ({
       messages: await listMessages(personaId),
       observations: await listPerceptionObservations(personaId),
@@ -4340,48 +3904,6 @@ async function sendTelegramText(chatId: number, text: string) {
   }).finally(() => clearTimeout(timer));
 
   return response.ok;
-}
-
-export async function flushPendingTelegramMessages() {
-  const pendingMessages = await listPendingTelegramMessages();
-  const results: Array<{ messageId: string; delivered: boolean }> = [];
-
-  for (const message of pendingMessages) {
-    const persona = await getPersona(message.personaId);
-
-    if (!persona?.telegramChatId) {
-      continue;
-    }
-
-    try {
-      const delivered = await sendTelegramText(persona.telegramChatId, message.body);
-      await updateMessage(message.id, (current) => ({
-        ...current,
-        delivery: {
-          ...current.delivery,
-          telegramStatus: delivered ? "sent" : "failed",
-          attempts: current.delivery.attempts + 1,
-          lastAttemptAt: new Date().toISOString(),
-          lastError: delivered ? undefined : "Telegram sendMessage failed.",
-        },
-      }));
-      results.push({ messageId: message.id, delivered });
-    } catch (error) {
-      await updateMessage(message.id, (current) => ({
-        ...current,
-        delivery: {
-          ...current.delivery,
-          telegramStatus: "failed",
-          attempts: current.delivery.attempts + 1,
-          lastAttemptAt: new Date().toISOString(),
-          lastError: error instanceof Error ? error.message : "Unknown telegram delivery error.",
-        },
-      }));
-      results.push({ messageId: message.id, delivered: false });
-    }
-  }
-
-  return results;
 }
 
 type TelegramUpdate = {
