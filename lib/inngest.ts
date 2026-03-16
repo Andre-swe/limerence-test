@@ -1,8 +1,57 @@
-import { Inngest } from "inngest";
+import { Inngest, NonRetriableError } from "inngest";
+import * as Sentry from "@sentry/nextjs";
 import { soulLogger } from "@/lib/soul-logger";
 import type { InternalScheduledEvent, PendingShadowTurn } from "@/lib/types";
 
 export const inngest = new Inngest({ id: "limerence" });
+
+/**
+ * Log error to Sentry and structured logging.
+ */
+function captureException(error: Error, context: Record<string, unknown>) {
+  // Send to Sentry
+  Sentry.captureException(error, {
+    extra: context,
+    tags: {
+      deadLetter: context.deadLetter ? "true" : "false",
+      nonRetriable: context.nonRetriable ? "true" : "false",
+    },
+  });
+  
+  // Also log locally for debugging
+  soulLogger.error(
+    {
+      ...context,
+      error: error.message,
+      stack: error.stack,
+    },
+    "inngest function failed - sent to sentry",
+  );
+}
+
+/**
+ * Determine if an error is retriable.
+ * Some errors (like validation errors) should not be retried.
+ */
+function isRetriableError(error: unknown): boolean {
+  if (error instanceof NonRetriableError) {
+    return false;
+  }
+  
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  
+  // Non-retriable errors
+  if (
+    message.includes("persona not found") ||
+    message.includes("validation") ||
+    message.includes("invalid") ||
+    message.includes("not authorized")
+  ) {
+    return false;
+  }
+  
+  return true;
+}
 
 /** Check if Inngest is configured for background job execution. */
 export function isInngestExecutionEnabled() {
@@ -95,54 +144,128 @@ export async function publishPersonaShadowTurns(input: {
 }
 
 export const soulInternalEventFunction = inngest.createFunction(
-  { id: "soul-internal-event" },
+  {
+    id: "soul-internal-event",
+    retries: 3,
+  },
   { event: "soul/internal-event" },
-  async ({ event }) => {
-    const { executeSoulInternalEvent } = await import("@/lib/services");
-    const execution = await executeSoulInternalEvent(event.data.personaId, event.data.eventId);
-
-    soulLogger.info(
-      {
-        personaId: event.data.personaId,
-        eventId: event.data.eventId,
-        dedupeKey: event.data.dedupeKey,
-        handled: execution.handled,
-      },
-      "soul internal event received by inngest",
-    );
-
-    return {
-      received: true,
-      handled: execution.handled,
+  async ({ event, attempt }) => {
+    const context = {
       personaId: event.data.personaId,
       eventId: event.data.eventId,
+      dedupeKey: event.data.dedupeKey,
+      attempt,
     };
+
+    try {
+      const { executeSoulInternalEvent } = await import("@/lib/services");
+      const execution = await executeSoulInternalEvent(event.data.personaId, event.data.eventId);
+
+      soulLogger.info(
+        { ...context, handled: execution.handled },
+        "soul internal event executed by inngest",
+      );
+
+      return {
+        received: true,
+        handled: execution.handled,
+        personaId: event.data.personaId,
+        eventId: event.data.eventId,
+      };
+    } catch (error) {
+      // Log failure with full context for monitoring
+      const isLastAttempt = attempt >= 3;
+      
+      if (isLastAttempt) {
+        // Dead-letter: all retries exhausted
+        captureException(
+          error instanceof Error ? error : new Error(String(error)),
+          { ...context, deadLetter: true },
+        );
+      } else {
+        soulLogger.warn(
+          { ...context, error: error instanceof Error ? error.message : String(error) },
+          "soul internal event failed, will retry",
+        );
+      }
+
+      // Throw non-retriable errors immediately to avoid wasting retries
+      if (!isRetriableError(error)) {
+        captureException(
+          error instanceof Error ? error : new Error(String(error)),
+          { ...context, nonRetriable: true },
+        );
+        throw new NonRetriableError(
+          error instanceof Error ? error.message : "Non-retriable error",
+          { cause: error },
+        );
+      }
+
+      throw error;
+    }
   },
 );
 
 export const soulShadowTurnFunction = inngest.createFunction(
-  { id: "soul-shadow-turn" },
+  {
+    id: "soul-shadow-turn",
+    retries: 5, // More retries for shadow turns since they're important
+  },
   { event: "soul/shadow-turn" },
-  async ({ event }) => {
-    const { executeQueuedShadowTurn } = await import("@/lib/services");
-    const execution = await executeQueuedShadowTurn(event.data.personaId, event.data.jobId);
-
-    soulLogger.info(
-      {
-        personaId: event.data.personaId,
-        jobId: event.data.jobId,
-        sessionId: event.data.sessionId,
-        handled: execution.handled,
-      },
-      "soul shadow turn received by inngest",
-    );
-
-    return {
-      received: true,
-      handled: execution.handled,
+  async ({ event, attempt }) => {
+    const context = {
       personaId: event.data.personaId,
       jobId: event.data.jobId,
+      sessionId: event.data.sessionId,
+      attempt,
     };
+
+    try {
+      const { executeQueuedShadowTurn } = await import("@/lib/services");
+      const execution = await executeQueuedShadowTurn(event.data.personaId, event.data.jobId);
+
+      soulLogger.info(
+        { ...context, handled: execution.handled },
+        "soul shadow turn executed by inngest",
+      );
+
+      return {
+        received: true,
+        handled: execution.handled,
+        personaId: event.data.personaId,
+        jobId: event.data.jobId,
+      };
+    } catch (error) {
+      // Log failure with full context for monitoring
+      const isLastAttempt = attempt >= 5;
+      
+      if (isLastAttempt) {
+        // Dead-letter: all retries exhausted
+        captureException(
+          error instanceof Error ? error : new Error(String(error)),
+          { ...context, deadLetter: true },
+        );
+      } else {
+        soulLogger.warn(
+          { ...context, error: error instanceof Error ? error.message : String(error) },
+          "soul shadow turn failed, will retry",
+        );
+      }
+
+      // Throw non-retriable errors immediately
+      if (!isRetriableError(error)) {
+        captureException(
+          error instanceof Error ? error : new Error(String(error)),
+          { ...context, nonRetriable: true },
+        );
+        throw new NonRetriableError(
+          error instanceof Error ? error.message : "Non-retriable error",
+          { cause: error },
+        );
+      }
+
+      throw error;
+    }
   },
 );
 
