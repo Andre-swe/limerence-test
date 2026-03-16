@@ -288,7 +288,6 @@ export function MessagesPanel({
       createdAt: optimisticCreatedAt,
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested",
         attempts: 0,
       },
       optimistic: true,

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   ArrowLeft,
-  Bot,
   CloudCog,
   Database,
   MessageCircleMore,
@@ -14,7 +13,7 @@ import { getSupabaseStatus } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-/** Renders the settings and diagnostics page showing provider status, storage configuration, and Telegram bridge setup. */
+/** Renders the settings and diagnostics page showing provider status and storage configuration. */
 export default function SettingsPage() {
   const providerStatus = getProviderStatus();
   const supabaseStatus = getSupabaseStatus();
@@ -95,11 +94,11 @@ export default function SettingsPage() {
             The invisible machinery
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-7 text-[rgba(29,38,34,0.62)]">
-            The demo still runs on explicit provider adapters, storage, and legacy Telegram plumbing.
+            The demo still runs on explicit provider adapters and storage.
             Those details stay here instead of leaking into the main product surface.
           </p>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
             {[
               {
                 icon: CloudCog,
@@ -110,15 +109,6 @@ export default function SettingsPage() {
                 icon: Database,
                 title: "Memory layer",
                 rows: storageRows,
-              },
-              {
-                icon: Bot,
-                title: "Telegram bridge",
-                rows: [
-                  "Set TELEGRAM_BOT_TOKEN",
-                  "Point the webhook at /api/telegram/webhook",
-                  "Use the secure /bind command from a persona's Messages page",
-                ],
               },
             ].map(({ icon: Icon, title, rows }) => (
               <section key={title} className="rounded-[24px] bg-[rgba(255,255,255,0.72)] px-5 py-5">

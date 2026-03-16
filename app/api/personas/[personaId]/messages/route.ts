@@ -20,7 +20,6 @@ export async function POST(
 
     const formData = await request.formData();
     const text = String(formData.get("text") ?? "").trim();
-    const channel = String(formData.get("channel") ?? "web");
     const audio = formData.get("audio");
     const images = formData
       .getAll("images")
@@ -30,7 +29,7 @@ export async function POST(
     const result = await withUserStore(ownership.userId, () =>
       sendPersonaMessage(personaId, {
         text,
-        channel: channel === "telegram" ? "telegram" : "web",
+        channel: "web" as const,
         audioFile: audio instanceof File ? audio : null,
         images,
       })

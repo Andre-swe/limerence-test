@@ -5,10 +5,6 @@ import { MessagesPanel } from "@/components/messages-panel";
 import { DebugPanel } from "@/components/debug-panel";
 import { LogoMark } from "@/components/logo-mark";
 import { getPersona, listMessages } from "@/lib/store";
-import {
-  buildTelegramBindCommand,
-  telegramBindCodeLifetimeMinutes,
-} from "@/lib/telegram-bind";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +21,6 @@ export default async function PersonaMessagesPage({
   }
 
   const messages = await listMessages(persona.id);
-  const telegramBindCommand = process.env.TELEGRAM_BOT_TOKEN?.trim()
-    ? buildTelegramBindCommand(persona)
-    : null;
 
   return (
     <div className="app-shell min-h-screen px-4 py-6 sm:px-6 lg:px-10">
@@ -56,21 +49,6 @@ export default async function PersonaMessagesPage({
             Call
           </Link>
         </header>
-
-        {telegramBindCommand ? (
-          <section className="rounded-[24px] border border-[var(--line)] bg-[rgba(255,255,255,0.72)] px-5 py-4">
-            <p className="text-xs uppercase tracking-[0.22em] text-[rgba(29,38,34,0.45)]">
-              Telegram connect
-            </p>
-            <p className="mt-2 text-sm text-[rgba(29,38,34,0.74)]">
-              Use this secure command in Telegram to bind the chat to {persona.name}. It expires in{" "}
-              {telegramBindCodeLifetimeMinutes} minutes.
-            </p>
-            <code className="mt-3 block overflow-x-auto rounded-[16px] bg-[rgba(223,228,209,0.5)] px-3 py-3 text-sm text-[var(--sage-deep)]">
-              {telegramBindCommand}
-            </code>
-          </section>
-        ) : null}
 
         <MessagesPanel
           initialMessages={messages}
