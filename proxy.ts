@@ -10,6 +10,13 @@ import {
 
 let startupValidated = false;
 
+function copyResponseCookies(source: NextResponse, target: NextResponse) {
+  source.cookies.getAll().forEach((cookie) => {
+    target.cookies.set(cookie);
+  });
+  return target;
+}
+
 function ensureStartupEnvironment() {
   if (startupValidated) {
     return;
@@ -66,11 +73,11 @@ export async function proxy(request: NextRequest) {
   if (isProtectedPage(pathname) && !user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl);
+    return copyResponseCookies(response, NextResponse.redirect(loginUrl));
   }
 
   if (pathname === "/login" && user) {
-    return NextResponse.redirect(new URL("/", request.url));
+    return copyResponseCookies(response, NextResponse.redirect(new URL("/", request.url)));
   }
 
   const needsAuthenticatedUserHeader =
@@ -81,9 +88,12 @@ export async function proxy(request: NextRequest) {
   }
 
   if (!user) {
-    return NextResponse.json(
-      { error: "Unauthorized. Valid session required." },
-      { status: 401, headers: corsHeaders },
+    return copyResponseCookies(
+      response,
+      NextResponse.json(
+        { error: "Unauthorized. Valid session required." },
+        { status: 401, headers: corsHeaders },
+      ),
     );
   }
 
@@ -91,9 +101,12 @@ export async function proxy(request: NextRequest) {
   requestHeaders.set("x-user-id", user.id);
 
   return applyHeaders(
-    NextResponse.next({
-      request: { headers: requestHeaders },
-    }),
+    copyResponseCookies(
+      response,
+      NextResponse.next({
+        request: { headers: requestHeaders },
+      }),
+    ),
     corsHeaders,
   );
 }

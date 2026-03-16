@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, User } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
 
 interface UserMenuProps {
   email: string;
@@ -10,16 +11,14 @@ interface UserMenuProps {
 
 export function UserMenu({ email }: UserMenuProps) {
   const router = useRouter();
+  const { signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSignOut = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/sign-out", { method: "POST" });
-      if (!response.ok) {
-        throw new Error("Unable to sign out.");
-      }
+      await signOut();
       router.push("/login");
       router.refresh();
     } finally {

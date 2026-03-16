@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { User, Session } from "@supabase/supabase-js";
 
@@ -25,9 +25,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
+    supabaseRef.current = supabase;
 
     // Get initial session
     supabase.auth
@@ -59,7 +61,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
-    await fetch("/api/auth/sign-out", { method: "POST" });
+    const supabase = supabaseRef.current ?? createClient();
+    supabaseRef.current = supabase;
+
+    const [clientSignOut, serverSignOut] = await Promise.allSettled([
+      supabase.auth.signOut(),
+      fetch("/api/auth/sign-out", { method: "POST" }),
+    ]);
+
+    if (clientSignOut.status === "rejected" && serverSignOut.status === "rejected") {
+      throw clientSignOut.reason ?? serverSignOut.reason;
+    }
+
     setUser(null);
     setSession(null);
   };

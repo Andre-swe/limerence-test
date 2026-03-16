@@ -2,17 +2,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
 
-const { createServerClientMock, getUserMock } = vi.hoisted(() => {
+const { createServerClientMock, getUserMock, refreshedCookies } = vi.hoisted(() => {
   const getUserMock = vi.fn();
-  const createServerClientMock = vi.fn(() => ({
-    auth: {
-      getUser: getUserMock,
-    },
-  }));
+  const refreshedCookies: Array<{
+    name: string;
+    options?: Record<string, unknown>;
+    value: string;
+  }> = [];
+  const createServerClientMock = vi.fn(
+    (
+      _url: string,
+      _key: string,
+      options: { cookies: { setAll: (cookiesToSet: typeof refreshedCookies) => void } },
+    ) => ({
+      auth: {
+        getUser: async () => {
+          if (refreshedCookies.length > 0) {
+            options.cookies.setAll(refreshedCookies);
+          }
+          return getUserMock();
+        },
+      },
+    }),
+  );
 
   return {
     createServerClientMock,
     getUserMock,
+    refreshedCookies,
   };
 });
 
@@ -26,6 +43,7 @@ describe("proxy", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://supabase.test");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
+    refreshedCookies.length = 0;
     getUserMock.mockResolvedValue({
       data: { user: null },
     });
@@ -74,6 +92,11 @@ describe("proxy", () => {
     getUserMock.mockResolvedValueOnce({
       data: { user: { id: "user-42" } },
     });
+    refreshedCookies.push({
+      name: "sb-access-token",
+      value: "fresh-token",
+      options: { path: "/" },
+    });
 
     const response = await proxy(
       new NextRequest("http://localhost/api/personas/persona-1/messages", {
@@ -84,6 +107,7 @@ describe("proxy", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-request-x-user-id")).toBe("user-42");
     expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+    expect(response.cookies.get("sb-access-token")?.value).toBe("fresh-token");
   });
 
   it("injects x-user-id into the authenticated store health route", async () => {
