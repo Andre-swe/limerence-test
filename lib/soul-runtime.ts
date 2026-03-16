@@ -1,4 +1,5 @@
 import { getReadyOpenLoop } from "@/lib/mind-runtime";
+import { isPersonaInQuietHours, isPersonaInWorkHours } from "@/lib/persona-schedule";
 import { getReadyScheduledPerceptions, getSoulProcessDefinition } from "@/lib/soul-kernel";
 import { buildSoulHarness, type SoulMemory } from "@/lib/soul-harness";
 import type { HeartbeatDecision, MessageEntry, MindProcess, Persona, SoulPerception, UserStateSnapshot } from "@/lib/types";
@@ -425,6 +426,8 @@ function fallbackReplyForProcess(process: SoulConversationProcess, persona: Pers
               : voiceStyle === "ritual"
                 ? `${opening}stay with me a second. let the room get smaller around the one part that matters first.${repairTail}`.trim()
                 : `${opening}I’m right here. let me be the steady part for a second while you catch up to yourself.${repairTail}`.trim());
+    default:
+      return personaFallbackLine(persona, process, `${opening}I’m here. tell me the part that matters most right now.${repairTail}`.trim());
   }
 }
 
@@ -433,22 +436,11 @@ function heartbeatModeFor(persona: Persona) {
 }
 
 function inQuietHours(persona: Persona, now: Date) {
-  const hour = now.getHours();
-  const start = persona.heartbeatPolicy.quietHoursStart;
-  const end = persona.heartbeatPolicy.quietHoursEnd;
-
-  return start > end ? hour >= start || hour < end : hour >= start && hour < end;
+  return isPersonaInQuietHours(persona, now);
 }
 
 function inWorkHours(persona: Persona, now: Date) {
-  const hour = now.getHours();
-  const weekday = now.getDay();
-  return (
-    persona.heartbeatPolicy.workHoursEnabled &&
-    persona.heartbeatPolicy.workDays.includes(weekday) &&
-    hour >= persona.heartbeatPolicy.workHoursStart &&
-    hour < persona.heartbeatPolicy.workHoursEnd
-  );
+  return isPersonaInWorkHours(persona, now);
 }
 
 /** Plan a full conversation reply — selects process and builds the prompt for Gemini. */

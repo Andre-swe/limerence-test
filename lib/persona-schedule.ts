@@ -122,7 +122,8 @@ export function calculateCircadianInterval(persona: Persona, now: Date) {
   }
 
   const activityRatio = smoothedActivity / maxActivity;
-  return maxInterval - (maxInterval - minInterval) * activityRatio;
+  const interval = maxInterval - (maxInterval - minInterval) * activityRatio;
+  return Number.isFinite(interval) ? interval : policy.intervalHours;
 }
 
 export function isPersonaInQuietHours(persona: Persona, now: Date) {
