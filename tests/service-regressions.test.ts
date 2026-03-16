@@ -132,6 +132,46 @@ describe("service regressions", () => {
     expect(persona?.heartbeatPolicy.hourlyActivityCounts[15]).toBe(0);
   });
 
+  it("applies the daily outbound cap using the persona's local date", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-16T01:00:00.000Z"));
+
+    await appendMessages([
+      {
+        id: "heartbeat-tokyo-1",
+        personaId: "persona-mom",
+        role: "assistant",
+        kind: "text",
+        channel: "heartbeat",
+        body: "Checking in from the earlier local morning.",
+        attachments: [],
+        audioStatus: "unavailable",
+        createdAt: "2026-03-15T16:00:00.000Z",
+        replyMode: "text",
+        delivery: {
+          webInbox: true,
+          telegramStatus: "not_requested",
+          attempts: 0,
+        },
+      },
+    ]);
+
+    await updatePersona("persona-mom", (persona) => ({
+      ...persona,
+      timezone: "Asia/Tokyo",
+      heartbeatPolicy: {
+        ...persona.heartbeatPolicy,
+        maxOutboundPerDay: 1,
+      },
+      nextHeartbeatAt: undefined,
+    }));
+
+    const decision = await runHeartbeat("persona-mom");
+
+    expect(decision.action).toBe("SILENT");
+    expect(decision.reason).toContain("Daily outbound heartbeat cap reached");
+  });
+
   it("preserves learned state when a concurrent persona update forces a turn retry", async () => {
     const before = await getPersona("persona-mom");
     const actualProviders = providersModule.getProviders();

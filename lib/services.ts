@@ -34,7 +34,14 @@ import {
 } from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
 import { computeAwakeningReliability, planInternalMonologue, renderInternalMonologuePrompt } from "@/lib/soul-runtime";
-import { getPersonaLocalHour, resolvePersonaTimeZone } from "@/lib/persona-schedule";
+import {
+  calculateCircadianInterval,
+  countOutboundToday as countOutboundTodayForPersona,
+  getPersonaLocalHour,
+  isPersonaInQuietHours,
+  isPersonaInWorkHours,
+  resolvePersonaTimeZone,
+} from "@/lib/persona-schedule";
 import {
   buildDebugContext,
   summarizeLiveSessionMetrics,
@@ -384,46 +391,17 @@ function calculateNextHeartbeatInterval(persona: Persona, now: Date): number {
     return applyVariableReinforcement(policy.intervalHours, minInterval, maxInterval);
   }
   
-  const currentHour = now.getHours();
-  const hourlyActivity = policy.hourlyActivityCounts ?? Array(24).fill(0);
-  
-  // Get activity for current hour and surrounding hours (smoothed)
-  const prevHour = (currentHour + 23) % 24;
-  const nextHour = (currentHour + 1) % 24;
-  const smoothedActivity = (
-    hourlyActivity[prevHour] * 0.25 +
-    hourlyActivity[currentHour] * 0.5 +
-    hourlyActivity[nextHour] * 0.25
-  );
-  
-  // Find max activity to normalize
-  const maxActivity = Math.max(...hourlyActivity, 1);
-  const activityRatio = smoothedActivity / maxActivity;
-  
-  // High activity → short interval, low activity → long interval
-  let baseInterval = maxInterval - (maxInterval - minInterval) * activityRatio;
+  let baseInterval = calculateCircadianInterval(persona, now);
   
   // Check if we're in quiet hours
-  const quietStart = policy.quietHoursStart;
-  const quietEnd = policy.quietHoursEnd;
-  const inQuietHours = quietStart > quietEnd
-    ? (currentHour >= quietStart || currentHour < quietEnd)
-    : (currentHour >= quietStart && currentHour < quietEnd);
-  
-  if (inQuietHours) {
+  if (isPersonaInQuietHours(persona, now)) {
     // During quiet hours, use extended max interval (8-16 hours)
     return applyVariableReinforcement(maxInterval * 2, maxInterval, maxInterval * 2);
   }
   
   // Check work hours if enabled
-  if (policy.workHoursEnabled) {
-    const dayOfWeek = now.getDay();
-    const inWorkDay = policy.workDays.includes(dayOfWeek);
-    const inWorkHours = currentHour >= policy.workHoursStart && currentHour < policy.workHoursEnd;
-    
-    if (inWorkDay && inWorkHours) {
-      return applyVariableReinforcement(maxInterval * 1.5, maxInterval, maxInterval * 2);
-    }
+  if (policy.workHoursEnabled && isPersonaInWorkHours(persona, now)) {
+    return applyVariableReinforcement(maxInterval * 1.5, maxInterval, maxInterval * 2);
   }
   
   // Apply emotional state modifier
@@ -461,17 +439,6 @@ function buildHeartbeatDue(persona: Persona, now: Date) {
     (now.getTime() - new Date(persona.lastHeartbeatAt).getTime()) / (1000 * 60 * 60);
   const requiredInterval = calculateNextHeartbeatInterval(persona, now);
   return elapsedHours >= requiredInterval;
-}
-
-function countOutboundToday(messages: MessageEntry[], personaId: string, now: Date) {
-  const dateKey = now.toISOString().slice(0, 10);
-  return messages.filter(
-    (message) =>
-      message.personaId === personaId &&
-      message.role === "assistant" &&
-      message.channel === "heartbeat" &&
-      message.createdAt.slice(0, 10) === dateKey,
-  ).length;
 }
 
 function nextHeartbeatAtFor(persona: Persona, now: Date) {
@@ -3751,7 +3718,7 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
 
   const messages = await listMessages(personaId);
 
-  if (countOutboundToday(messages, personaId, now) >= persona.heartbeatPolicy.maxOutboundPerDay) {
+  if (countOutboundTodayForPersona(messages, persona, now) >= persona.heartbeatPolicy.maxOutboundPerDay) {
     const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);
 
     await updatePersona(personaId, (current) => ({
