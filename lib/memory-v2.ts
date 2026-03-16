@@ -69,7 +69,7 @@ function clamp(value: number, min = 0, max = 1) {
 function calculateClaimWeight(claim: MemoryClaim): number {
   const now = Date.now();
   const lastObserved = new Date(claim.lastObservedAt).getTime();
-  const ageMs = Number.isFinite(lastObserved) ? Math.max(0, now - lastObserved) : 365 * 24 * 60 * 60 * 1000;
+  const ageMs = Number.isFinite(lastObserved) ? Math.max(0, now - lastObserved) : 7 * 24 * 60 * 60 * 1000;
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
   
   // Recency decay: claims lose value over time (half-life of ~30 days)
@@ -80,9 +80,12 @@ function calculateClaimWeight(claim: MemoryClaim): number {
   
   // Base weight from importance and confidence
   const baseWeight = (claim.importance * 0.6) + (claim.confidence * 0.4);
-  
+
+  // Bootstrap claims that haven't been contradicted get eviction protection
+  const bootstrapBonus = claim.tags.includes("bootstrap") && claim.status !== "contradicted" && claim.status !== "stale" ? 0.3 : 0;
+
   // Combine factors
-  return (baseWeight + reinforcementBonus) * (0.5 + 0.5 * recencyFactor);
+  return (baseWeight + reinforcementBonus + bootstrapBonus) * (0.5 + 0.5 * recencyFactor);
 }
 
 /**
@@ -194,10 +197,10 @@ function importanceForKind(kind: MemoryClaimKind) {
 
 function guessKindFromText(text: string, fallback: MemoryClaimKind) {
   const lower = text.toLowerCase();
-  if (/(don'?t|do not|while i('| a)?m at work|need space|leave me alone|quiet hours|stop texting)/.test(lower)) {
+  if (/(don'?t (text|message|call|contact|send|reach out)|do not (text|message|call|contact)|while i('| a)?m at work|need space|leave me alone|quiet hours|stop texting)/.test(lower)) {
     return "boundary";
   }
-  if (/(prefer|like|hate|love|rather|text me|voice notes|call me)/.test(lower)) {
+  if (/\b(prefer|rather)\b.*(text|voice|call|message|morning|evening|night|check.?in)|(text me|voice notes|call me|hate (when you|getting|texts|calls))/.test(lower)) {
     return "preference";
   }
   if (/(always|every morning|every night|usually|before big meetings|when i('| a)?m)/.test(lower)) {
@@ -253,6 +256,7 @@ function upsertClaim(input: {
   claims: MemoryClaim[];
   sources: ClaimSource[];
   candidate: ClaimCandidate;
+  allowReconfirm?: boolean;
 }) {
   const claims = [...input.claims];
   const sources = [...input.sources];
@@ -309,13 +313,11 @@ function upsertClaim(input: {
 
   const existing = claims[existingIndex];
   const nextStatus =
-    existing.status === "contradicted" && input.candidate.status === "confirmed"
-      ? "confirmed"
-      : existing.status === "contradicted"
-        ? existing.status
-        : input.candidate.status === "confirmed" || existing.status === "confirmed"
-          ? "confirmed"
-          : existing.status;
+    existing.status === "contradicted"
+      ? (input.allowReconfirm && input.candidate.status === "confirmed" ? "confirmed" : existing.status)
+      : input.candidate.status === "confirmed" || existing.status === "confirmed"
+        ? "confirmed"
+        : existing.status;
   const nextClaim: MemoryClaim = {
     ...existing,
     detail: input.candidate.detail
@@ -411,6 +413,7 @@ export function applyBoundaryClaimUpdate(input: {
     claims: input.claims,
     sources: input.claimSources,
     candidate: buildConfirmedBoundaryClaim(input),
+    allowReconfirm: true,
   });
 }
 
@@ -583,10 +586,13 @@ export function applyLearningArtifactsToMemoryClaims(input: {
     }
 
     if (artifact.kind === "consolidate_episode") {
-      const summaryKeyValue = normalizeText(artifact.summary);
-      const existingIndex = episodes.findIndex(
-        (episode) => normalizeText(episode.summary) === summaryKeyValue,
-      );
+      const summaryTokens = new Set(tokenize(artifact.summary));
+      const existingIndex = episodes.findIndex((episode) => {
+        const epTokens = tokenize(episode.summary);
+        if (epTokens.length === 0 || summaryTokens.size === 0) return false;
+        const overlap = epTokens.filter((t) => summaryTokens.has(t)).length;
+        return overlap >= Math.min(summaryTokens.size, epTokens.length) * 0.6;
+      });
       const nextEpisode: EpisodeRecord = {
         id: existingIndex >= 0 ? episodes[existingIndex].id : randomUUID(),
         sessionId: input.perceptionSessionId,
@@ -947,7 +953,7 @@ export function buildMemoryRetrievalPack(input: RetrievalInput) {
         topicRelevanceBonus(claim, topicTokens) +
         modalityBonus(claim, input.perception?.kind),
     }))
-    .filter(({ claim, score }) => score > 1.7 && !alwaysLoadedClaims.some((loaded) => loaded.id === claim.id))
+    .filter(({ claim, score }) => score > 1.2 && !alwaysLoadedClaims.some((loaded) => loaded.id === claim.id))
     .sort((left, right) => right.score - left.score)
     .slice(0, 6)
     .map(({ claim }) => claim);

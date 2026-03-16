@@ -985,7 +985,10 @@ function routeSoulProcess(input: {
   }
 
   if (readyLoop && completionPattern.test(input.latestUserText ?? "")) {
-    return "follow_through" as const;
+    const lower = (input.latestUserText ?? "").toLowerCase();
+    if (readyLoop.keywords.some((kw) => lower.includes(kw.toLowerCase()))) {
+      return "follow_through" as const;
+    }
   }
 
   if ((state?.valence ?? 0.5) >= 0.68 && (state?.activation ?? 0.5) >= 0.55) {
