@@ -6,6 +6,7 @@ import {
   applySoulArchetypeToRelationship,
   inferSoulArchetypeSeed,
 } from "@/lib/personality-archetypes";
+import { isValidTimeZone } from "@/lib/persona-schedule";
 import { getProviders } from "@/lib/providers";
 import { appendMessages, savePersona } from "@/lib/store";
 import type { Persona, PersonaAssemblyInput, PersonaSource, VoiceProfile } from "@/lib/types";
@@ -72,6 +73,7 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
       : String(formData.get("preferredMode") ?? "mixed") === "text"
         ? "text"
         : "mixed";
+  const rawTimezone = String(formData.get("timezone") ?? "").trim();
   const status: Persona["status"] = "active";
 
   if (!name || !relationship || !description) {
@@ -80,6 +82,10 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
 
   if (!attestedRights) {
     throw new Error("Rights attestation is required.");
+  }
+
+  if (rawTimezone && !isValidTimeZone(rawTimezone)) {
+    throw new Error("Invalid timezone.");
   }
 
   const interviewAnswers = Object.fromEntries(
@@ -173,6 +179,7 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
     updatedAt: now,
     lastActiveAt: undefined,
     lastHeartbeatAt: undefined,
+    timezone: rawTimezone || undefined,
     pastedText,
     screenshotSummaries: assemblyInput.screenshotSummaries,
     interviewAnswers,

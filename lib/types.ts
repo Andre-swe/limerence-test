@@ -929,6 +929,16 @@ export type DataStore = z.infer<typeof dataStoreSchema>;
 export type HeartbeatDecision = z.infer<typeof heartbeatDecisionSchema>;
 export type LiveTranscriptRequest = z.infer<typeof liveTranscriptRequestSchema>;
 
+export const personaSettingsInputSchema = z.object({
+  timezone: z.string(),
+  heartbeatIntervalHours: z.number().min(0.5).max(48),
+  quietHoursStart: z.number().min(0).max(23),
+  quietHoursEnd: z.number().min(0).max(23),
+  preferredMode: z.enum(["text", "voice_note", "mixed"]),
+});
+
+export type PersonaSettingsInput = z.infer<typeof personaSettingsInputSchema>;
+
 export type PersonaAssemblyInput = {
   name: string;
   relationship: string;
