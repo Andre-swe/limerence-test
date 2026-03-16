@@ -19,6 +19,7 @@ import {
 } from "@/lib/mind-runtime";
 import { getReadyScheduledPerceptions } from "@/lib/soul-kernel";
 import { buildSoulHarness, buildStableSystemPrompt, renderLiveContextOverlay, renderSoulHarnessContext } from "@/lib/soul-harness";
+import { computeNextAwakeningReadyAt, inferAwakeningScheduleFromText } from "@/lib/memory-v2";
 import { planConversationSoul, renderMockConversationReply } from "@/lib/soul-runtime";
 import {
   addPersonaFeedback,
@@ -1820,5 +1821,375 @@ describe("persona workflows", () => {
         process.env.HUME_ACCESS_TOKEN = previousAccessToken;
       }
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Self-scheduling awakenings
+  // ---------------------------------------------------------------------------
+
+  it("creates an awakening claim with schedule metadata from natural language", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+
+      const persona = await getPersona("persona-mom");
+      const awakeningClaim = persona?.mindState.memoryClaims.find(
+        (claim) => claim.kind === "ritual" && claim.awakeningSchedule?.active,
+      );
+
+      expect(awakeningClaim).toBeTruthy();
+      expect(awakeningClaim?.status).toBe("confirmed");
+      expect(awakeningClaim?.awakeningSchedule?.recurrence).toBe("daily");
+      expect(awakeningClaim?.awakeningSchedule?.targetHour).toBe(8);
+      expect(awakeningClaim?.awakeningSchedule?.sourceUtterance).toContain("good morning");
+
+      // Should have materialized an internal event for the next occurrence
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening" && e.dedupeKey === `awakening:${awakeningClaim?.id}`,
+      );
+      expect(awakeningEvent).toBeTruthy();
+      expect(awakeningEvent?.status === "pending" || awakeningEvent?.status === "queued").toBe(true);
+      expect(awakeningEvent?.readyAt).toBeTruthy();
+    });
+  });
+
+  it("deactivates only matching awakening claims on targeted cancellation", async () => {
+    await withoutReasoningProviders(async () => {
+      // Create two awakenings
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+      await sendPersonaMessage("persona-mom", {
+        text: "send me goodnight texts before bed",
+        channel: "web",
+      });
+
+      let persona = await getPersona("persona-mom");
+      const activeAwakenings = persona?.mindState.memoryClaims.filter(
+        (c) => c.kind === "ritual" && c.awakeningSchedule?.active,
+      );
+      expect(activeAwakenings?.length).toBeGreaterThanOrEqual(2);
+
+      // Cancel only morning texts
+      await sendPersonaMessage("persona-mom", {
+        text: "stop the morning texts",
+        channel: "web",
+      });
+
+      persona = await getPersona("persona-mom");
+      const morningAwakening = persona?.mindState.memoryClaims.find(
+        (c) => c.kind === "ritual" && c.awakeningSchedule?.targetHour === 8,
+      );
+      const goodnightAwakening = persona?.mindState.memoryClaims.find(
+        (c) => c.kind === "ritual" && c.awakeningSchedule?.targetHour === 22,
+      );
+
+      // Morning should be deactivated, goodnight should still be active
+      expect(morningAwakening?.awakeningSchedule?.active).toBe(false);
+      expect(goodnightAwakening?.awakeningSchedule?.active).toBe(true);
+    });
+  });
+
+  it("materializes awakening occurrences as internal events with exact readyAt", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+
+      const persona = await getPersona("persona-mom");
+      const awakeningClaim = persona?.mindState.memoryClaims.find(
+        (c) => c.kind === "ritual" && c.awakeningSchedule?.active,
+      );
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening",
+      );
+
+      expect(awakeningEvent).toBeTruthy();
+
+      // readyAt should be in the future and carry the claim ID in metadata
+      const readyAt = new Date(awakeningEvent!.readyAt);
+      expect(readyAt.getTime()).toBeGreaterThan(Date.now());
+
+      const meta = awakeningEvent!.perception.metadata as Record<string, unknown>;
+      expect(meta.awakeningClaimId).toBe(awakeningClaim?.id);
+      expect(meta.sourceUtterance).toBeTruthy();
+    });
+  });
+
+  it("fires an awakening event and updates claim accounting", async () => {
+    await withoutReasoningProviders(async () => {
+      // Create the awakening
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+
+      let persona = await getPersona("persona-mom");
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening",
+      );
+      expect(awakeningEvent).toBeTruthy();
+
+      // Fast-forward past the event's readyAt so it fires
+      vi.useFakeTimers();
+      const fireTime = new Date(new Date(awakeningEvent!.readyAt).getTime() + 60_000);
+      vi.setSystemTime(fireTime);
+
+      const execution = await executeSoulInternalEvent(
+        "persona-mom",
+        awakeningEvent!.id,
+        { now: fireTime },
+      );
+      expect(execution.handled).toBe(true);
+
+      persona = await getPersona("persona-mom");
+      const awakeningClaim = persona?.mindState.memoryClaims.find(
+        (c) => c.kind === "ritual" && c.awakeningSchedule,
+      );
+
+      // Either fired or skipped based on reliability roll
+      const schedule = awakeningClaim?.awakeningSchedule;
+      expect(schedule).toBeTruthy();
+      expect((schedule?.fireCount ?? 0) + (schedule?.skipCount ?? 0)).toBeGreaterThanOrEqual(1);
+
+      // Should have scheduled the next occurrence (readyAt in the future)
+      const nextEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) =>
+          e.origin === "awakening" &&
+          e.status === "pending",
+      );
+      expect(nextEvent).toBeTruthy();
+      expect(new Date(nextEvent!.readyAt).getTime()).toBeGreaterThan(fireTime.getTime());
+    });
+  });
+
+  it("cancels pending awakening events when the awakening is deactivated", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+
+      let persona = await getPersona("persona-mom");
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening" && e.status !== "cancelled",
+      );
+      expect(awakeningEvent).toBeTruthy();
+
+      // Cancel the awakening
+      await sendPersonaMessage("persona-mom", {
+        text: "stop the morning texts",
+        channel: "web",
+      });
+
+      persona = await getPersona("persona-mom");
+      const cancelledEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.id === awakeningEvent!.id,
+      );
+      expect(cancelledEvent?.status).toBe("cancelled");
+    });
+  });
+
+  it("does not fire an awakening event before its readyAt time", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+
+      const persona = await getPersona("persona-mom");
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening",
+      );
+      expect(awakeningEvent).toBeTruthy();
+
+      // Try to execute NOW — readyAt is in the future, so it should not fire
+      const execution = await executeSoulInternalEvent(
+        "persona-mom",
+        awakeningEvent!.id,
+        { now: new Date() },
+      );
+      expect(execution.handled).toBe(false);
+    });
+  });
+
+  it("fires awakening through the dedicated path with correct provenance", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "I like good morning texts",
+        channel: "web",
+      });
+
+      let persona = await getPersona("persona-mom");
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening",
+      );
+      expect(awakeningEvent).toBeTruthy();
+      const awakeningClaimId = (awakeningEvent!.perception.metadata as Record<string, unknown>)
+        .awakeningClaimId as string;
+
+      // Pin Math.random to force the reliability roll to fire (0 <= reliability)
+      const origRandom = Math.random;
+      Math.random = () => 0;
+
+      vi.useFakeTimers();
+      const fireTime = new Date(new Date(awakeningEvent!.readyAt).getTime() + 60_000);
+      vi.setSystemTime(fireTime);
+
+      try {
+        const execution = await executeSoulInternalEvent(
+          "persona-mom",
+          awakeningEvent!.id,
+          { now: fireTime },
+        );
+        expect(execution.handled).toBe(true);
+      } finally {
+        Math.random = origRandom;
+      }
+
+      // A heartbeat message should have been created
+      const messages = await listMessages("persona-mom");
+      const heartbeatMessages = messages.filter(
+        (m) => m.role === "assistant" && m.channel === "heartbeat",
+      );
+      expect(heartbeatMessages.length).toBeGreaterThanOrEqual(1);
+
+      // The awakening claim should have fireCount = 1, not just a generic heartbeat
+      persona = await getPersona("persona-mom");
+      const firedClaim = persona?.mindState.memoryClaims.find(
+        (c) => c.id === awakeningClaimId,
+      );
+      expect(firedClaim?.awakeningSchedule?.fireCount).toBe(1);
+      expect(firedClaim?.awakeningSchedule?.lastFiredAt).toBeTruthy();
+
+      // The original event should be marked executed
+      const executedEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.id === awakeningEvent!.id,
+      );
+      expect(executedEvent?.status).toBe("executed");
+
+      // A next occurrence should be scheduled
+      const nextEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) =>
+          e.origin === "awakening" &&
+          e.status === "pending" &&
+          e.dedupeKey === `awakening:${awakeningClaimId}`,
+      );
+      expect(nextEvent).toBeTruthy();
+      expect(new Date(nextEvent!.readyAt).getTime()).toBeGreaterThan(fireTime.getTime());
+    });
+  });
+
+  it("computes DST-safe readyAt across a spring-forward boundary", () => {
+    // March 8, 2026 at 1:00 AM EST — DST springs forward at 2:00 AM
+    // After DST, America/Toronto is UTC-4 instead of UTC-5
+    const beforeDST = new Date("2026-03-08T06:00:00.000Z"); // 1:00 AM EST
+
+    // Seed Math.random for deterministic jitter (jitter=0 when both randoms=0.5)
+    const origRandom = Math.random;
+    Math.random = () => 0.5;
+    try {
+      const readyAt = computeNextAwakeningReadyAt({
+        targetHour: 8,
+        jitterMinutes: 0, // No jitter for deterministic test
+        recurrence: "daily",
+        timezone: "America/Toronto",
+        now: beforeDST,
+      });
+
+      const readyDate = new Date(readyAt);
+      // After DST, 8:00 AM EDT = 12:00 UTC (UTC-4)
+      expect(readyDate.getUTCHours()).toBe(12);
+    } finally {
+      Math.random = origRandom;
+    }
+  });
+
+  it("creates a one-shot reminder awakening that fires once and goes stale", async () => {
+    await withoutReasoningProviders(async () => {
+      await sendPersonaMessage("persona-mom", {
+        text: "remind me about my interview tomorrow",
+        channel: "web",
+      });
+
+      let persona = await getPersona("persona-mom");
+      const reminderClaim = persona?.mindState.memoryClaims.find(
+        (claim) => claim.kind === "ritual" && claim.awakeningSchedule?.awakeningKind === "reminder",
+      );
+
+      expect(reminderClaim).toBeTruthy();
+      expect(reminderClaim?.awakeningSchedule?.recurrence).toBe("once");
+      expect(reminderClaim?.awakeningSchedule?.active).toBe(true);
+
+      // Should have materialized an internal event
+      const awakeningEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) => e.origin === "awakening" && e.dedupeKey === `awakening:${reminderClaim?.id}`,
+      );
+      expect(awakeningEvent).toBeTruthy();
+
+      // Pin Math.random to force fire
+      const origRandom = Math.random;
+      Math.random = () => 0;
+
+      vi.useFakeTimers();
+      const fireTime = new Date(new Date(awakeningEvent!.readyAt).getTime() + 60_000);
+      vi.setSystemTime(fireTime);
+
+      try {
+        const execution = await executeSoulInternalEvent(
+          "persona-mom",
+          awakeningEvent!.id,
+          { now: fireTime },
+        );
+        expect(execution.handled).toBe(true);
+      } finally {
+        Math.random = origRandom;
+      }
+
+      // After firing, the claim should be stale and inactive — no next occurrence
+      persona = await getPersona("persona-mom");
+      const firedClaim = persona?.mindState.memoryClaims.find(
+        (c) => c.id === reminderClaim?.id,
+      );
+      expect(firedClaim?.status).toBe("stale");
+      expect(firedClaim?.awakeningSchedule?.active).toBe(false);
+      expect(firedClaim?.awakeningSchedule?.fireCount).toBe(1);
+
+      // No next occurrence should be scheduled for a one-shot
+      const nextEvent = persona?.mindState.pendingInternalEvents.find(
+        (e) =>
+          e.origin === "awakening" &&
+          e.status === "pending" &&
+          e.dedupeKey === `awakening:${reminderClaim?.id}`,
+      );
+      expect(nextEvent).toBeFalsy();
+    });
+  });
+
+  it("infers correct awakeningKind for different scheduling patterns", () => {
+
+    // Recurring ritual
+    const ritual = inferAwakeningScheduleFromText("I like good morning texts");
+    expect(ritual?.awakeningKind).toBe("ritual");
+    expect(ritual?.recurrence).toBe("daily");
+
+    // One-shot reminder
+    const reminder = inferAwakeningScheduleFromText("remind me about my interview tomorrow");
+    expect(reminder?.awakeningKind).toBe("reminder");
+    expect(reminder?.recurrence).toBe("once");
+
+    // Followup
+    const followup = inferAwakeningScheduleFromText("I should check back on them after that meeting");
+    expect(followup?.awakeningKind).toBe("followup");
+    expect(followup?.recurrence).toBe("once");
+
+    // Deferred
+    const deferred = inferAwakeningScheduleFromText("let me think about that and get back to you");
+    expect(deferred?.awakeningKind).toBe("deferred");
+    expect(deferred?.recurrence).toBe("once");
   });
 });
