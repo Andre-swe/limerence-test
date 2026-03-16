@@ -788,6 +788,7 @@ export const personaSchema = z.object({
   updatedAt: z.string(),
   lastActiveAt: z.string().optional(),
   lastHeartbeatAt: z.string().optional(),
+  nextHeartbeatAt: z.string().optional(),
   telegramChatId: z.number().optional(),
   telegramUsername: z.string().optional(),
   pastedText: z.string(),

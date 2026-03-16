@@ -331,22 +331,99 @@ export async function recordUserActivity(personaId: string, now: Date = new Date
 }
 
 /**
- * Calculate the dynamic heartbeat interval based on circadian activity patterns.
- * Higher activity hours → shorter intervals (more frequent check-ins).
- * Lower activity hours → longer intervals (less intrusive).
+ * Get emotional state modifier for heartbeat interval.
+ * Excited/energetic personas reach out more; withdrawn personas go quiet.
  */
-function calculateCircadianInterval(persona: Persona, now: Date): number {
-  const policy = persona.heartbeatPolicy;
+function getEmotionalStateModifier(persona: Persona): number {
+  const mindState = persona.mindState;
+  const internalState = mindState.internalState;
   
-  // If variable interval is disabled, use fixed interval
+  // Use energy and engagementDrive from internal state
+  const energy = internalState?.energy ?? 0.6;
+  const engagementDrive = internalState?.engagementDrive ?? 0.6;
+  const mood = internalState?.mood ?? "";
+  
+  // High energy + high engagement → reach out more (0.6x)
+  if (energy > 0.7 && engagementDrive > 0.7) {
+    return 0.6;
+  }
+  
+  // Low energy + low engagement → go quiet (1.5x)
+  if (energy < 0.4 && engagementDrive < 0.4) {
+    return 1.5;
+  }
+  
+  // Parse mood for emotional cues
+  const moodLower = mood.toLowerCase();
+  
+  // Excited/energetic moods → more frequent
+  if (/(excit|energetic|happy|joyful|enthusiastic|eager|thrilled)/i.test(moodLower)) {
+    return 0.7;
+  }
+  
+  // Withdrawn/sad moods → less frequent
+  if (/(withdrawn|sad|tired|exhausted|depressed|lonely|melanchol)/i.test(moodLower)) {
+    return 1.4;
+  }
+  
+  // Use energy as a continuous modifier (0.8 to 1.2)
+  // High energy → 0.8x, low energy → 1.2x
+  return 1.2 - (energy * 0.4);
+}
+
+/**
+ * Get relationship warmth modifier for heartbeat interval.
+ * Closer relationships (measured by conversation depth) get more frequent heartbeats.
+ */
+function getRelationshipWarmthModifier(persona: Persona): number {
+  const relationshipModel = persona.relationshipModel;
+  const internalState = persona.mindState.internalState;
+  
+  // Use closeness from relationship model and warmthTowardUser from internal state
+  const closeness = relationshipModel?.closeness ?? 0.5;
+  const acceptablePushback = relationshipModel?.acceptablePushback ?? 0.5;
+  const warmthTowardUser = internalState?.warmthTowardUser ?? 0.7;
+  
+  // Average the relationship metrics
+  const avgRelationship = (closeness + acceptablePushback + warmthTowardUser) / 3;
+  
+  // Higher closeness/warmth → shorter intervals
+  // 0.7x at max relationship, 1.3x at min relationship
+  return 1.3 - (avgRelationship * 0.6);
+}
+
+/**
+ * Apply variable reinforcement by randomizing within a window.
+ * Avoids predictability (e.g., 2-6 hours during active, 8-16 hours during dormant).
+ */
+function applyVariableReinforcement(baseInterval: number, minInterval: number, maxInterval: number): number {
+  // Randomize within ±30% of the base interval
+  const randomFactor = 0.7 + Math.random() * 0.6; // 0.7 to 1.3
+  const randomizedInterval = baseInterval * randomFactor;
+  
+  // Clamp to bounds
+  return Math.max(minInterval, Math.min(maxInterval, randomizedInterval));
+}
+
+/**
+ * Calculate the dynamic heartbeat interval based on multiple factors:
+ * - Circadian patterns (user activity by hour)
+ * - Emotional state (excited → more frequent, withdrawn → less)
+ * - Relationship warmth (deeper relationships → more frequent)
+ * - Variable reinforcement (randomization to avoid predictability)
+ */
+function calculateNextHeartbeatInterval(persona: Persona, now: Date): number {
+  const policy = persona.heartbeatPolicy;
+  const minInterval = policy.minIntervalHours ?? 1;
+  const maxInterval = policy.maxIntervalHours ?? 8;
+  
+  // If variable interval is disabled, use fixed interval with slight randomization
   if (!policy.variableInterval) {
-    return policy.intervalHours;
+    return applyVariableReinforcement(policy.intervalHours, minInterval, maxInterval);
   }
   
   const currentHour = now.getHours();
   const hourlyActivity = policy.hourlyActivityCounts ?? Array(24).fill(0);
-  const minInterval = policy.minIntervalHours ?? 1;
-  const maxInterval = policy.maxIntervalHours ?? 8;
   
   // Get activity for current hour and surrounding hours (smoothed)
   const prevHour = (currentHour + 23) % 24;
@@ -362,8 +439,7 @@ function calculateCircadianInterval(persona: Persona, now: Date): number {
   const activityRatio = smoothedActivity / maxActivity;
   
   // High activity → short interval, low activity → long interval
-  // Inverse relationship: interval = max - (max - min) * activityRatio
-  const interval = maxInterval - (maxInterval - minInterval) * activityRatio;
+  let baseInterval = maxInterval - (maxInterval - minInterval) * activityRatio;
   
   // Check if we're in quiet hours
   const quietStart = policy.quietHoursStart;
@@ -372,9 +448,9 @@ function calculateCircadianInterval(persona: Persona, now: Date): number {
     ? (currentHour >= quietStart || currentHour < quietEnd)
     : (currentHour >= quietStart && currentHour < quietEnd);
   
-  // During quiet hours, use max interval
   if (inQuietHours) {
-    return maxInterval;
+    // During quiet hours, use extended max interval (8-16 hours)
+    return applyVariableReinforcement(maxInterval * 2, maxInterval, maxInterval * 2);
   }
   
   // Check work hours if enabled
@@ -384,27 +460,44 @@ function calculateCircadianInterval(persona: Persona, now: Date): number {
     const inWorkHours = currentHour >= policy.workHoursStart && currentHour < policy.workHoursEnd;
     
     if (inWorkDay && inWorkHours) {
-      return maxInterval; // Stay quiet during work
+      return applyVariableReinforcement(maxInterval * 1.5, maxInterval, maxInterval * 2);
     }
   }
   
-  return interval;
+  // Apply emotional state modifier
+  const emotionalModifier = getEmotionalStateModifier(persona);
+  baseInterval = baseInterval * emotionalModifier;
+  
+  // Apply relationship warmth modifier
+  const warmthModifier = getRelationshipWarmthModifier(persona);
+  baseInterval = baseInterval * warmthModifier;
+  
+  // Apply variable reinforcement (randomization)
+  return applyVariableReinforcement(baseInterval, minInterval, maxInterval);
 }
 
+/**
+ * Check if a persona's heartbeat is due based on nextHeartbeatAt timestamp.
+ */
 function buildHeartbeatDue(persona: Persona, now: Date) {
   if (!persona.heartbeatPolicy.enabled || persona.status !== "active") {
     return false;
   }
 
+  // Use pre-calculated nextHeartbeatAt if available
+  if (persona.nextHeartbeatAt) {
+    return now >= new Date(persona.nextHeartbeatAt);
+  }
+
+  // Fallback for personas without nextHeartbeatAt (first heartbeat or legacy)
   if (!persona.lastHeartbeatAt) {
     return true;
   }
 
+  // Legacy fallback: calculate interval on the fly
   const elapsedHours =
     (now.getTime() - new Date(persona.lastHeartbeatAt).getTime()) / (1000 * 60 * 60);
-  
-  // Use variable interval based on circadian patterns
-  const requiredInterval = calculateCircadianInterval(persona, now);
+  const requiredInterval = calculateNextHeartbeatInterval(persona, now);
   return elapsedHours >= requiredInterval;
 }
 
@@ -793,6 +886,7 @@ async function commitTurnResultWithRevision(input: {
   updatedAt: string;
   lastActiveAt?: string;
   lastHeartbeatAt?: string;
+  nextHeartbeatAt?: string;
   shadowJobId?: string;
   liveSessionId?: string;
   liveMode?: LiveSessionMode;
@@ -827,6 +921,7 @@ async function commitTurnResultWithRevision(input: {
       updatedAt: input.updatedAt,
       lastActiveAt: input.lastActiveAt ?? current.lastActiveAt,
       lastHeartbeatAt: input.lastHeartbeatAt ?? current.lastHeartbeatAt,
+      nextHeartbeatAt: input.nextHeartbeatAt ?? current.nextHeartbeatAt,
       mindState: didRequestLiveDelivery
         ? updateMindStateLiveSessionMetrics(nextMindState, {
             sessionId: input.liveSessionId,
@@ -853,6 +948,7 @@ async function runVersionedSoulTurn(input: {
   updatedAt?: string;
   lastActiveAt?: string;
   lastHeartbeatAt?: string;
+  nextHeartbeatAt?: string;
 }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const persona =
@@ -875,6 +971,7 @@ async function runVersionedSoulTurn(input: {
       updatedAt,
       lastActiveAt: input.lastActiveAt ?? updatedAt,
       lastHeartbeatAt: input.lastHeartbeatAt,
+      nextHeartbeatAt: input.nextHeartbeatAt,
     });
 
     if (committed.matched) {
@@ -3590,9 +3687,14 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
   });
 
   if (decision.action === "SILENT" || !decision.content) {
+    // Calculate next heartbeat time even for SILENT decisions
+    const nextInterval = calculateNextHeartbeatInterval(activePersona, now);
+    const nextHeartbeatAt = new Date(now.getTime() + nextInterval * 60 * 60 * 1000);
+    
     await updatePersona(personaId, (current) => ({
       ...current,
       lastHeartbeatAt: now.toISOString(),
+      nextHeartbeatAt: nextHeartbeatAt.toISOString(),
       updatedAt: now.toISOString(),
     }));
     return decision;
@@ -3628,12 +3730,18 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
     });
 
   await appendMessages([heartbeatMessage]);
+  
+  // Calculate next heartbeat time based on current state
+  const nextInterval = calculateNextHeartbeatInterval(activePersona, now);
+  const nextHeartbeatAt = new Date(now.getTime() + nextInterval * 60 * 60 * 1000);
+  
   const assistantTurnExecution = await runVersionedSoulTurn({
     personaId,
     basePersona: activePersona,
     updatedAt: now.toISOString(),
     lastActiveAt: now.toISOString(),
     lastHeartbeatAt: now.toISOString(),
+    nextHeartbeatAt: nextHeartbeatAt.toISOString(),
     build: async () => ({
       messages: await listMessages(personaId),
       observations: await listPerceptionObservations(personaId),
