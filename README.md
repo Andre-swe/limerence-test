@@ -165,11 +165,14 @@ Then open [http://localhost:3000](http://localhost:3000).
 npm run dev
 npm run build
 npm run lint
+npm run verify
 npm run test
 npm run check:supabase
 npm run worker:heartbeat
 npm run worker:telegram
 ```
+
+For a fast architectural/debugging map, see [`docs/repo-overpass.md`](/Users/syekel/Documents/limerance/docs/repo-overpass.md).
 
 ### 5. Runtime data
 
