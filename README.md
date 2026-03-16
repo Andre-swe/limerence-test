@@ -46,31 +46,31 @@ separate from each other, so the same soul can behave consistently across calls 
 
 These are the folders that matter most:
 
-- [`app/`](/Users/syekel/Documents/limerance/app)  
+- [`app/`](app)  
   Next.js App Router pages and API routes.
 
-- [`components/`](/Users/syekel/Documents/limerance/components)  
+- [`components/`](components)  
   UI surfaces for the call scene, messages scene, persona creation, and shared controls.
 
-- [`lib/`](/Users/syekel/Documents/limerance/lib)  
+- [`lib/`](lib)  
   The product’s runtime core: orchestration, providers, Hume session setup, soul kernel, persistence, types, and helpers.
 
-- [`data/`](/Users/syekel/Documents/limerance/data)  
+- [`data/`](data)  
   File-backed demo persistence, including the seeded local store.
 
-- [`public/uploads/`](/Users/syekel/Documents/limerance/public/uploads)  
+- [`public/uploads/`](public/uploads)  
   Uploaded voice samples, generated reply audio, and user-shared image assets during local development.
 
-- [`worker/`](/Users/syekel/Documents/limerance/worker)  
+- [`worker/`](worker)  
   Small Node entrypoints for running due heartbeats and flushing Telegram messages.
 
-- [`tests/`](/Users/syekel/Documents/limerance/tests)  
+- [`tests/`](tests)  
   Vitest coverage for persona workflows, soul behavior, live session building, and multimodal flows.
 
-- [`supabase/`](/Users/syekel/Documents/limerance/supabase)
+- [`supabase/`](supabase)
   Supabase schema, migrations, and configuration for the shared runtime store.
 
-- [`vendor/opensouls-main/`](/Users/syekel/Documents/limerance/vendor/opensouls-main)  
+- [`vendor/opensouls-main/`](vendor/opensouls-main)  
   Vendored reference material. This repo is **not** used as a runtime dependency; it is kept here for architecture study and future cross-checking.
 
 ## 🔮 Future
@@ -137,7 +137,7 @@ Every persona has a `userId` field that links it to its creator. The middleware:
 
 ### 1. Install dependencies
 
-This repo currently uses **npm** as the package manager of record because it ships with [`package-lock.json`](/Users/syekel/Documents/limerance/package-lock.json).
+This repo currently uses **npm** as the package manager of record because it ships with [`package-lock.json`](package-lock.json).
 
 ```bash
 npm install
@@ -172,7 +172,7 @@ npm run worker:heartbeat
 npm run worker:telegram
 ```
 
-For a fast architectural/debugging map, see [`docs/repo-overpass.md`](/Users/syekel/Documents/limerance/docs/repo-overpass.md).
+For a fast architectural/debugging map, see [`docs/repo-overpass.md`](docs/repo-overpass.md).
 
 ### 5. Runtime data
 
@@ -181,9 +181,9 @@ Limerence now supports two persistence modes:
 - **Shared Supabase runtime**  
   When `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured, the app uses a shared runtime-store row in Supabase plus Supabase Storage for uploaded files.
 - **Local file fallback**  
-  Without Supabase runtime configuration, personas, messages, observations, and feedback live in [`data/demo-store.json`](/Users/syekel/Documents/limerance/data/demo-store.json), and uploads are written to [`public/uploads/`](/Users/syekel/Documents/limerance/public/uploads).
+  Without Supabase runtime configuration, personas, messages, observations, and feedback live in [`data/demo-store.json`](data/demo-store.json), and uploads are written to [`public/uploads/`](public/uploads).
 
-For tests, the seed store is reset programmatically through [`resetStoreForTests()`](/Users/syekel/Documents/limerance/lib/store.ts), and the test environment stays on the local file store even if Supabase env vars exist locally.
+For tests, the seed store is reset programmatically through [`resetStoreForTests()`](lib/store.ts), and the test environment stays on the local file store even if Supabase env vars exist locally.
 
 ### 6. Shared Supabase setup
 
@@ -198,7 +198,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 npm run supabase:push
 ```
 
-If you do not want to use the CLI, run [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) in the Supabase SQL editor instead. The same schema also lives in the migration file at [`supabase/migrations/20260313150000_initial_runtime_store.sql`](/Users/syekel/Documents/limerance/supabase/migrations/20260313150000_initial_runtime_store.sql). 3. Copy [`.env.example`](/Users/syekel/Documents/limerance/.env.example) to `.env.local`. 4. Fill in at minimum:
+If you do not want to use the CLI, run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor instead. The same schema also lives in the migration file at [`supabase/migrations/20260313150000_initial_runtime_store.sql`](supabase/migrations/20260313150000_initial_runtime_store.sql). 3. Copy [`.env.example`](.env.example) to `.env.local`. 4. Fill in at minimum:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
@@ -298,7 +298,7 @@ These enable the shared runtime so multiple collaborators can point at the same 
 - `SUPABASE_STORAGE_BUCKET`  
   Optional override for the shared upload bucket. Defaults to `limerence-uploads`.
 
-When the required server variables are present, [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts) switches from the local JSON store to the Supabase-backed runtime store and writes uploads to Supabase Storage.
+When the required server variables are present, [`lib/store.ts`](lib/store.ts) switches from the local JSON store to the Supabase-backed runtime store and writes uploads to Supabase Storage.
 
 ### 📲 Optional Telegram
 
@@ -371,7 +371,7 @@ SUPABASE_STORAGE_BUCKET=
 
 ### Live calls
 
-Live session bootstrap is built in [`lib/hume-evi.ts`](/Users/syekel/Documents/limerance/lib/hume-evi.ts).
+Live session bootstrap is built in [`lib/hume-evi.ts`](lib/hume-evi.ts).
 
 At session start, Limerence:
 
@@ -385,11 +385,11 @@ At session start, Limerence:
    - soul metadata
    - the current live mode (`voice`, `screen`, or `camera`)
 
-The live UI is rendered by [`components/conversation-panel.tsx`](/Users/syekel/Documents/limerance/components/conversation-panel.tsx).
+The live UI is rendered by [`components/conversation-panel.tsx`](components/conversation-panel.tsx).
 
 ### Stored playback
 
-Stored reply playback is handled through the voice provider layer in [`lib/providers.ts`](/Users/syekel/Documents/limerance/lib/providers.ts).
+Stored reply playback is handled through the voice provider layer in [`lib/providers.ts`](lib/providers.ts).
 
 - If Hume is configured and a usable voice ID exists, stored assistant audio can be synthesized and written to `public/uploads`
 - If not, the app falls back to a non-audio mock path
@@ -416,31 +416,31 @@ What is not yet self-serve in this repo:
 
 The soul runtime lives primarily in:
 
-- [`lib/services.ts`](/Users/syekel/Documents/limerance/lib/services.ts)
-- [`lib/soul-kernel.ts`](/Users/syekel/Documents/limerance/lib/soul-kernel.ts)
-- [`lib/mind-runtime.ts`](/Users/syekel/Documents/limerance/lib/mind-runtime.ts)
-- [`lib/soul-harness.ts`](/Users/syekel/Documents/limerance/lib/soul-harness.ts)
-- [`lib/soul-runtime.ts`](/Users/syekel/Documents/limerance/lib/soul-runtime.ts)
+- [`lib/services.ts`](lib/services.ts)
+- [`lib/soul-kernel.ts`](lib/soul-kernel.ts)
+- [`lib/mind-runtime.ts`](lib/mind-runtime.ts)
+- [`lib/soul-harness.ts`](lib/soul-harness.ts)
+- [`lib/soul-runtime.ts`](lib/soul-runtime.ts)
 
 ### Runtime layers
 
 - **UI layer**  
-  Next.js pages and components in [`app/`](/Users/syekel/Documents/limerance/app) and [`components/`](/Users/syekel/Documents/limerance/components).
+  Next.js pages and components in [`app/`](app) and [`components/`](components).
 
 - **Service layer**  
-  [`lib/services.ts`](/Users/syekel/Documents/limerance/lib/services.ts) is the orchestration entrypoint for persona creation, messages, live transcript persistence, visual observations, feedback, heartbeat runs, and Telegram flushing.
+  [`lib/services.ts`](lib/services.ts) is the orchestration entrypoint for persona creation, messages, live transcript persistence, visual observations, feedback, heartbeat runs, and Telegram flushing.
 
 - **Provider layer**  
-  [`lib/providers.ts`](/Users/syekel/Documents/limerance/lib/providers.ts) chooses reasoning, transcription, and voice adapters based on configured env vars.
+  [`lib/providers.ts`](lib/providers.ts) chooses reasoning, transcription, and voice adapters based on configured env vars.
 
 - **Live voice layer**  
-  [`lib/hume-evi.ts`](/Users/syekel/Documents/limerance/lib/hume-evi.ts) builds Hume session payloads from soul state.
+  [`lib/hume-evi.ts`](lib/hume-evi.ts) builds Hume session payloads from soul state.
 
 - **Soul layer**  
-  [`lib/soul-kernel.ts`](/Users/syekel/Documents/limerance/lib/soul-kernel.ts), [`lib/mind-runtime.ts`](/Users/syekel/Documents/limerance/lib/mind-runtime.ts), [`lib/soul-harness.ts`](/Users/syekel/Documents/limerance/lib/soul-harness.ts), and [`lib/soul-runtime.ts`](/Users/syekel/Documents/limerance/lib/soul-runtime.ts) decide what the persona is carrying and how it should respond.
+  [`lib/soul-kernel.ts`](lib/soul-kernel.ts), [`lib/mind-runtime.ts`](lib/mind-runtime.ts), [`lib/soul-harness.ts`](lib/soul-harness.ts), and [`lib/soul-runtime.ts`](lib/soul-runtime.ts) decide what the persona is carrying and how it should respond.
 
 - **Persistence layer**  
-  [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts) now uses a shared Supabase runtime store when configured and falls back to [`data/demo-store.json`](/Users/syekel/Documents/limerance/data/demo-store.json) locally. [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql) includes the runtime store table and shared uploads bucket setup.
+  [`lib/store.ts`](lib/store.ts) now uses a shared Supabase runtime store when configured and falls back to [`data/demo-store.json`](data/demo-store.json) locally. [`supabase/schema.sql`](supabase/schema.sql) includes the runtime store table and shared uploads bucket setup.
 
 ### What the soul tracks
 
@@ -479,7 +479,7 @@ The kernel currently includes explicit process definitions such as:
 At a high level, the runtime behaves like this:
 
 1. **Perception enters**  
-   A text message, live transcript turn, shared image, or live visual observation reaches [`lib/services.ts`](/Users/syekel/Documents/limerance/lib/services.ts).
+   A text message, live transcript turn, shared image, or live visual observation reaches [`lib/services.ts`](lib/services.ts).
 
 2. **User state is inferred**  
    The provider layer or heuristic layer produces a `UserStateSnapshot`.
@@ -507,7 +507,7 @@ Limerence now supports **visual sidecar perception** in two places:
 During `screen` or `camera` sessions:
 
 - the browser captures compressed frames
-- those frames are posted to [`/api/personas/[personaId]/live/perception`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/live/perception/route.ts)
+- those frames are posted to [`/api/personas/[personaId]/live/perception`](app/api/personas/%5BpersonaId%5D/live/perception/route.ts)
 - the reasoning provider turns them into **distilled observations**
 - those observations update soul state and live context
 
@@ -531,7 +531,7 @@ This lets async messaging carry visual context forward without turning the produ
 
 ## 💬 Messages, Voice Notes, and Media
 
-The async thread is rendered by [`components/messages-panel.tsx`](/Users/syekel/Documents/limerance/components/messages-panel.tsx).
+The async thread is rendered by [`components/messages-panel.tsx`](components/messages-panel.tsx).
 
 Messages can currently include:
 
@@ -556,22 +556,22 @@ This is the main separation in the product:
 
 ### Pages
 
-- [`/`](/Users/syekel/Documents/limerance/app/page.tsx)  
+- [`/`](app/page.tsx)  
   Home screen for choosing a persona or creating a new one.
 
-- [`/create`](/Users/syekel/Documents/limerance/app/create/page.tsx)  
+- [`/create`](app/create/page.tsx)  
   Persona creation flow with identity, memory, voice material, and safety attestation.
 
-- [`/personas/[personaId]`](/Users/syekel/Documents/limerance/app/personas/%5BpersonaId%5D/page.tsx)  
+- [`/personas/[personaId]`](app/personas/%5BpersonaId%5D/page.tsx)  
   Call scene.
 
-- [`/personas/[personaId]/messages`](/Users/syekel/Documents/limerance/app/personas/%5BpersonaId%5D/messages/page.tsx)  
+- [`/personas/[personaId]/messages`](app/personas/%5BpersonaId%5D/messages/page.tsx)  
   Async messages scene.
 
-- [`/review`](/Users/syekel/Documents/limerance/app/review/page.tsx)  
+- [`/review`](app/review/page.tsx)  
   Legacy route that redirects back home.
 
-- [`/settings`](/Users/syekel/Documents/limerance/app/settings/page.tsx)  
+- [`/settings`](app/settings/page.tsx)  
   “How it works” and prototype notes.
 
 ### API routes
@@ -591,33 +591,33 @@ This is the main separation in the product:
 - [`POST /api/personas`](app/api/personas/route.ts)  
   Create a persona from form data. Requires authentication.
 
-- [`POST /api/personas/[personaId]/feedback`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/feedback/route.ts)  
+- [`POST /api/personas/[personaId]/feedback`](app/api/personas/%5BpersonaId%5D/feedback/route.ts)  
   Save message-level feedback.
 
-- [`POST /api/personas/[personaId]/heartbeat`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/heartbeat/route.ts)  
+- [`POST /api/personas/[personaId]/heartbeat`](app/api/personas/%5BpersonaId%5D/heartbeat/route.ts)  
   Run one heartbeat decision manually.
 
-- [`GET/POST /api/personas/[personaId]/live`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/live/route.ts)  
+- [`GET/POST /api/personas/[personaId]/live`](app/api/personas/%5BpersonaId%5D/live/route.ts)  
   Bootstrap a live Hume session.
 
-- [`POST /api/personas/[personaId]/live/messages`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/live/messages/route.ts)  
+- [`POST /api/personas/[personaId]/live/messages`](app/api/personas/%5BpersonaId%5D/live/messages/route.ts)  
   Persist live transcript turns for soul learning.
 
-- [`POST /api/personas/[personaId]/live/perception`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/live/perception/route.ts)  
+- [`POST /api/personas/[personaId]/live/perception`](app/api/personas/%5BpersonaId%5D/live/perception/route.ts)  
   Process screen/camera visual observations.
 
-- [`POST /api/personas/[personaId]/messages`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/messages/route.ts)  
+- [`POST /api/personas/[personaId]/messages`](app/api/personas/%5BpersonaId%5D/messages/route.ts)  
   Send text, voice-note, and image-based async messages.
 
-- [`POST /api/personas/[personaId]/messages/[messageId]/audio`](/Users/syekel/Documents/limerance/app/api/personas/%5BpersonaId%5D/messages/%5BmessageId%5D/audio/route.ts)  
+- [`POST /api/personas/[personaId]/messages/[messageId]/audio`](app/api/personas/%5BpersonaId%5D/messages/%5BmessageId%5D/audio/route.ts)  
   Synthesize stored assistant audio for a message.
 
-- [`POST /api/telegram/webhook`](/Users/syekel/Documents/limerance/app/api/telegram/webhook/route.ts)  
+- [`POST /api/telegram/webhook`](app/api/telegram/webhook/route.ts)  
   Receive Telegram bot updates.
 
 ## 🧪 Testing
 
-The test suite lives in [`tests/persona-workflows.test.ts`](/Users/syekel/Documents/limerance/tests/persona-workflows.test.ts).
+The test suite lives in [`tests/persona-workflows.test.ts`](tests/persona-workflows.test.ts).
 
 It currently covers:
 
@@ -648,22 +648,22 @@ npm run build
 
 If you are onboarding into the codebase, these are the quickest anchors:
 
-- start at [`app/page.tsx`](/Users/syekel/Documents/limerance/app/page.tsx) for the top-level product feel
-- look at [`components/conversation-panel.tsx`](/Users/syekel/Documents/limerance/components/conversation-panel.tsx) for the live call surface
-- look at [`components/messages-panel.tsx`](/Users/syekel/Documents/limerance/components/messages-panel.tsx) for the async thread
-- use [`lib/services.ts`](/Users/syekel/Documents/limerance/lib/services.ts) as the orchestration entrypoint
-- follow live voice setup through [`lib/hume-evi.ts`](/Users/syekel/Documents/limerance/lib/hume-evi.ts)
+- start at [`app/page.tsx`](app/page.tsx) for the top-level product feel
+- look at [`components/conversation-panel.tsx`](components/conversation-panel.tsx) for the live call surface
+- look at [`components/messages-panel.tsx`](components/messages-panel.tsx) for the async thread
+- use [`lib/services.ts`](lib/services.ts) as the orchestration entrypoint
+- follow live voice setup through [`lib/hume-evi.ts`](lib/hume-evi.ts)
 - follow soul logic through the `lib/soul-*` and `lib/mind-runtime.ts` files
-- use [`lib/store.ts`](/Users/syekel/Documents/limerance/lib/store.ts) to understand local persistence and test resets
+- use [`lib/store.ts`](lib/store.ts) to understand local persistence and test resets
 
 Worker entrypoints:
 
-- [`worker/heartbeat.ts`](/Users/syekel/Documents/limerance/worker/heartbeat.ts)
-- [`worker/telegram.ts`](/Users/syekel/Documents/limerance/worker/telegram.ts)
+- [`worker/heartbeat.ts`](worker/heartbeat.ts)
+- [`worker/telegram.ts`](worker/telegram.ts)
 
 Target production schema:
 
-- [`supabase/schema.sql`](/Users/syekel/Documents/limerance/supabase/schema.sql)
+- [`supabase/schema.sql`](supabase/schema.sql)
 
 ## ⚠️ Current Limitations
 
