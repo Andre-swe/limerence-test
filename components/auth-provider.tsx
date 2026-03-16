@@ -60,6 +60,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Periodically check if session has expired
+  useEffect(() => {
+    if (!session?.expires_at) return;
+    const check = setInterval(() => {
+      if (session.expires_at! * 1000 < Date.now()) {
+        supabaseRef.current?.auth.getSession().then(({ data }) => {
+          if (!data.session) {
+            setSession(null);
+            setUser(null);
+          }
+        });
+      }
+    }, 60_000);
+    return () => clearInterval(check);
+  }, [session]);
+
   const signOut = async () => {
     const supabase = supabaseRef.current ?? createClient();
     supabaseRef.current = supabase;

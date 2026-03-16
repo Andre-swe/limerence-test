@@ -41,6 +41,7 @@ export function CreatePersonaForm() {
       className="mx-auto max-w-4xl space-y-5"
       onSubmit={async (event) => {
         event.preventDefault();
+        if (isSubmitting) return;
         setIsSubmitting(true);
         try {
           const formData = new FormData(event.currentTarget);

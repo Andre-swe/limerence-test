@@ -247,12 +247,14 @@ export function MessagesPanel({
   const [sendKey, setSendKey] = useState(0);
   const [receiptPhase, setReceiptPhase] = useState<"sent" | "delivered" | "read" | "typing">("sent");
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const sendingRef = useRef(false);
   const isLocked = personaStatus !== "active";
 
   async function submit(payload: { text?: string; file?: File; images?: File[] }) {
-    if (isSending) {
+    if (isSending || sendingRef.current) {
       return;
     }
+    sendingRef.current = true;
 
     const submitStartedAt = Date.now();
     const draftText = payload.text ?? "";
@@ -357,6 +359,7 @@ export function MessagesPanel({
       setText((current) => current.trim() ? current : draftText);
       console.error(error);
     } finally {
+      sendingRef.current = false;
       setIsSending(false);
     }
   }

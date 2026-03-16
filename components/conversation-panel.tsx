@@ -64,6 +64,10 @@ export function ConversationPanel({
   > | null>(null);
   const persistedLiveEventsRef = useRef(new Set<string>());
   const userEndedLiveRef = useRef(false);
+  const activeModeRef = useRef(activeMode);
+  const sessionIdRef = useRef(sessionId);
+  activeModeRef.current = activeMode;
+  sessionIdRef.current = sessionId;
 
   const isLocked = personaStatus !== "active";
 
@@ -93,8 +97,8 @@ export function ConversationPanel({
         },
         body: JSON.stringify({
           ...input,
-          liveMode: activeMode,
-          sessionId: sessionId ?? undefined,
+          liveMode: activeModeRef.current,
+          sessionId: sessionIdRef.current ?? undefined,
         }),
       });
 
