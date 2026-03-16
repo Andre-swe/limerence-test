@@ -19,15 +19,19 @@ export const PROTECTED_PAGES = [
   "/review",
 ];
 
-export function getCorsHeaders(origin: string | null) {
+export function getCorsHeaders(origin: string | null): Record<string, string> {
   const isAllowed = origin !== null && ALLOWED_ORIGINS.includes(origin);
-
-  return {
-    "Access-Control-Allow-Origin": isAllowed ? origin : "",
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Credentials": "true",
   };
+
+  if (isAllowed) {
+    headers["Access-Control-Allow-Origin"] = origin!;
+    headers["Access-Control-Allow-Credentials"] = "true";
+  }
+
+  return headers;
 }
 
 export function applyHeaders(

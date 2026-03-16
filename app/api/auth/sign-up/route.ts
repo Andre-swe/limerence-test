@@ -1,9 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { ALLOWED_ORIGINS } from "@/lib/proxy-config";
 
 export async function POST(request: Request) {
-  const { email, password } = await request.json();
+  let body: { email?: string; password?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const { email, password } = body;
 
   if (!email || !password) {
     return NextResponse.json(
@@ -30,7 +38,10 @@ export async function POST(request: Request) {
     },
   );
 
-  const origin = request.headers.get("origin") ?? "http://localhost:3000";
+  const rawOrigin = request.headers.get("origin");
+  const origin = rawOrigin && ALLOWED_ORIGINS.includes(rawOrigin)
+    ? rawOrigin
+    : ALLOWED_ORIGINS[0];
 
   const { data, error } = await supabase.auth.signUp({
     email,
