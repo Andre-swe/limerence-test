@@ -33,7 +33,7 @@ function getLocalParts(date: Date, timezone: string) {
     year: Number(parts.year ?? 0),
     month: Number(parts.month ?? 1),
     day: Number(parts.day ?? 1),
-    hour: Number(parts.hour ?? 0),
+    hour: Number(parts.hour ?? 0) % 24,
     weekday: weekdayIndexByLabel[parts.weekday ?? "Sun"] ?? 0,
   };
 }
