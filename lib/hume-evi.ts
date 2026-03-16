@@ -65,7 +65,7 @@ async function resolveAccessToken() {
   const secretKey = process.env.HUME_SECRET_KEY?.trim();
 
   if (!apiKey || !secretKey) {
-    throw new Error("HUME_API_KEY and HUME_SECRET_KEY are required for Hume EVI live voice.");
+    throw new Error("Voice provider is not configured. Please check your Hume credentials.");
   }
 
   return fetchAccessToken({

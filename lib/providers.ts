@@ -5,6 +5,7 @@ import {
   intentResultSchema,
   learningArtifactPayloadSchema,
   personaDossierSchema,
+  soulProcessSchema,
   type FastTurnResult,
   type LiveSessionMode,
   type MessageEntry,
@@ -352,7 +353,7 @@ function sanitizeLocalMemory(
   let dropped = 0;
 
   for (const [key, value] of Object.entries(source)) {
-    if (!key.trim()) {
+    if (!key.trim() || key === "__proto__" || key === "constructor" || key === "prototype") {
       dropped += 1;
       continue;
     }
@@ -561,7 +562,9 @@ function parseFastTurnResult(
         ? parsedRecord.replyText.trim()
         : fallback.replyText,
     userState: userStateCandidate.success ? userStateCandidate.data : fallback.userState,
-    process: parsedRecord.process,
+    process: typeof parsedRecord.process === "string" && soulProcessSchema.safeParse(parsedRecord.process).success
+      ? parsedRecord.process
+      : fallback.process,
     processIntent:
       typeof parsedRecord.processIntent === "string" && parsedRecord.processIntent.trim().length > 0
         ? parsedRecord.processIntent.trim()
@@ -1159,6 +1162,175 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
         ...plan.decision,
         content: renderMockHeartbeatContent(plan, input.persona),
       };
+    }
+  }
+
+  override async generateInternalMonologue(prompt: string): Promise<InternalMonologueResult> {
+    try {
+      const response = await this.callResponses({
+        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
+        input: prompt,
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(response.output_text ?? "", {});
+      return {
+        thought: typeof parsed.thought === "string" ? parsed.thought : "I'm here.",
+        mood: typeof parsed.mood === "string" ? parsed.mood : "present",
+        energy: normalizedMonologueValue(parsed.energy, 0.6),
+        patience: normalizedMonologueValue(parsed.patience, 0.8),
+        warmthTowardUser: normalizedMonologueValue(parsed.warmthTowardUser, 0.7),
+        engagementDrive: normalizedMonologueValue(parsed.engagementDrive, 0.65),
+        shouldReply: typeof parsed.shouldReply === "boolean" ? parsed.shouldReply : true,
+        replyFormat: parsed.replyFormat === "voice_note" ? "voice_note" : "text",
+      };
+    } catch (error) {
+      logProviderFailure("openai", "generateInternalMonologue", error);
+      return super.generateInternalMonologue(prompt);
+    }
+  }
+
+  override async inferUserState(input: UserStateRequest) {
+    const fallback = await super.inferUserState(input);
+
+    try {
+      const systemPrompt = [
+        "Return only strict JSON for a user-state snapshot.",
+        "Use keys: topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, summary, evidence.",
+        "All numeric fields must be between 0 and 1.",
+        "Use the recent arc and, if provided, prosody hints.",
+      ].join(" ");
+
+      const userPrompt = [
+        `Persona: ${input.persona.name} (${input.persona.relationship})`,
+        `Latest user text: ${input.latestUserText}`,
+        `Channel: ${input.channel}`,
+        `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ")}`,
+        input.visualContext && input.visualContext.length > 0
+          ? `Visual context: ${input.visualContext
+              .map((item) => {
+                const signals =
+                  item.situationalSignals.length > 0
+                    ? ` Signals: ${item.situationalSignals.join(", ")}.`
+                    : "";
+                const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
+                const target = item.attentionTarget
+                  ? ` Attention target: ${item.attentionTarget}.`
+                  : "";
+                return `${item.summary}${signals}${task}${target}`;
+              })
+              .join(" | ")}`
+          : "Visual context: none",
+        input.prosodyScores
+          ? `Prosody hints: ${Object.entries(input.prosodyScores)
+              .sort((left, right) => right[1] - left[1])
+              .slice(0, 8)
+              .map(([key, value]) => `${key}:${value.toFixed(2)}`)
+              .join(", ")}`
+          : "Prosody hints: none",
+      ].join("\n");
+
+      const response = await this.callResponses({
+        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
+        instructions: systemPrompt,
+        input: userPrompt,
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(response.output_text ?? "", {});
+      const candidate = userStateSnapshotSchema.safeParse({
+        ...fallback,
+        ...parsed,
+        id: fallback.id,
+        modality: fallback.modality,
+        createdAt: input.createdAt ?? fallback.createdAt,
+        prosodyScores: input.prosodyScores ?? fallback.prosodyScores,
+        visualContextSummary:
+          typeof parsed.visualContextSummary === "string"
+            ? parsed.visualContextSummary
+            : fallback.visualContextSummary,
+        situationalSignals:
+          Array.isArray(parsed.situationalSignals) &&
+          parsed.situationalSignals.every((value) => typeof value === "string")
+            ? parsed.situationalSignals
+            : fallback.situationalSignals,
+        environmentPressure:
+          typeof parsed.environmentPressure === "number"
+            ? parsed.environmentPressure
+            : fallback.environmentPressure,
+        taskContext:
+          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.taskContext,
+        attentionTarget:
+          typeof parsed.attentionTarget === "string"
+            ? parsed.attentionTarget
+            : fallback.attentionTarget,
+      });
+
+      return candidate.success ? candidate.data : fallback;
+    } catch (error) {
+      logProviderFailure("openai", "inferUserState", error);
+      return fallback;
+    }
+  }
+
+  override async observeVisualContext(input: VisualPerceptionRequest) {
+    try {
+      const systemPrompt = [
+        "Return only strict JSON.",
+        "Use keys: summary, situationalSignals, environmentPressure, taskContext, attentionTarget.",
+        "situationalSignals must be an array of short strings.",
+        "environmentPressure must be a number between 0 and 1.",
+        "Describe only what would matter for an emotionally intelligent ongoing relationship.",
+        "Do not mention pixels, image quality, or model limitations.",
+      ].join(" ");
+
+      const response = await this.callResponses({
+        model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
+        instructions: systemPrompt,
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_image",
+                image_url: `data:${input.mimeType};base64,${input.buffer.toString("base64")}`,
+              },
+              {
+                type: "input_text",
+                text: [
+                  `Mode: ${input.mode}`,
+                  `Source: ${input.source}`,
+                  `Persona: ${input.persona.name} (${input.persona.relationship})`,
+                  `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ") || "none"}`,
+                  "Describe what matters relationally, situationally, and emotionally.",
+                ].join("\n"),
+              },
+            ],
+          },
+        ],
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(response.output_text ?? "", {});
+      const situationalSignals =
+        Array.isArray(parsed.situationalSignals) &&
+        parsed.situationalSignals.every((value) => typeof value === "string")
+          ? parsed.situationalSignals.slice(0, 6)
+          : [];
+
+      if (typeof parsed.summary !== "string" || parsed.summary.trim().length === 0) {
+        return super.observeVisualContext(input);
+      }
+
+      return {
+        summary: parsed.summary.trim(),
+        situationalSignals,
+        environmentPressure:
+          typeof parsed.environmentPressure === "number" ? parsed.environmentPressure : 0.5,
+        taskContext: typeof parsed.taskContext === "string" ? parsed.taskContext : undefined,
+        attentionTarget:
+          typeof parsed.attentionTarget === "string" ? parsed.attentionTarget : undefined,
+      };
+    } catch (error) {
+      logProviderFailure("openai", "observeVisualContext", error);
+      return super.observeVisualContext(input);
     }
   }
 }
@@ -1873,6 +2045,191 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
         ...plan.decision,
         content: renderMockHeartbeatContent(plan, input.persona),
       };
+    }
+  }
+
+  override async generateInternalMonologue(prompt: string): Promise<InternalMonologueResult> {
+    try {
+      const response = await this.callMessages({
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: prompt }],
+          },
+        ],
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(this.extractText(response), {});
+      return {
+        thought: typeof parsed.thought === "string" ? parsed.thought : "I'm here.",
+        mood: typeof parsed.mood === "string" ? parsed.mood : "present",
+        energy: normalizedMonologueValue(parsed.energy, 0.6),
+        patience: normalizedMonologueValue(parsed.patience, 0.8),
+        warmthTowardUser: normalizedMonologueValue(parsed.warmthTowardUser, 0.7),
+        engagementDrive: normalizedMonologueValue(parsed.engagementDrive, 0.65),
+        shouldReply: typeof parsed.shouldReply === "boolean" ? parsed.shouldReply : true,
+        replyFormat: parsed.replyFormat === "voice_note" ? "voice_note" : "text",
+      };
+    } catch (error) {
+      logProviderFailure("anthropic", "generateInternalMonologue", error);
+      return super.generateInternalMonologue(prompt);
+    }
+  }
+
+  override async inferUserState(input: UserStateRequest) {
+    const fallback = await super.inferUserState(input);
+
+    try {
+      const systemPrompt = [
+        "Return only strict JSON for a user-state snapshot.",
+        "Use keys: topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, summary, evidence.",
+        "All numeric fields must be between 0 and 1.",
+        "Use the recent arc and, if provided, prosody hints.",
+      ].join(" ");
+
+      const userPrompt = [
+        `Persona: ${input.persona.name} (${input.persona.relationship})`,
+        `Latest user text: ${input.latestUserText}`,
+        `Channel: ${input.channel}`,
+        `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ")}`,
+        input.visualContext && input.visualContext.length > 0
+          ? `Visual context: ${input.visualContext
+              .map((item) => {
+                const signals =
+                  item.situationalSignals.length > 0
+                    ? ` Signals: ${item.situationalSignals.join(", ")}.`
+                    : "";
+                const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
+                const target = item.attentionTarget
+                  ? ` Attention target: ${item.attentionTarget}.`
+                  : "";
+                return `${item.summary}${signals}${task}${target}`;
+              })
+              .join(" | ")}`
+          : "Visual context: none",
+        input.prosodyScores
+          ? `Prosody hints: ${Object.entries(input.prosodyScores)
+              .sort((left, right) => right[1] - left[1])
+              .slice(0, 8)
+              .map(([key, value]) => `${key}:${value.toFixed(2)}`)
+              .join(", ")}`
+          : "Prosody hints: none",
+      ].join("\n");
+
+      const response = await this.callMessages({
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: userPrompt }],
+          },
+        ],
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(this.extractText(response), {});
+      const candidate = userStateSnapshotSchema.safeParse({
+        ...fallback,
+        ...parsed,
+        id: fallback.id,
+        modality: fallback.modality,
+        createdAt: input.createdAt ?? fallback.createdAt,
+        prosodyScores: input.prosodyScores ?? fallback.prosodyScores,
+        visualContextSummary:
+          typeof parsed.visualContextSummary === "string"
+            ? parsed.visualContextSummary
+            : fallback.visualContextSummary,
+        situationalSignals:
+          Array.isArray(parsed.situationalSignals) &&
+          parsed.situationalSignals.every((value) => typeof value === "string")
+            ? parsed.situationalSignals
+            : fallback.situationalSignals,
+        environmentPressure:
+          typeof parsed.environmentPressure === "number"
+            ? parsed.environmentPressure
+            : fallback.environmentPressure,
+        taskContext:
+          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.taskContext,
+        attentionTarget:
+          typeof parsed.attentionTarget === "string"
+            ? parsed.attentionTarget
+            : fallback.attentionTarget,
+      });
+
+      return candidate.success ? candidate.data : fallback;
+    } catch (error) {
+      logProviderFailure("anthropic", "inferUserState", error);
+      return fallback;
+    }
+  }
+
+  override async observeVisualContext(input: VisualPerceptionRequest) {
+    const mediaType = this.resolveVisionMediaType(input.mimeType);
+    if (!mediaType) {
+      return super.observeVisualContext(input);
+    }
+
+    try {
+      const systemPrompt = [
+        "Return only strict JSON.",
+        "Use keys: summary, situationalSignals, environmentPressure, taskContext, attentionTarget.",
+        "situationalSignals must be an array of short strings.",
+        "environmentPressure must be a number between 0 and 1.",
+        "Describe only what would matter for an emotionally intelligent ongoing relationship.",
+        "Do not mention pixels, image quality, or model limitations.",
+      ].join(" ");
+
+      const response = await this.callMessages({
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: mediaType,
+                  data: input.buffer.toString("base64"),
+                },
+              },
+              {
+                type: "text",
+                text: [
+                  `Mode: ${input.mode}`,
+                  `Source: ${input.source}`,
+                  `Persona: ${input.persona.name} (${input.persona.relationship})`,
+                  `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ") || "none"}`,
+                  "Describe what matters relationally, situationally, and emotionally.",
+                ].join("\n"),
+              },
+            ],
+          },
+        ],
+      });
+
+      const parsed = safeJsonParse<Record<string, unknown>>(this.extractText(response), {});
+      const situationalSignals =
+        Array.isArray(parsed.situationalSignals) &&
+        parsed.situationalSignals.every((value) => typeof value === "string")
+          ? parsed.situationalSignals.slice(0, 6)
+          : [];
+
+      if (typeof parsed.summary !== "string" || parsed.summary.trim().length === 0) {
+        return super.observeVisualContext(input);
+      }
+
+      return {
+        summary: parsed.summary.trim(),
+        situationalSignals,
+        environmentPressure:
+          typeof parsed.environmentPressure === "number" ? parsed.environmentPressure : 0.5,
+        taskContext: typeof parsed.taskContext === "string" ? parsed.taskContext : undefined,
+        attentionTarget:
+          typeof parsed.attentionTarget === "string" ? parsed.attentionTarget : undefined,
+      };
+    } catch (error) {
+      logProviderFailure("anthropic", "observeVisualContext", error);
+      return super.observeVisualContext(input);
     }
   }
 }

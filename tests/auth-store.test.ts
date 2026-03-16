@@ -58,12 +58,12 @@ describe("auth store integration", () => {
 
     expect(result).toEqual({
       authorized: false,
-      error: "Forbidden. You do not own this persona.",
+      error: "Persona not found.",
       status: 403,
     });
   });
 
-  it("returns a 404 when the persona does not exist", async () => {
+  it("returns 403 when the persona does not exist", async () => {
     const result = await verifyPersonaOwnership(
       new Request("http://localhost/api/personas/missing", {
         headers: {
@@ -76,7 +76,7 @@ describe("auth store integration", () => {
     expect(result).toEqual({
       authorized: false,
       error: "Persona not found.",
-      status: 404,
+      status: 403,
     });
   });
 

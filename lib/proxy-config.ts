@@ -2,7 +2,7 @@ import type { NextResponse } from "next/server";
 
 export const ALLOWED_ORIGINS = [
   "https://limerance.vercel.app",
-  "http://localhost:3000",
+  ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
 ];
 
 export const PUBLIC_PATHS = [

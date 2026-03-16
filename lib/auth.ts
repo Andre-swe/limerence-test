@@ -34,23 +34,28 @@ export async function verifyPersonaOwnership(
   // Use the user's store context when fetching the persona
   const persona = await withUserStore(userId, () => getPersona(personaId));
 
-  if (!persona) {
+  if (!persona || persona.userId !== userId) {
     return {
       authorized: false,
       error: "Persona not found.",
-      status: 404,
-    };
-  }
-
-  if (persona.userId !== userId) {
-    return {
-      authorized: false,
-      error: "Forbidden. You do not own this persona.",
       status: 403,
     };
   }
 
   return { authorized: true, persona, userId };
+}
+
+/**
+ * Loads a persona only if it belongs to the given user.
+ * Returns the persona or null if not found / not owned.
+ */
+export async function getOwnedPersonaForUser(
+  userId: string,
+  personaId: string,
+) {
+  const persona = await withUserStore(userId, () => getPersona(personaId));
+  if (!persona || persona.userId !== userId) return null;
+  return persona;
 }
 
 /**

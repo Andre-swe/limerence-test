@@ -187,7 +187,7 @@ function sanitizeProcessLocalMemory(record: Record<string, unknown>, limit = 8) 
   const sanitized: Record<string, string | number | boolean> = {};
 
   for (const [key, value] of Object.entries(record)) {
-    if (!key.trim()) {
+    if (!key.trim() || key === "__proto__" || key === "constructor" || key === "prototype") {
       continue;
     }
 
@@ -912,9 +912,7 @@ function toInternalScheduledEvents(input: {
   persona: Persona;
   perception: SoulPerception;
 }) {
-  const previous = input.persona.mindState.pendingInternalEvents.filter(
-    (event) => event.origin === "open_loop" || event.origin === "ritual" || event.origin === "awakening" || event.status !== "pending"
-  );
+  const previous = input.persona.mindState.pendingInternalEvents;
   const mapped = input.persona.mindState.scheduledPerceptions.map((scheduled) => ({
     id: `internal_${scheduled.id}`,
     dedupeKey: `${scheduled.kind}:${scheduled.source}:${scheduled.sourceId ?? scheduled.summary}`,
@@ -1212,6 +1210,9 @@ export async function executeFastMessageTurn(
   );
 
   const currentInstance = processTransition.processInstances[processTransition.currentProcessInstanceId!];
+  if (!currentInstance) {
+    throw new Error(`Process instance ${processTransition.currentProcessInstanceId} not found in transition state`);
+  }
   const updatedCurrentInstance: ProcessInstanceState = {
     ...currentInstance,
     localMemory: sanitizeProcessLocalMemory(fastTurn.updatedLocalMemory),
@@ -1376,8 +1377,8 @@ export async function executeFastMessageTurn(
       },
       recentEvents: boundedArray([...events, ...seededPersona.mindState.recentEvents], 32),
       traceHead: boundedArray([...trace, ...seededPersona.mindState.traceHead], 40),
-      contextVersion: seededPersona.mindState.contextVersion + 1,
-      traceVersion: seededPersona.mindState.traceVersion + trace.length,
+      contextVersion: seededPersona.mindState.contextVersion,
+      traceVersion: seededPersona.mindState.traceVersion,
       processState: {
         ...baseState.processState,
         process_instance_id: updatedCurrentInstance.id,
@@ -1925,6 +1926,9 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
   );
 
   const currentInstance = processTransition.processInstances[processTransition.currentProcessInstanceId];
+  if (!currentInstance) {
+    throw new Error(`Process instance ${processTransition.currentProcessInstanceId} not found in full turn transition state`);
+  }
   const localMemoryBase: Record<string, unknown> = {
     ...currentInstance.localMemory,
     last_user_summary: appraisedUserState?.summary ?? "",

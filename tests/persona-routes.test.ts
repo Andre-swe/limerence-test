@@ -529,7 +529,7 @@ describe("persona routes", () => {
   it("rejects soul traces when the requester does not own the persona", async () => {
     verifyPersonaOwnershipMock.mockResolvedValueOnce({
       authorized: false,
-      error: "Forbidden. You do not own this persona.",
+      error: "Persona not found.",
       status: 403,
     });
 
@@ -538,7 +538,7 @@ describe("persona routes", () => {
       personaParams(),
     );
 
-    await expectJsonError(response, 403, "Forbidden. You do not own this persona.");
+    await expectJsonError(response, 403, "Persona not found.");
   });
 
   it("applies the same ownership check in production", async () => {
@@ -546,7 +546,7 @@ describe("persona routes", () => {
     verifyPersonaOwnershipMock.mockResolvedValueOnce({
       authorized: false,
       error: "Persona not found.",
-      status: 404,
+      status: 403,
     });
 
     const response = await soulTraceGet(
@@ -554,6 +554,6 @@ describe("persona routes", () => {
       personaParams(),
     );
 
-    await expectJsonError(response, 404, "Persona not found.");
+    await expectJsonError(response, 403, "Persona not found.");
   });
 });
