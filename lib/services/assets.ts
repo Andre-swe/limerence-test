@@ -2,6 +2,29 @@ import { randomUUID } from "node:crypto";
 import { savePublicFile } from "@/lib/store";
 import type { MessageAttachment, MessageEntry, StoredAsset } from "@/lib/types";
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
+
+const ALLOWED_MIME_PREFIXES = [
+  "image/",
+  "audio/",
+  "video/",
+  "application/pdf",
+];
+
+function isAllowedMimeType(mimeType: string) {
+  return ALLOWED_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix));
+}
+
+function validateUpload(file: File) {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error(`File "${file.name}" exceeds the 25 MB upload limit.`);
+  }
+  const mime = file.type || "application/octet-stream";
+  if (!isAllowedMimeType(mime)) {
+    throw new Error(`File type "${mime}" is not allowed.`);
+  }
+}
+
 // Centralize persisted message shape so ids, timestamps, and attachment defaults
 // stay consistent across the split service modules.
 export function createMessage({
@@ -41,6 +64,7 @@ export function createMessage({
 }
 
 export async function persistFileAsset(file: File, kind: StoredAsset["kind"]) {
+  validateUpload(file);
   // Persona setup uploads and browser message uploads both flow through the
   // same store helper; normalize them once before they enter domain code.
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -65,6 +89,7 @@ export async function persistMessageAttachment(
     visualSummary?: string;
   },
 ) {
+  validateUpload(file);
   // Message attachments share the same storage backend as setup assets, but
   // keep extraction metadata alongside the file record for later reasoning.
   const buffer = Buffer.from(await file.arrayBuffer());

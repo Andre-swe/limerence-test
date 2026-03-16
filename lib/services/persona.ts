@@ -180,7 +180,9 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
     interviewAnswers,
     heartbeatPolicy: {
       enabled: true,
-      intervalHours: Number.isFinite(heartbeatIntervalHours) ? heartbeatIntervalHours : 4,
+      intervalHours: Number.isFinite(heartbeatIntervalHours) && heartbeatIntervalHours >= 0.5
+        ? Math.min(heartbeatIntervalHours, 48)
+        : 4,
       maxOutboundPerDay: 3,
       quietHoursStart: 22,
       quietHoursEnd: 8,

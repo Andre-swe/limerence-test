@@ -54,6 +54,12 @@ export function assertStartupEnvironment(
     );
   }
 
+  if (!optionalEnv(source, "SUPABASE_SERVICE_ROLE_KEY")) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is required in production to enable per-user store isolation.",
+    );
+  }
+
   return startup;
 }
 
