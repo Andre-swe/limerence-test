@@ -896,6 +896,9 @@ async function commitTurnResultWithRevision(input: {
 
     const nextMindState = {
       ...input.turnResult.persona.mindState,
+      // Preserve fields that concurrent operations may have mutated during the LLM call.
+      liveSessionMetrics: current.mindState.liveSessionMetrics,
+      internalState: current.mindState.internalState,
       pendingShadowTurns: current.mindState.pendingShadowTurns.map((job) =>
         job.id === input.shadowJobId
           ? {
@@ -1273,8 +1276,7 @@ async function tryUpdateLoadedPersona(
   persona: Persona,
   updater: (persona: Persona) => Persona,
 ) {
-  const result = await replacePersonaIfRevision(persona.id, persona.revision, updater);
-  return result.persona;
+  return updatePersona(persona.id, updater);
 }
 
 async function recordLiveShadowTurnOutcome(input: {
@@ -3705,7 +3707,7 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
 
   const messages = await listMessages(personaId);
 
-  if (countOutboundTodayForPersona(messages, persona, now) >= persona.heartbeatPolicy.maxOutboundPerDay) {
+  if (countOutboundTodayForPersona(messages, activePersona, now) >= activePersona.heartbeatPolicy.maxOutboundPerDay) {
     const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);
 
     await updatePersona(personaId, (current) => ({

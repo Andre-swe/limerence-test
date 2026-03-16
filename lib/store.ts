@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -620,8 +620,10 @@ async function ensureStore() {
   const directory = path.dirname(storeFile);
   await mkdir(directory, { recursive: true });
 
-  if (!existsSync(storeFile)) {
-    await writeFile(storeFile, JSON.stringify(createSeedStore(), null, 2), "utf8");
+  try {
+    await writeFile(storeFile, JSON.stringify(createSeedStore(), null, 2), { encoding: "utf8", flag: "wx" });
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
 }
 
@@ -632,7 +634,7 @@ async function readFileStoreSnapshot(): Promise<StoreSnapshot> {
     const mtimeMs = statSync(storeFile).mtimeMs;
     if (cachedStore && mtimeMs === cachedMtimeMs) {
       return {
-        store: cachedStore,
+        store: cloneStore(cachedStore),
         revision: 0,
       };
     }
