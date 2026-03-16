@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repo is already functionally broad: a Next.js app surface, a local/supabase-backed runtime store, live-call orchestration, scheduled persona behavior, and a Telegram bridge. This document is the fast map for debugging and safe change-making.
+This repo is already functionally broad: a Next.js app surface, a local/supabase-backed runtime store, live-call orchestration, and scheduled persona behavior. This document is the fast map for debugging and safe change-making.
 
 ## Subsystems
 
@@ -20,7 +20,6 @@ This repo is already functionally broad: a Next.js app surface, a local/supabase
 - `lib/services/persona.ts` owns persona assembly from onboarding material.
 - `lib/services/messaging.ts` owns stored reply synthesis.
 - `lib/services/feedback.ts` owns feedback persistence and memory correction.
-- `lib/services/telegram.ts` owns outbound Telegram delivery.
 - The remaining `lib/services.ts` body is still the main home for live-session cognition, heartbeats, and cross-cutting orchestration.
 
 ### Core cognition and providers
@@ -31,8 +30,8 @@ This repo is already functionally broad: a Next.js app surface, a local/supabase
 
 ### Background entrypoints
 
-- `worker/heartbeat.ts` and `worker/telegram.ts` are the Node entrypoints for autonomous work.
-- `app/api/internal/heartbeat/route.ts` is the cron-style API entrypoint for running both due heartbeats and Telegram delivery.
+- `worker/heartbeat.ts` is the Node entrypoint for autonomous work.
+- `app/api/internal/heartbeat/route.ts` is the cron-style API entrypoint for running due heartbeats.
 
 ## Critical Invariants
 
@@ -57,9 +56,7 @@ This repo is already functionally broad: a Next.js app surface, a local/supabase
   - `lib/supabase.ts`
   - `app/api/health/store/route.ts`
 - Autonomous delivery bugs:
-  - `lib/services/telegram.ts`
   - `app/api/internal/heartbeat/route.ts`
-  - `app/api/telegram/webhook/route.ts`
 
 ## Verification Matrix
 

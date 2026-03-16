@@ -61,8 +61,8 @@ These are the folders that matter most:
 - [`public/uploads/`](public/uploads)  
   Uploaded voice samples, generated reply audio, and user-shared image assets during local development.
 
-- [`worker/`](worker)  
-  Small Node entrypoints for running due heartbeats and flushing Telegram messages.
+- [`worker/`](worker)
+  Small Node entrypoints for running due heartbeats.
 
 - [`tests/`](tests)  
   Vitest coverage for persona workflows, soul behavior, live session building, and multimodal flows.
@@ -169,7 +169,6 @@ npm run verify
 npm run test
 npm run check:supabase
 npm run worker:heartbeat
-npm run worker:telegram
 ```
 
 For a fast architectural/debugging map, see [`docs/repo-overpass.md`](docs/repo-overpass.md).
@@ -300,13 +299,6 @@ These enable the shared runtime so multiple collaborators can point at the same 
 
 When the required server variables are present, [`lib/store.ts`](lib/store.ts) switches from the local JSON store to the Supabase-backed runtime store and writes uploads to Supabase Storage.
 
-### 📲 Optional Telegram
-
-- `TELEGRAM_BOT_TOKEN`  
-  Enables Telegram binding, message delivery, and webhook handling.
-
-Telegram is present in the codebase, but it is a **secondary integration**, not the core product experience.
-
 ### 📈 Optional observability / background tooling
 
 - `SENTRY_DSN`
@@ -345,9 +337,6 @@ OPENAI_MODEL=
 
 # Transcription
 DEEPGRAM_API_KEY=
-
-# Telegram
-TELEGRAM_BOT_TOKEN=
 
 # Supabase (required for auth)
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -427,8 +416,8 @@ The soul runtime lives primarily in:
 - **UI layer**  
   Next.js pages and components in [`app/`](app) and [`components/`](components).
 
-- **Service layer**  
-  [`lib/services.ts`](lib/services.ts) is the orchestration entrypoint for persona creation, messages, live transcript persistence, visual observations, feedback, heartbeat runs, and Telegram flushing.
+- **Service layer**
+  [`lib/services.ts`](lib/services.ts) is the orchestration entrypoint for persona creation, messages, live transcript persistence, visual observations, feedback, and heartbeat runs.
 
 - **Provider layer**  
   [`lib/providers.ts`](lib/providers.ts) chooses reasoning, transcription, and voice adapters based on configured env vars.
@@ -612,9 +601,6 @@ This is the main separation in the product:
 - [`POST /api/personas/[personaId]/messages/[messageId]/audio`](app/api/personas/%5BpersonaId%5D/messages/%5BmessageId%5D/audio/route.ts)  
   Synthesize stored assistant audio for a message.
 
-- [`POST /api/telegram/webhook`](app/api/telegram/webhook/route.ts)  
-  Receive Telegram bot updates.
-
 ## 🧪 Testing
 
 The test suite lives in [`tests/persona-workflows.test.ts`](tests/persona-workflows.test.ts).
@@ -659,7 +645,6 @@ If you are onboarding into the codebase, these are the quickest anchors:
 Worker entrypoints:
 
 - [`worker/heartbeat.ts`](worker/heartbeat.ts)
-- [`worker/telegram.ts`](worker/telegram.ts)
 
 Target production schema:
 
@@ -678,9 +663,6 @@ It currently acts as a sidecar for explicit images and sampled live visual frame
 
 ⚠️ **Background execution is near-term, not final-form**  
 Live shadow cognition now uses `Inngest` for execution when `INNGEST_EVENT_KEY` is configured, and the connected client still polls for session-frame delivery. If Inngest is not configured, local development falls back to polling-based queue advancement.
-
-⚠️ **Telegram is legacy/secondary in product terms**  
-It still works as an integration surface, but the core product direction is web/app call + messages, not chatbots as the primary experience.
 
 ## 🛣️ Near-Term Roadmap
 
