@@ -1,7 +1,0 @@
-data/
-.data/
-.env
-dist/
-.soul-engine-out/
-/memory-integrator-spec
-heap-dump.json
