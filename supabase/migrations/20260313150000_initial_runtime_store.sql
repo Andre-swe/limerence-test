@@ -35,8 +35,6 @@ create table if not exists personas (
   consent jsonb not null,
   dossier jsonb not null,
   mind_state jsonb not null,
-  telegram_chat_id bigint,
-  telegram_username text,
   last_active_at timestamptz,
   last_heartbeat_at timestamptz,
   created_at timestamptz not null default now(),
@@ -86,7 +84,3 @@ create table if not exists feedback_events (
   created_at timestamptz not null default now()
 );
 
-create table if not exists processed_telegram_updates (
-  update_id text primary key,
-  created_at timestamptz not null default now()
-);

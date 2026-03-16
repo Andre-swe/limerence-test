@@ -38,8 +38,6 @@ type StoreSnapshot = {
 };
 
 const remoteStoreRetryLimit = 6;
-export const MAX_PROCESSED_TELEGRAM_UPDATES = 2048;
-
 const seededHouseVoiceMap = {
   "persona-mom": houseVoicePresets[0].id,
   "persona-alex": houseVoicePresets[1].id,
@@ -183,7 +181,6 @@ function createSeedStore(): DataStore {
       replyMode: "text",
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested",
         attempts: 0,
       },
     },
@@ -199,7 +196,6 @@ function createSeedStore(): DataStore {
       audioStatus: "unavailable",
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested",
         attempts: 0,
       },
     },
@@ -216,7 +212,6 @@ function createSeedStore(): DataStore {
       replyMode: "voice_note",
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested",
         attempts: 0,
       },
     },
@@ -319,8 +314,6 @@ function createSeedStore(): DataStore {
         updatedAt: iso(-2),
         lastActiveAt: iso(-2),
         lastHeartbeatAt: iso(-6),
-        telegramChatId: undefined,
-        telegramUsername: undefined,
         pastedText:
           "good luck today sweetie!! you're going to do amazing. call me after, okay? love you.",
         screenshotSummaries: [
@@ -359,8 +352,6 @@ function createSeedStore(): DataStore {
         updatedAt: iso(-12),
         lastActiveAt: undefined,
         lastHeartbeatAt: undefined,
-        telegramChatId: undefined,
-        telegramUsername: undefined,
         pastedText: "lmao. you got this. don't overthink it.",
         screenshotSummaries: ["Uses clipped messages, lowercase, and quick sarcastic reassurance."],
         interviewAnswers: {
@@ -385,7 +376,6 @@ function createSeedStore(): DataStore {
     messages,
     perceptionObservations: [],
     feedbackEvents: [],
-    processedTelegramUpdates: [],
   };
 }
 
@@ -1158,48 +1148,6 @@ export async function appendFeedback(feedback: FeedbackEvent) {
     store.feedbackEvents.push(feedback);
     return feedback;
   });
-}
-
-export async function hasProcessedTelegramUpdate(updateId: string) {
-  const store = await readStore();
-  return store.processedTelegramUpdates.includes(updateId);
-}
-
-export async function markTelegramUpdateProcessed(updateId: string) {
-  return mutateStore(async (store) => {
-    if (!store.processedTelegramUpdates.includes(updateId)) {
-      store.processedTelegramUpdates.push(updateId);
-      if (store.processedTelegramUpdates.length > MAX_PROCESSED_TELEGRAM_UPDATES) {
-        store.processedTelegramUpdates.splice(
-          0,
-          store.processedTelegramUpdates.length - MAX_PROCESSED_TELEGRAM_UPDATES,
-        );
-      }
-    }
-  });
-}
-
-export async function findPersonaByTelegramChat(chatId: number) {
-  const store = await readStore();
-  return store.personas.find((persona) => persona.telegramChatId === chatId) ?? null;
-}
-
-export async function bindTelegramChat(personaId: string, chatId: number, username?: string) {
-  return updatePersona(personaId, (persona) => ({
-    ...persona,
-    telegramChatId: chatId,
-    telegramUsername: username,
-    updatedAt: new Date().toISOString(),
-  }));
-}
-
-export async function listPendingTelegramMessages() {
-  const store = await readStore();
-  return store.messages.filter(
-    (message) =>
-      message.role === "assistant" &&
-      message.delivery.telegramStatus === "pending",
-  );
 }
 
 /** Persist a file to Supabase Storage or the local uploads directory. Returns the public URL. */

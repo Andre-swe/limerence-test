@@ -13,8 +13,7 @@
     "verify": "tsx scripts/verify.ts",
     "check:supabase": "tsx --env-file=.env.local scripts/check-supabase-runtime.ts",
     "supabase:push": "supabase db push",
-    "worker:heartbeat": "tsx worker/heartbeat.ts",
-    "worker:telegram": "tsx worker/telegram.ts"
+    "worker:heartbeat": "tsx worker/heartbeat.ts"
   },
   "dependencies": {
     "@humeai/voice-react": "^0.2.14",

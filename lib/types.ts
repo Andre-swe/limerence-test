@@ -10,18 +10,11 @@ export const interviewPrompts = [
 
 export const personaSourceSchema = z.enum(["living"]);
 export const personaStatusSchema = z.enum(["draft", "active"]);
-export const channelSchema = z.enum(["web", "telegram", "heartbeat", "live"]);
+export const channelSchema = z.enum(["web", "heartbeat", "live"]);
 export const liveSessionModeSchema = z.enum(["voice", "screen", "camera"]);
 export const messageRoleSchema = z.enum(["user", "assistant", "system"]);
 export const messageKindSchema = z.enum(["text", "audio", "preview", "image"]);
 export const replyModeSchema = z.enum(["text", "voice_note"]);
-export const telegramDeliveryStatusSchema = z.enum([
-  "not_requested",
-  "pending",
-  "sent",
-  "failed",
-]);
-
 const normalizedScoreSchema = z.number().min(0).max(1);
 const flexibleScoreSchema = normalizedScoreSchema.default(0.5);
 
@@ -806,8 +799,6 @@ export const personaSchema = z.object({
   lastHeartbeatAt: z.string().optional(),
   nextHeartbeatAt: z.string().optional(),
   timezone: z.string().optional(),
-  telegramChatId: z.number().optional(),
-  telegramUsername: z.string().optional(),
   pastedText: z.string(),
   screenshotSummaries: z.array(z.string()),
   interviewAnswers: z.record(z.string(), z.string()),
@@ -840,7 +831,6 @@ export const messageSchema = z.object({
   metadata: messageMetadataSchema.optional(),
   delivery: z.object({
     webInbox: z.boolean().default(true),
-    telegramStatus: telegramDeliveryStatusSchema.default("not_requested"),
     attempts: z.number().default(0),
     lastAttemptAt: z.string().optional(),
     lastError: z.string().optional(),
@@ -867,7 +857,6 @@ export const dataStoreSchema = z.object({
   messages: z.array(messageSchema),
   perceptionObservations: z.array(perceptionObservationSchema).default([]),
   feedbackEvents: z.array(feedbackEventSchema),
-  processedTelegramUpdates: z.array(z.string()),
 });
 
 export const heartbeatDecisionSchema = z.object({
