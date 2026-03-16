@@ -33,15 +33,24 @@ import {
 import {
   applyBoundaryClaimUpdate,
   applyFeedbackToMemoryClaims,
+  buildAwakeningInternalEvent,
+  deactivateMatchingAwakeningClaims,
+  inferAwakeningScheduleFromText,
   seedBootstrapClaims,
 } from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
-import { planInternalMonologue, renderInternalMonologuePrompt } from "@/lib/soul-runtime";
+import { computeAwakeningReliability, planInternalMonologue, renderInternalMonologuePrompt } from "@/lib/soul-runtime";
+import { resolvePersonaTimeZone } from "@/lib/persona-schedule";
 import {
   applySoulArchetypeToConstitution,
   applySoulArchetypeToRelationship,
   inferSoulArchetypeSeed,
 } from "@/lib/personality-archetypes";
+import {
+  buildDebugContext,
+  summarizeLiveSessionMetrics,
+  summarizePendingInternalEvents,
+} from "@/lib/debug-observability";
 import { soulLogger } from "@/lib/soul-logger";
 import { getHouseVoicePreset, houseVoicePresets } from "@/lib/voice-presets";
 import {
@@ -78,13 +87,16 @@ import {
 import { slugify } from "@/lib/utils";
 
 type PreferenceUpdate = {
-  kind: "avoid_work_hours" | "prefer_text" | "prefer_voice" | "less_often" | "more_often";
+  kind: "avoid_work_hours" | "prefer_text" | "prefer_voice" | "less_often" | "more_often" | "schedule_awakening" | "cancel_awakening";
   interpretation: string;
   effectSummary: string;
   status: PreferenceSignal["status"];
   apply: (policy: HeartbeatPolicy) => HeartbeatPolicy;
 };
 
+// Local in-memory fallback queue for shadow turns when Inngest publish fails.
+// Lost on process crash — acceptable for Vercel where process lifecycle is
+// request-scoped. Production reliability depends on Inngest being available.
 const localShadowExecutionQueues = new Map<string, Promise<void>>();
 const MIN_LIVE_DELIVERY_INTERVAL_MS = 4500;
 const MAX_COMPLETED_LIVE_SESSION_METRICS = 8;
@@ -615,6 +627,33 @@ function detectPreferenceUpdate(persona: Persona, text: string): PreferenceUpdat
     };
   }
 
+  // Cancel awakening patterns — must come before schedule detection
+  if (
+    /(stop the .*(morning|goodnight|bedtime|evening|lunch|weekend)|no more .*(morning|goodnight|bedtime|evening|lunch|weekend)|don'?t .*(send|text).*(morning|goodnight|bedtime|evening|lunch|weekend)|cancel .*(morning|goodnight|bedtime|evening|lunch|weekend))/.test(
+      normalized,
+    )
+  ) {
+    return {
+      kind: "cancel_awakening",
+      interpretation: "Deactivate scheduled awakening messages.",
+      effectSummary: "Stops the scheduled awakening messages the persona was sending.",
+      status: "noted",
+      apply: (policy) => policy,
+    };
+  }
+
+  // Schedule awakening patterns — inferred from natural language
+  const awakeningSchedule = inferAwakeningScheduleFromText(text);
+  if (awakeningSchedule) {
+    return {
+      kind: "schedule_awakening",
+      interpretation: awakeningSchedule.reason,
+      effectSummary: `Schedules a ${awakeningSchedule.recurrence} awakening around ${awakeningSchedule.targetHour}:00.`,
+      status: "noted",
+      apply: (policy) => policy,
+    };
+  }
+
   return null;
 }
 
@@ -646,6 +685,10 @@ function composePreferenceReply(persona: Persona, update: PreferenceUpdate) {
         : `${signature}okay, I’ll give the conversation more space.`;
     case "more_often":
       return `${signature}okay. I can show up a little more often.`;
+    case "schedule_awakening":
+      return `${signature}okay. I'll remember that.`;
+    case "cancel_awakening":
+      return `${signature}okay, I'll stop those. you'll still hear from me, just not on a schedule.`;
   }
 }
 
@@ -675,6 +718,114 @@ async function applyPreferenceSignalIfNeeded(
     status: preferenceUpdate.status,
     createdAt: new Date().toISOString(),
   };
+
+  // Handle awakening scheduling — create via proper claim upsert + materialize event
+  if (preferenceUpdate.kind === "schedule_awakening") {
+    const awakeningSchedule = inferAwakeningScheduleFromText(userText);
+    const updatedPersona = await updatePersona(persona.id, (current) => {
+      // Build claim through proper upsert with full lifecycle support
+      const boundaryWrite = applyBoundaryClaimUpdate({
+        claims: current.mindState.memoryClaims,
+        claimSources: current.mindState.claimSources,
+        summary: preferenceUpdate.effectSummary,
+        detail: preferenceUpdate.interpretation,
+        createdAt: signal.createdAt,
+        sourceMessageId: options?.sourceMessageId,
+        sessionId: options?.sessionId,
+        sourceText: userText,
+      });
+
+      // Attach awakeningSchedule metadata to the created/reinforced claim
+      const claimWithSchedule = boundaryWrite.claims.map((claim) =>
+        claim.id === boundaryWrite.result.claim.id
+          ? {
+              ...claim,
+              kind: "ritual" as const,
+              awakeningSchedule: awakeningSchedule ?? claim.awakeningSchedule,
+              tags: [...new Set([...claim.tags, "awakening", awakeningSchedule?.awakeningKind ?? "ritual", "scheduled"])],
+            }
+          : claim,
+      );
+
+      // Materialize the next occurrence as an InternalScheduledEvent
+      const awakeningClaim = claimWithSchedule.find((c) => c.id === boundaryWrite.result.claim.id)!;
+      const timezone = resolvePersonaTimeZone(current.timezone);
+      const nextEvents = awakeningClaim.awakeningSchedule
+        ? [
+            buildAwakeningInternalEvent(awakeningClaim, timezone, new Date()),
+            ...current.mindState.pendingInternalEvents.filter(
+              (e) => e.dedupeKey !== `awakening:${awakeningClaim.id}`,
+            ),
+          ]
+        : current.mindState.pendingInternalEvents;
+
+      return {
+        ...current,
+        updatedAt: new Date().toISOString(),
+        preferenceSignals: [signal, ...current.preferenceSignals].slice(0, 8),
+        mindState: {
+          ...current.mindState,
+          memoryClaims: claimWithSchedule,
+          claimSources: boundaryWrite.sources,
+          recentChangedClaims: [
+            awakeningClaim,
+            ...current.mindState.recentChangedClaims.filter(
+              (c) => c.id !== awakeningClaim.id,
+            ),
+          ].slice(0, 12),
+          pendingInternalEvents: nextEvents.slice(0, 24),
+        },
+      };
+    });
+
+    // Queue the awakening event for execution via Inngest
+    await queuePendingInternalEvents(updatedPersona);
+
+    return {
+      persona: updatedPersona,
+      preferenceUpdate,
+      contextualUpdate: `The user requested a scheduled awakening: ${preferenceUpdate.effectSummary}. Acknowledge it warmly and naturally.`,
+    };
+  }
+
+  // Handle awakening cancellation — targeted match by keywords, not blanket deactivation
+  if (preferenceUpdate.kind === "cancel_awakening") {
+    const updatedPersona = await updatePersona(persona.id, (current) => {
+      const { claims: updatedClaims, deactivatedIds } = deactivateMatchingAwakeningClaims(
+        current.mindState.memoryClaims,
+        userText,
+        signal.createdAt,
+      );
+
+      // Cancel any pending internal events for deactivated awakenings
+      const updatedEvents = current.mindState.pendingInternalEvents.map((event) => {
+        if ((event.origin !== "ritual" && event.origin !== "awakening") || event.status !== "pending") return event;
+        const meta = event.perception.metadata as Record<string, unknown> | undefined;
+        const claimId = (meta?.awakeningClaimId ?? meta?.ritualClaimId) as string | undefined;
+        if (claimId && deactivatedIds.includes(claimId)) {
+          return { ...event, status: "cancelled" as const, updatedAt: signal.createdAt };
+        }
+        return event;
+      });
+
+      return {
+        ...current,
+        updatedAt: new Date().toISOString(),
+        preferenceSignals: [signal, ...current.preferenceSignals].slice(0, 8),
+        mindState: {
+          ...current.mindState,
+          memoryClaims: updatedClaims,
+          pendingInternalEvents: updatedEvents,
+        },
+      };
+    });
+
+    return {
+      persona: updatedPersona,
+      preferenceUpdate,
+      contextualUpdate: "The user cancelled their scheduled awakenings. Acknowledge naturally and don't sound like a machine that just turned off a timer.",
+    };
+  }
 
   const updatedPersona = await updatePersona(persona.id, (current) => ({
     ...current,
@@ -2041,7 +2192,7 @@ async function executeReadyInternalEvents(input: {
   return activePersona;
 }
 
-/** Execute a scheduled internal event (timer, silence detection, heartbeat tick). */
+/** Execute a scheduled internal event (timer, silence detection, heartbeat tick, or awakening). */
 export async function executeSoulInternalEvent(
   personaId: string,
   eventId: string,
@@ -2056,6 +2207,10 @@ export async function executeSoulInternalEvent(
     throw new Error("Persona not found.");
   }
 
+  const pendingEventsBefore = summarizePendingInternalEvents(
+    persona.mindState.pendingInternalEvents,
+  );
+
   const internalEvent = persona.mindState.pendingInternalEvents.find((event) => event.id === eventId);
   if (!internalEvent || (internalEvent.status !== "pending" && internalEvent.status !== "queued")) {
     return {
@@ -2064,12 +2219,26 @@ export async function executeSoulInternalEvent(
     };
   }
 
+  // Guard: do not execute events before their readyAt time.
+  const now = options?.now ?? new Date();
+  if (new Date(internalEvent.readyAt).getTime() > now.getTime()) {
+    return {
+      handled: false,
+      persona,
+    };
+  }
+
+  // Awakening events get a dedicated execution path with reliability rolls,
+  // message generation, claim accounting, and next-occurrence scheduling.
+  if (internalEvent.origin === "ritual" || internalEvent.origin === "awakening") {
+    return executeAwakeningOccurrence(personaId, internalEvent, options);
+  }
+
   const localShadowQueue = localShadowExecutionQueues.get(personaId);
   if (localShadowQueue) {
     await localShadowQueue.catch(() => undefined);
   }
 
-  const now = options?.now ?? new Date();
   const feedbackNotes: string[] = options?.feedbackNotes
     ? [...options.feedbackNotes]
     : await listFeedback(personaId).then((entries) => entries.map((entry) => entry.note));
@@ -2133,11 +2302,304 @@ export async function executeSoulInternalEvent(
   });
   activePersona = await queuePendingInternalEvents(activePersona);
 
+  soulLogger.debug(
+    {
+      ...buildDebugContext(activePersona, {
+        event: "internal_event_executed",
+        eventId,
+        channel: internalEvent.perception.channel,
+        sessionId: internalEvent.perception.sessionId,
+      }),
+      beforePendingInternalEvents: pendingEventsBefore,
+      afterPendingInternalEvents: summarizePendingInternalEvents(
+        activePersona.mindState.pendingInternalEvents,
+      ),
+    },
+    "Internal scheduled event executed",
+  );
+
   return {
     handled: true,
     persona: activePersona,
     eventId,
   };
+}
+
+/**
+ * Execute an awakening occurrence — the dedicated path for awakening/ritual-origin events.
+ * 1. Reliability roll (personality-driven skip/fire)
+ * 2. If fire: generate message adapted to awakeningKind, update claim, schedule next (unless "once")
+ * 3. If skip: update claim skipCount, schedule next (unless "once")
+ */
+async function executeAwakeningOccurrence(
+  personaId: string,
+  internalEvent: import("@/lib/types").InternalScheduledEvent,
+  options?: { now?: Date; feedbackNotes?: string[] },
+) {
+  const persona = await getPersona(personaId);
+  if (!persona) {
+    return { handled: false, persona: null, eventId: internalEvent.id };
+  }
+
+  const pendingEventsBefore = summarizePendingInternalEvents(
+    persona.mindState.pendingInternalEvents,
+  );
+
+  const now = options?.now ?? new Date();
+  const isoNow = now.toISOString();
+  const metadata = internalEvent.perception.metadata as Record<string, unknown> | undefined;
+  const awakeningClaimId = (metadata?.awakeningClaimId ?? metadata?.ritualClaimId) as string | undefined;
+
+  if (!awakeningClaimId) {
+    return { handled: false, persona, eventId: internalEvent.id };
+  }
+
+  const awakeningClaim = persona.mindState.memoryClaims.find((c) => c.id === awakeningClaimId);
+  if (!awakeningClaim?.awakeningSchedule?.active) {
+    // Awakening was cancelled — mark event, don't reschedule
+    const updated = await updatePersona(personaId, (current) => ({
+      ...current,
+      mindState: {
+        ...current.mindState,
+        pendingInternalEvents: current.mindState.pendingInternalEvents.map((e) =>
+          e.id === internalEvent.id
+            ? { ...e, status: "cancelled" as const, updatedAt: isoNow }
+            : e,
+        ),
+      },
+    }));
+    soulLogger.debug(
+      {
+        ...buildDebugContext(updated, {
+          event: "awakening_cancelled",
+          eventId: internalEvent.id,
+          channel: internalEvent.perception.channel,
+          sessionId: internalEvent.perception.sessionId,
+        }),
+        beforePendingInternalEvents: pendingEventsBefore,
+        afterPendingInternalEvents: summarizePendingInternalEvents(
+          updated.mindState.pendingInternalEvents,
+        ),
+      },
+      "Awakening cancelled because the claim is inactive",
+    );
+    return { handled: true, persona: updated, eventId: internalEvent.id };
+  }
+
+  const schedule = awakeningClaim.awakeningSchedule;
+  const isOneShot = schedule.recurrence === "once";
+  const awakeningKind = schedule.awakeningKind ?? "ritual";
+
+  // Personality-driven reliability roll
+  const reliability = computeAwakeningReliability(persona);
+  const fires = Math.random() <= reliability;
+
+  if (!fires) {
+    // Skip — update claim, schedule next occurrence (unless one-shot)
+    const updated = await updatePersona(personaId, (current) => ({
+      ...current,
+      updatedAt: isoNow,
+      mindState: {
+        ...current.mindState,
+        memoryClaims: current.mindState.memoryClaims.map((c) =>
+          c.id === awakeningClaimId && c.awakeningSchedule
+            ? {
+                ...c,
+                ...(isOneShot ? { status: "stale" as const } : {}),
+                awakeningSchedule: {
+                  ...c.awakeningSchedule,
+                  skipCount: c.awakeningSchedule.skipCount + 1,
+                  ...(isOneShot ? { active: false } : {}),
+                },
+              }
+            : c,
+        ),
+        pendingInternalEvents: [
+          ...current.mindState.pendingInternalEvents.map((e) =>
+            e.id === internalEvent.id
+              ? { ...e, status: "executed" as const, updatedAt: isoNow }
+              : e,
+          ),
+          // Only schedule next if recurring
+          ...(!isOneShot
+            ? [buildAwakeningInternalEvent(awakeningClaim, resolvePersonaTimeZone(current.timezone), now)]
+            : []),
+        ].slice(0, 24),
+      },
+    }));
+    const queuedPersona = await queuePendingInternalEvents(updated);
+    soulLogger.debug(
+      {
+        ...buildDebugContext(queuedPersona, {
+          event: "awakening_skipped",
+          eventId: internalEvent.id,
+          channel: internalEvent.perception.channel,
+          sessionId: internalEvent.perception.sessionId,
+          awakeningKind,
+        }),
+        beforePendingInternalEvents: pendingEventsBefore,
+        afterPendingInternalEvents: summarizePendingInternalEvents(
+          queuedPersona.mindState.pendingInternalEvents,
+        ),
+      },
+      "Awakening occurrence skipped by reliability roll",
+    );
+    return { handled: true, persona: queuedPersona, eventId: internalEvent.id };
+  }
+
+  // Fire — generate an awakening-grounded message.
+  // Content generation prompt adapts based on awakeningKind.
+  const feedbackNotes: string[] = options?.feedbackNotes
+    ? [...options.feedbackNotes]
+    : await listFeedback(personaId).then((entries) => entries.map((entry) => entry.note));
+  const messages = await listMessages(personaId);
+  const providers = getProviders();
+
+  const contextByKind: Record<string, string> = {
+    ritual: [
+      `[AWAKENING CONTEXT] You remembered something that made you want to reach out.`,
+      `The ritual: "${awakeningClaim.summary}".`,
+      `The user originally said: "${schedule.sourceUtterance}".`,
+      `Send a natural message grounded in this ritual. Do NOT mention schedules or timers.`,
+    ].join(" "),
+    reminder: [
+      `[AWAKENING CONTEXT] You're reminding them about something.`,
+      `Remind them about: "${awakeningClaim.summary}".`,
+      `The user originally said: "${schedule.sourceUtterance}".`,
+      `Be direct but warm. This is a one-time reminder, not a recurring message.`,
+    ].join(" "),
+    followup: [
+      `[AWAKENING CONTEXT] You wanted to check back about something.`,
+      `You wanted to check back about: "${awakeningClaim.summary}".`,
+      `Ask naturally, as if you've been thinking about it.`,
+    ].join(" "),
+    deferred: [
+      `[AWAKENING CONTEXT] You said you'd get back to them about something.`,
+      `You said you'd get back to them about: "${awakeningClaim.summary}".`,
+      `Follow through now. Be warm and direct.`,
+    ].join(" "),
+  };
+
+  const awakeningContext = contextByKind[awakeningKind] ?? contextByKind.ritual;
+
+  let content: string;
+  try {
+    content = await providers.reasoning.generateReply({
+      persona,
+      messages,
+      latestUserText: awakeningContext,
+      feedbackNotes,
+      channel: "web",
+    });
+  } catch {
+    // Fallback to the awakening's source utterance if generation fails
+    content = schedule.sourceUtterance;
+  }
+  const heartbeatMessage = createMessage({
+    personaId,
+    role: "assistant",
+    kind: "text",
+    channel: "heartbeat",
+    body: content,
+    audioStatus: "unavailable",
+    delivery: {
+      webInbox: true,
+      telegramStatus: persona.telegramChatId ? "pending" : "not_requested",
+      attempts: 0,
+    },
+  });
+
+  await appendMessages([heartbeatMessage]);
+
+  // Run soul turn to process the outbound awakening message
+  const assistantTurnExecution = await runVersionedSoulTurn({
+    personaId,
+    basePersona: persona,
+    updatedAt: isoNow,
+    lastActiveAt: isoNow,
+    lastHeartbeatAt: isoNow,
+    build: async () => ({
+      messages: await listMessages(personaId),
+      observations: await listPerceptionObservations(personaId),
+      feedbackNotes,
+      perception: {
+        kind: "assistant_message",
+        channel: "heartbeat",
+        modality: "text",
+        content: heartbeatMessage.body,
+        createdAt: heartbeatMessage.createdAt,
+        internal: true,
+        causationId: heartbeatMessage.id,
+        correlationId: heartbeatMessage.id,
+        metadata: {
+          messageId: heartbeatMessage.id,
+          heartbeatAction: "TEXT",
+          awakeningClaimId,
+          awakeningKind,
+        },
+      },
+      latestUserText: "",
+      reasoning: providers.reasoning,
+      renderReply: false,
+    }),
+  });
+
+  // Update claim accounting + mark event executed + schedule next (unless one-shot)
+  let activePersona = assistantTurnExecution.persona;
+  activePersona = await updatePersona(personaId, (current) => ({
+    ...current,
+    mindState: {
+      ...current.mindState,
+      memoryClaims: current.mindState.memoryClaims.map((c) =>
+        c.id === awakeningClaimId && c.awakeningSchedule
+          ? {
+              ...c,
+              // One-shot: mark claim stale after firing
+              ...(isOneShot ? { status: "stale" as const } : {}),
+              awakeningSchedule: {
+                ...c.awakeningSchedule,
+                lastFiredAt: isoNow,
+                fireCount: c.awakeningSchedule.fireCount + 1,
+                // One-shot: deactivate after firing
+                ...(isOneShot ? { active: false } : {}),
+              },
+            }
+          : c,
+      ),
+      pendingInternalEvents: [
+        ...current.mindState.pendingInternalEvents.map((e) =>
+          e.id === internalEvent.id
+            ? { ...e, status: "executed" as const, updatedAt: isoNow }
+            : e,
+        ),
+        // Only schedule next occurrence for recurring awakenings
+        ...(!isOneShot
+          ? [buildAwakeningInternalEvent(awakeningClaim, resolvePersonaTimeZone(current.timezone), now)]
+          : []),
+      ].slice(0, 24),
+    },
+  }));
+
+  activePersona = await queuePendingInternalEvents(activePersona);
+
+  soulLogger.debug(
+    {
+      ...buildDebugContext(activePersona, {
+        event: "awakening_fired",
+        eventId: internalEvent.id,
+        channel: internalEvent.perception.channel,
+        sessionId: internalEvent.perception.sessionId,
+        awakeningKind,
+      }),
+      beforePendingInternalEvents: pendingEventsBefore,
+      afterPendingInternalEvents: summarizePendingInternalEvents(
+        activePersona.mindState.pendingInternalEvents,
+      ),
+    },
+    "Awakening occurrence fired and scheduled follow-up state",
+  );
+
+  return { handled: true, persona: activePersona, eventId: internalEvent.id };
 }
 
 async function createDerivedVisualObservation(input: {
@@ -2944,8 +3406,19 @@ export async function getLiveContextUpdate(
 
     soulLogger.debug(
       {
-        personaId,
-        sessionId: input.sessionId,
+        ...buildDebugContext(metricPersona, {
+          event: "live_context_poll_no_delivery",
+          sessionId: input.sessionId,
+          channel: "live",
+        }),
+        beforeLiveSessionMetrics: summarizeLiveSessionMetrics(
+          persona.mindState.liveSessionMetrics,
+          input.sessionId,
+        ),
+        afterLiveSessionMetrics: summarizeLiveSessionMetrics(
+          metricPersona.mindState.liveSessionMetrics,
+          input.sessionId,
+        ),
         event: "live_context_poll_no_delivery",
       },
       "Live context poll had no pending delivery",
@@ -2975,11 +3448,21 @@ export async function getLiveContextUpdate(
 
     soulLogger.debug(
       {
-        personaId,
-        sessionId: input.sessionId,
+        ...buildDebugContext(metricPersona, {
+          event: "live_context_delivery_coalesced",
+          sessionId: input.sessionId,
+          channel: "live",
+        }),
         version: persona.mindState.liveDeliveryVersion,
         reason: deliveryReason,
-        event: "live_context_delivery_coalesced",
+        beforeLiveSessionMetrics: summarizeLiveSessionMetrics(
+          persona.mindState.liveSessionMetrics,
+          input.sessionId,
+        ),
+        afterLiveSessionMetrics: summarizeLiveSessionMetrics(
+          metricPersona.mindState.liveSessionMetrics,
+          input.sessionId,
+        ),
       },
       "Live context delivery coalesced during cooldown",
     );
@@ -3014,12 +3497,22 @@ export async function getLiveContextUpdate(
 
   soulLogger.debug(
     {
-      personaId,
-      sessionId: input.sessionId,
+      ...buildDebugContext(metricPersona, {
+        event: "live_context_delivery_sent",
+        sessionId: input.sessionId,
+        channel: "live",
+      }),
       version: sessionFrame.liveDeliveryVersion,
       reason: deliveryReason,
       contextTextLength: sessionFrame.contextText.length,
-      event: "live_context_delivery_sent",
+      beforeLiveSessionMetrics: summarizeLiveSessionMetrics(
+        persona.mindState.liveSessionMetrics,
+        input.sessionId,
+      ),
+      afterLiveSessionMetrics: summarizeLiveSessionMetrics(
+        metricPersona.mindState.liveSessionMetrics,
+        input.sessionId,
+      ),
     },
     "Live context delivery sent to Hume",
   );
@@ -3456,6 +3949,14 @@ export async function finalizeLiveSession(
     };
   }
 
+  const liveMetricsBefore = summarizeLiveSessionMetrics(
+    persona.mindState.liveSessionMetrics,
+    payload.sessionId,
+  );
+  const pendingEventsBefore = summarizePendingInternalEvents(
+    persona.mindState.pendingInternalEvents,
+  );
+
   // -----------------------------------------------------------------------
   // Gather rich session evidence for the consolidation pass
   // -----------------------------------------------------------------------
@@ -3590,10 +4091,37 @@ export async function finalizeLiveSession(
     endedAt: createdAt,
   });
 
+  const finalizedPersona = (await getPersona(personaId)) ?? queuedPersona;
+
   clearLiveSessionState(payload.sessionId);
 
+  soulLogger.debug(
+    {
+      ...buildDebugContext(finalizedPersona, {
+        event: "post_call_consolidation_enqueued",
+        sessionId: payload.sessionId,
+        channel: "live",
+      }),
+      userTurnCount: userTurns.length,
+      assistantTurnCount: assistantTurns.length,
+      observationCount: sessionObservations.length,
+      feedbackCount: sessionFeedback.length,
+      repairWarning,
+      beforeLiveSessionMetrics: liveMetricsBefore,
+      afterLiveSessionMetrics: summarizeLiveSessionMetrics(
+        finalizedPersona.mindState.liveSessionMetrics,
+        payload.sessionId,
+      ),
+      beforePendingInternalEvents: pendingEventsBefore,
+      afterPendingInternalEvents: summarizePendingInternalEvents(
+        finalizedPersona.mindState.pendingInternalEvents,
+      ),
+    },
+    "Post-call consolidation enqueued",
+  );
+
   return {
-    persona: queuedPersona,
+    persona: finalizedPersona,
     queued: true,
     jobId: shadowTurn.id,
   };

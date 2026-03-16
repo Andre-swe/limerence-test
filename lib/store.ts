@@ -745,6 +745,13 @@ async function mutateStore<T>(
 // ---------------------------------------------------------------------------
 // Persona CRUD — reads/writes go through the shared runtime store (Supabase
 // or local file), with optimistic-concurrency revision checks on mutations.
+//
+// Concurrency model:
+//   File store  — serialized writes via mutex (safe for a single process).
+//   Supabase    — optimistic concurrency with revision checks and retries,
+//                 then throws on conflict. No distributed locking exists,
+//                 so multi-instance deployments may see write conflicts.
+//                 This is acceptable for single-instance Vercel deployment.
 // ---------------------------------------------------------------------------
 
 /** List all personas sorted by most recently updated. */

@@ -1,8 +1,8 @@
-import { flushPendingTelegramMessages } from "@/lib/services";
+import { runTelegramWorker } from "@/lib/worker-runtime";
 
-async function main() {
-  const results = await flushPendingTelegramMessages();
-  console.log(JSON.stringify({ results }, null, 2));
+export async function main() {
+  const result = await runTelegramWorker();
+  console.log(JSON.stringify(result, null, 2));
 }
 
 void main();

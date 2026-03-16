@@ -1,15 +1,11 @@
-import { flushPendingTelegramMessages, runDueHeartbeats } from "@/lib/services";
+import { runHeartbeatWorker } from "@/lib/worker-runtime";
 
-async function main() {
-  const heartbeatResults = await runDueHeartbeats();
-  const telegramResults = await flushPendingTelegramMessages();
+export async function main() {
+  const result = await runHeartbeatWorker();
 
   console.log(
     JSON.stringify(
-      {
-        heartbeatResults,
-        telegramResults,
-      },
+      result,
       null,
       2,
     ),

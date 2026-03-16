@@ -11,6 +11,12 @@ import {
   inferSoulArchetypeSeed,
   type SoulArchetypeId,
 } from "@/lib/personality-archetypes";
+import {
+  buildDebugContext,
+  summarizeLiveSessionMetrics,
+  summarizePendingInternalEvents,
+  summarizeRetrievalPack,
+} from "@/lib/debug-observability";
 import { soulLogger } from "@/lib/soul-logger";
 import { learningArtifactSchema } from "@/lib/types";
 import type {
@@ -896,6 +902,7 @@ function applyLearningArtifacts(
     claimSources: memoryWrites.claimSources,
     episodes: memoryWrites.episodes,
     recentChangedClaims: memoryWrites.changedClaims,
+    pendingAwakeningEvents: memoryWrites.pendingAwakeningEvents,
   };
 }
 
@@ -904,7 +911,7 @@ function toInternalScheduledEvents(input: {
   perception: SoulPerception;
 }) {
   const previous = input.persona.mindState.pendingInternalEvents.filter(
-    (event) => event.origin === "open_loop" || event.status !== "pending"
+    (event) => event.origin === "open_loop" || event.origin === "ritual" || event.origin === "awakening" || event.status !== "pending"
   );
   const mapped = input.persona.mindState.scheduledPerceptions.map((scheduled) => ({
     id: `internal_${scheduled.id}`,
@@ -1147,6 +1154,10 @@ export async function executeFastMessageTurn(
     userState: fastTurn.userState,
   });
 
+  // Dual memory system: V1 memoryRegions are rebuilt from scratch each turn by
+  // createInitialMindState (used in prompt construction via soul-harness). V2
+  // memoryClaims persist across turns and are carried forward explicitly from
+  // seededPersona below. Both coexist until V1 regions are fully migrated out.
   const baseState = createInitialMindState({
     persona: {
       ...seededPersona,
@@ -1403,7 +1414,7 @@ export async function executeFastMessageTurn(
     },
   };
 
-  finalPersona.mindState.lastRetrievalPack = buildMemoryRetrievalPack({
+  const fastPathRetrievalPack = buildMemoryRetrievalPack({
     persona: finalPersona,
     perception: {
       id: perception.id,
@@ -1413,6 +1424,28 @@ export async function executeFastMessageTurn(
       content: input.latestUserText,
     },
   });
+  finalPersona.mindState.lastRetrievalPack = fastPathRetrievalPack;
+
+  soulLogger.debug(
+    {
+      ...buildDebugContext(finalPersona, {
+        event: "memory_retrieval_pack_built",
+        channel: perception.channel,
+        sessionId: perception.sessionId,
+        perceptionId: perception.id,
+        path: "fast_message_path",
+      }),
+      retrievalPack: summarizeRetrievalPack(fastPathRetrievalPack),
+      pendingInternalEvents: summarizePendingInternalEvents(
+        finalPersona.mindState.pendingInternalEvents,
+      ),
+      liveSessionMetrics: summarizeLiveSessionMetrics(
+        finalPersona.mindState.liveSessionMetrics,
+        perception.sessionId,
+      ),
+    },
+    "Memory retrieval pack built",
+  );
 
   soulLogger.debug(
     {
@@ -1791,6 +1824,17 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
       learningState: seededPersona.mindState.learningState,
       contextVersion: seededPersona.mindState.contextVersion,
       traceVersion: seededPersona.mindState.traceVersion,
+      memoryClaims: seededPersona.mindState.memoryClaims,
+      claimSources: seededPersona.mindState.claimSources,
+      episodes: seededPersona.mindState.episodes,
+      recentChangedClaims: seededPersona.mindState.recentChangedClaims,
+      lastRetrievalPack: seededPersona.mindState.lastRetrievalPack,
+      liveDeliveryVersion: seededPersona.mindState.liveDeliveryVersion,
+      lastLiveDeliveryReason: seededPersona.mindState.lastLiveDeliveryReason,
+      lastLiveDeliverySentAt: seededPersona.mindState.lastLiveDeliverySentAt,
+      lastCoalescedLiveDeliveryVersion: seededPersona.mindState.lastCoalescedLiveDeliveryVersion,
+      liveSessionMetrics: seededPersona.mindState.liveSessionMetrics,
+      internalState: seededPersona.mindState.internalState,
       pendingInternalEvents: seededPersona.mindState.pendingInternalEvents,
       pendingShadowTurns: seededPersona.mindState.pendingShadowTurns,
       recentEvents: seededPersona.mindState.recentEvents,
@@ -1973,10 +2017,15 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     },
   };
 
-  const pendingInternalEvents = toInternalScheduledEvents({
+  const scheduledInternalEvents = toInternalScheduledEvents({
     persona: withLearningPersona,
     perception,
   });
+  // Merge any awakening events created by the learning pipeline
+  const pendingInternalEvents = [
+    ...scheduledInternalEvents,
+    ...(learningChanges.pendingAwakeningEvents ?? []),
+  ];
   const [scheduleStarted, scheduleCompleted] = createStepLifecycleEvents({
     stepId: "schedule_internal_events",
     process: withLearningPersona.mindState.activeProcess,
@@ -2081,6 +2130,27 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     },
   });
   finalPersona.mindState.lastRetrievalPack = finalRetrievalPack;
+
+  soulLogger.debug(
+    {
+      ...buildDebugContext(finalPersona, {
+        event: "memory_retrieval_pack_built",
+        channel: perception.channel,
+        sessionId: perception.sessionId,
+        perceptionId: perception.id,
+        path: "full_soul_turn",
+      }),
+      retrievalPack: summarizeRetrievalPack(finalRetrievalPack),
+      pendingInternalEvents: summarizePendingInternalEvents(
+        finalPersona.mindState.pendingInternalEvents,
+      ),
+      liveSessionMetrics: summarizeLiveSessionMetrics(
+        finalPersona.mindState.liveSessionMetrics,
+        perception.sessionId,
+      ),
+    },
+    "Memory retrieval pack built",
+  );
 
   const liveDeliveryDecision = determineLiveDeliveryDecision({
     previousPersona: input.persona,
