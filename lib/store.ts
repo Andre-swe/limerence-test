@@ -109,6 +109,10 @@ function createSeedStore(): DataStore {
     workHoursEnd: 17,
     workDays: [1, 2, 3, 4, 5],
     boundaryNotes: [],
+    variableInterval: true,
+    hourlyActivityCounts: Array(24).fill(0),
+    minIntervalHours: 1,
+    maxIntervalHours: 8,
   };
   const alexHeartbeatPolicy = {
     enabled: true,
@@ -122,6 +126,10 @@ function createSeedStore(): DataStore {
     workHoursEnd: 17,
     workDays: [1, 2, 3, 4, 5],
     boundaryNotes: [],
+    variableInterval: true,
+    hourlyActivityCounts: Array(24).fill(0),
+    minIntervalHours: 1,
+    maxIntervalHours: 8,
   };
   const momDossier: Persona["dossier"] = {
     essence: "A reassuring morning texter who leads with care and encouragement.",

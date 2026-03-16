@@ -298,6 +298,99 @@ function buildStartingVoiceProfile(input: {
   };
 }
 
+/**
+ * Record user activity for circadian pattern learning.
+ * Increments the activity count for the current hour.
+ * Uses exponential decay to gradually forget old patterns.
+ */
+export async function recordUserActivity(personaId: string, now: Date = new Date()) {
+  const currentHour = now.getHours();
+  
+  await updatePersona(personaId, (persona) => {
+    const policy = persona.heartbeatPolicy;
+    const hourlyActivity = [...(policy.hourlyActivityCounts ?? Array(24).fill(0))];
+    
+    // Apply decay to all hours (forget old patterns gradually)
+    const decayFactor = 0.995; // ~0.5% decay per interaction
+    for (let i = 0; i < 24; i++) {
+      hourlyActivity[i] = hourlyActivity[i] * decayFactor;
+    }
+    
+    // Increment current hour
+    hourlyActivity[currentHour] = (hourlyActivity[currentHour] || 0) + 1;
+    
+    return {
+      ...persona,
+      heartbeatPolicy: {
+        ...policy,
+        hourlyActivityCounts: hourlyActivity,
+      },
+      updatedAt: now.toISOString(),
+    };
+  });
+}
+
+/**
+ * Calculate the dynamic heartbeat interval based on circadian activity patterns.
+ * Higher activity hours → shorter intervals (more frequent check-ins).
+ * Lower activity hours → longer intervals (less intrusive).
+ */
+function calculateCircadianInterval(persona: Persona, now: Date): number {
+  const policy = persona.heartbeatPolicy;
+  
+  // If variable interval is disabled, use fixed interval
+  if (!policy.variableInterval) {
+    return policy.intervalHours;
+  }
+  
+  const currentHour = now.getHours();
+  const hourlyActivity = policy.hourlyActivityCounts ?? Array(24).fill(0);
+  const minInterval = policy.minIntervalHours ?? 1;
+  const maxInterval = policy.maxIntervalHours ?? 8;
+  
+  // Get activity for current hour and surrounding hours (smoothed)
+  const prevHour = (currentHour + 23) % 24;
+  const nextHour = (currentHour + 1) % 24;
+  const smoothedActivity = (
+    hourlyActivity[prevHour] * 0.25 +
+    hourlyActivity[currentHour] * 0.5 +
+    hourlyActivity[nextHour] * 0.25
+  );
+  
+  // Find max activity to normalize
+  const maxActivity = Math.max(...hourlyActivity, 1);
+  const activityRatio = smoothedActivity / maxActivity;
+  
+  // High activity → short interval, low activity → long interval
+  // Inverse relationship: interval = max - (max - min) * activityRatio
+  const interval = maxInterval - (maxInterval - minInterval) * activityRatio;
+  
+  // Check if we're in quiet hours
+  const quietStart = policy.quietHoursStart;
+  const quietEnd = policy.quietHoursEnd;
+  const inQuietHours = quietStart > quietEnd
+    ? (currentHour >= quietStart || currentHour < quietEnd)
+    : (currentHour >= quietStart && currentHour < quietEnd);
+  
+  // During quiet hours, use max interval
+  if (inQuietHours) {
+    return maxInterval;
+  }
+  
+  // Check work hours if enabled
+  if (policy.workHoursEnabled) {
+    const dayOfWeek = now.getDay();
+    const inWorkDay = policy.workDays.includes(dayOfWeek);
+    const inWorkHours = currentHour >= policy.workHoursStart && currentHour < policy.workHoursEnd;
+    
+    if (inWorkDay && inWorkHours) {
+      return maxInterval; // Stay quiet during work
+    }
+  }
+  
+  return interval;
+}
+
 function buildHeartbeatDue(persona: Persona, now: Date) {
   if (!persona.heartbeatPolicy.enabled || persona.status !== "active") {
     return false;
@@ -309,7 +402,10 @@ function buildHeartbeatDue(persona: Persona, now: Date) {
 
   const elapsedHours =
     (now.getTime() - new Date(persona.lastHeartbeatAt).getTime()) / (1000 * 60 * 60);
-  return elapsedHours >= persona.heartbeatPolicy.intervalHours;
+  
+  // Use variable interval based on circadian patterns
+  const requiredInterval = calculateCircadianInterval(persona, now);
+  return elapsedHours >= requiredInterval;
 }
 
 function countOutboundToday(messages: MessageEntry[], personaId: string, now: Date) {
@@ -2130,6 +2226,11 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
       workHoursEnd: 17,
       workDays: [1, 2, 3, 4, 5],
       boundaryNotes: [],
+      // Variable-interval heartbeat (circadian rhythm)
+      variableInterval: true,
+      hourlyActivityCounts: Array(24).fill(0),
+      minIntervalHours: 1,
+      maxIntervalHours: 8,
     },
     voice,
     consent: {
@@ -2258,6 +2359,9 @@ export async function sendPersonaMessage(
   const requestStartedAt = Date.now();
   const originalText = payload.text?.trim() ?? "";
   let userText = originalText;
+  
+  // Record user activity for circadian pattern learning
+  await recordUserActivity(personaId);
   const imageFiles = (payload.images ?? []).filter((file) => file.size > 0);
   let audioAttachment: MessageAttachment | undefined;
   let transcriptionMs = 0;

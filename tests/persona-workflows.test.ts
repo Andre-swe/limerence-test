@@ -139,6 +139,10 @@ describe("persona workflows", () => {
               workHoursEnd: 17,
               workDays: [1, 2, 3, 4, 5],
               boundaryNotes: [],
+              variableInterval: true,
+              hourlyActivityCounts: Array(24).fill(0),
+              minIntervalHours: 1,
+              maxIntervalHours: 8,
             },
             voice: {
               provider: "mock",

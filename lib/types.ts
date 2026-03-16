@@ -53,6 +53,13 @@ export const heartbeatPolicySchema = z.object({
   workHoursEnd: z.number().min(0).max(23).default(17),
   workDays: z.array(z.number().min(0).max(6)).default([1, 2, 3, 4, 5]),
   boundaryNotes: z.array(z.string()).default([]),
+  // Variable-interval heartbeat settings (circadian rhythm)
+  variableInterval: z.boolean().default(true),
+  // Activity counts per hour (0-23), learned from user interactions
+  hourlyActivityCounts: z.array(z.number()).length(24).default(Array(24).fill(0)),
+  // Min/max interval bounds for variable scheduling
+  minIntervalHours: z.number().min(0.5).max(12).default(1),
+  maxIntervalHours: z.number().min(2).max(48).default(8),
 });
 
 export const preferenceSignalSchema = z.object({
