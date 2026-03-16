@@ -4,7 +4,9 @@ import { ArrowLeft } from "lucide-react";
 import { MessagesPanel } from "@/components/messages-panel";
 import { DebugPanel } from "@/components/debug-panel";
 import { LogoMark } from "@/components/logo-mark";
-import { getPersona, listMessages } from "@/lib/store";
+import { createClient } from "@/lib/supabase-server";
+import { getPersonaForUser, listMessages } from "@/lib/store";
+import { withUserStore } from "@/lib/store-context";
 
 export const dynamic = "force-dynamic";
 
@@ -13,14 +15,21 @@ export default async function PersonaMessagesPage({
 }: {
   params: Promise<{ personaId: string }>;
 }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
   const { personaId } = await params;
-  const persona = await getPersona(personaId);
+
+  if (!user) {
+    notFound();
+  }
+
+  const persona = await getPersonaForUser(user.id, personaId);
 
   if (!persona) {
     notFound();
   }
 
-  const messages = await listMessages(persona.id);
+  const messages = await withUserStore(user.id, () => listMessages(persona.id));
 
   return (
     <div className="app-shell min-h-screen px-4 py-6 sm:px-6 lg:px-10">

@@ -4,7 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { ConversationPanel } from "@/components/conversation-panel";
 import { DebugPanel } from "@/components/debug-panel";
 import { LogoMark } from "@/components/logo-mark";
-import { getPersona } from "@/lib/store";
+import { createClient } from "@/lib/supabase-server";
+import { getPersonaForUser } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,15 @@ export default async function PersonaDetailPage({
 }: {
   params: Promise<{ personaId: string }>;
 }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
   const { personaId } = await params;
-  const persona = await getPersona(personaId);
+
+  if (!user) {
+    notFound();
+  }
+
+  const persona = await getPersonaForUser(user.id, personaId);
 
   if (!persona) {
     notFound();

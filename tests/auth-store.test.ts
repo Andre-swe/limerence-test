@@ -3,7 +3,13 @@ import {
   verifyPersonaOwnership,
   withUserContext,
 } from "@/lib/auth";
-import { resetStoreForTests } from "@/lib/store";
+import {
+  getPersona,
+  getPersonaForUser,
+  listPersonasForUser,
+  resetStoreForTests,
+  savePersona,
+} from "@/lib/store";
 
 describe("auth store integration", () => {
   beforeEach(async () => {
@@ -85,5 +91,43 @@ describe("auth store integration", () => {
     );
 
     expect(value).toBe("current:user-demo");
+  });
+
+  it("lists only personas owned by the requested user in local-file mode", async () => {
+    const sourcePersona = await getPersona("persona-mom");
+    if (!sourcePersona) {
+      throw new Error("Seed persona missing");
+    }
+
+    await savePersona({
+      ...JSON.parse(JSON.stringify(sourcePersona)),
+      id: "persona-other",
+      name: "Other User Persona",
+      userId: "user-other",
+      createdAt: "2026-03-16T12:00:00.000Z",
+      updatedAt: "2026-03-16T12:00:00.000Z",
+    });
+
+    const personas = await listPersonasForUser("user-demo");
+
+    expect(personas.map((persona) => persona.userId)).toEqual(["user-demo", "user-demo"]);
+    expect(personas.map((persona) => persona.name)).not.toContain("Other User Persona");
+  });
+
+  it("does not return a persona owned by a different user", async () => {
+    const sourcePersona = await getPersona("persona-mom");
+    if (!sourcePersona) {
+      throw new Error("Seed persona missing");
+    }
+
+    await savePersona({
+      ...JSON.parse(JSON.stringify(sourcePersona)),
+      id: "persona-other",
+      userId: "user-other",
+      createdAt: "2026-03-16T12:00:00.000Z",
+      updatedAt: "2026-03-16T12:00:00.000Z",
+    });
+
+    await expect(getPersonaForUser("user-demo", "persona-other")).resolves.toBeNull();
   });
 });

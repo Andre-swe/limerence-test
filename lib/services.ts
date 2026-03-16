@@ -10,11 +10,13 @@ import {
   listMessages,
   listPerceptionObservations,
   listPersonas,
+  listPersonasForUser,
   replacePersonaIfRevision,
   updateMessage,
   updatePersona,
   updatePersonaShadowTurn,
 } from "@/lib/store";
+import { runDueHeartbeatsAcrossStores } from "@/lib/heartbeat-scheduler";
 import { getProviders, getProviderStatus } from "@/lib/providers";
 import { executeFastMessageTurn, executeSoulTurn } from "@/lib/soul-engine";
 import {
@@ -45,6 +47,8 @@ import {
 } from "@/lib/debug-observability";
 import { createMessage, persistMessageAttachment } from "@/lib/services/assets";
 import { soulLogger } from "@/lib/soul-logger";
+import { listSupabaseRuntimeStoreKeys, getSupabaseRuntimeConfig } from "@/lib/supabase";
+import { withUserStore } from "@/lib/store-context";
 import {
   type ConversationChannel,
   type LiveSessionMode,
@@ -3807,20 +3811,39 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
 }
 
 export async function runDueHeartbeats() {
-  const personas = await listPersonas();
-  const duePersonas = personas.filter((persona) => buildHeartbeatDue(persona, new Date()));
-  const results: Array<{ personaId: string; action: HeartbeatDecision["action"]; reason: string }> =
-    [];
+  const now = new Date();
 
-  for (const persona of duePersonas) {
-    const decision = await runHeartbeat(persona.id);
-    results.push({
-      personaId: persona.id,
-      action: decision.action,
-      reason: decision.reason,
+  if (!getSupabaseRuntimeConfig()) {
+    return runDueHeartbeatsAcrossStores({
+      now,
+      listPersonasForStore: () => listPersonas(),
+      runHeartbeatForStore: (personaId) => runHeartbeat(personaId),
+      isDue: buildHeartbeatDue,
     });
   }
 
-  return results;
-}
+  const storeKeys = await listSupabaseRuntimeStoreKeys();
+  if (storeKeys.length === 0) {
+    return [];
+  }
 
+  return runDueHeartbeatsAcrossStores({
+    now,
+    storeKeys,
+    listPersonasForStore: (storeKey) => {
+      if (!storeKey) {
+        return listPersonas();
+      }
+
+      return listPersonasForUser(storeKey);
+    },
+    runHeartbeatForStore: (personaId, storeKey) => {
+      if (!storeKey) {
+        return runHeartbeat(personaId);
+      }
+
+      return withUserStore(storeKey, () => runHeartbeat(personaId));
+    },
+    isDue: buildHeartbeatDue,
+  });
+}

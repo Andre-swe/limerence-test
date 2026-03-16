@@ -6,14 +6,12 @@ const {
   createClientMock,
   getProviderStatusMock,
   getSupabaseStatusMock,
-  listPersonasMock,
-  withUserStoreMock,
+  listPersonasForUserMock,
 } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   getProviderStatusMock: vi.fn(),
   getSupabaseStatusMock: vi.fn(),
-  listPersonasMock: vi.fn(),
-  withUserStoreMock: vi.fn((_userId: string, fn: () => unknown) => fn()),
+  listPersonasForUserMock: vi.fn(),
 }));
 
 vi.mock("next/link", () => ({
@@ -49,11 +47,7 @@ vi.mock("@/components/create-persona-form", () => ({
 }));
 
 vi.mock("@/lib/store", () => ({
-  listPersonas: listPersonasMock,
-}));
-
-vi.mock("@/lib/store-context", () => ({
-  withUserStore: withUserStoreMock,
+  listPersonasForUser: listPersonasForUserMock,
 }));
 
 vi.mock("@/lib/supabase-server", () => ({
@@ -75,7 +69,7 @@ import SettingsPage from "@/app/settings/page";
 describe("app pages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listPersonasMock.mockResolvedValue([
+    listPersonasForUserMock.mockResolvedValue([
       {
         id: "persona-1",
         name: "Mira",
@@ -114,7 +108,7 @@ describe("app pages", () => {
     expect(markup).toContain("Choose someone.");
     expect(markup).toContain("Mira");
     expect(markup).toContain("user@example.com");
-    expect(withUserStoreMock).toHaveBeenCalledWith("user-1", expect.any(Function));
+    expect(listPersonasForUserMock).toHaveBeenCalledWith("user-1");
   });
 
   it("renders the create page shell", () => {

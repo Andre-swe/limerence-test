@@ -14,15 +14,12 @@ import {
 const {
   addPersonaFeedbackMock,
   appendLiveTranscriptTurnMock,
-  authGetUserMock,
   buildMemoryRetrievalPackMock,
   createPersonaFromFormMock,
   createPersonaLiveSessionMock,
-  createServerClientMock,
   finalizeLiveSessionMock,
   getAuthenticatedUserIdMock,
   getLiveContextUpdateMock,
-  getPersonaMock,
   observeLiveVisualPerceptionMock,
   runHeartbeatMock,
   sendPersonaMessageMock,
@@ -32,15 +29,12 @@ const {
 } = vi.hoisted(() => ({
   addPersonaFeedbackMock: vi.fn(),
   appendLiveTranscriptTurnMock: vi.fn(),
-  authGetUserMock: vi.fn(),
   buildMemoryRetrievalPackMock: vi.fn(),
   createPersonaFromFormMock: vi.fn(),
   createPersonaLiveSessionMock: vi.fn(),
-  createServerClientMock: vi.fn(),
   finalizeLiveSessionMock: vi.fn(),
   getAuthenticatedUserIdMock: vi.fn(),
   getLiveContextUpdateMock: vi.fn(),
-  getPersonaMock: vi.fn(),
   observeLiveVisualPerceptionMock: vi.fn(),
   runHeartbeatMock: vi.fn(),
   sendPersonaMessageMock: vi.fn(),
@@ -70,20 +64,12 @@ vi.mock("@/lib/services", () => ({
   synthesizeStoredReply: synthesizeStoredReplyMock,
 }));
 
-vi.mock("@/lib/store", () => ({
-  getPersona: getPersonaMock,
-}));
-
 vi.mock("@/lib/hume-evi", () => ({
   createPersonaLiveSession: createPersonaLiveSessionMock,
 }));
 
 vi.mock("@/lib/memory-v2", () => ({
   buildMemoryRetrievalPack: buildMemoryRetrievalPackMock,
-}));
-
-vi.mock("@supabase/ssr", () => ({
-  createServerClient: createServerClientMock,
 }));
 
 import { POST as personaFeedbackPost } from "@/app/api/personas/[personaId]/feedback/route";
@@ -127,9 +113,6 @@ describe("persona routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("NODE_ENV", "test");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://supabase.test");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-test");
-    vi.stubEnv("ADMIN_EMAILS", "admin@example.com");
     getAuthenticatedUserIdMock.mockReturnValue("user-1");
     verifyPersonaOwnershipMock.mockResolvedValue({
       authorized: true,
@@ -162,7 +145,6 @@ describe("persona routes", () => {
       leftOnRead: false,
     });
     synthesizeStoredReplyMock.mockResolvedValue({ id: "msg-1", audioUrl: "/audio.mp3" });
-    getPersonaMock.mockResolvedValue(activePersona);
     createPersonaLiveSessionMock.mockResolvedValue({ accessToken: "live-token" });
     buildMemoryRetrievalPackMock.mockReturnValue({
       alwaysLoadedClaims: [],
@@ -170,15 +152,6 @@ describe("persona routes", () => {
       contextualEpisodes: [],
       summary: "ready",
       builtAt: "2026-03-16T00:00:00.000Z",
-    });
-    authGetUserMock.mockResolvedValue({
-      data: { user: { email: "admin@example.com" } },
-      error: null,
-    });
-    createServerClientMock.mockReturnValue({
-      auth: {
-        getUser: authGetUserMock,
-      },
     });
   });
 
@@ -530,18 +503,21 @@ describe("persona routes", () => {
     await expectJsonError(response, 400, "tts failed");
   });
 
-  it("returns non-production soul traces without admin auth", async () => {
-    getAuthenticatedUserIdMock.mockReturnValueOnce(null);
-    getPersonaMock.mockResolvedValueOnce({
-      ...activePersona,
-      mindState: {
-        ...activePersona.mindState,
-        memoryClaims: [{ id: "claim-1", kind: "boundary", status: "confirmed" }],
+  it("returns soul traces for the owning user", async () => {
+    verifyPersonaOwnershipMock.mockResolvedValueOnce({
+      authorized: true,
+      userId: "user-1",
+      persona: {
+        ...activePersona,
+        mindState: {
+          ...activePersona.mindState,
+          memoryClaims: [{ id: "claim-1", kind: "boundary", status: "confirmed" }],
+        },
       },
     });
 
     const response = await soulTraceGet(
-      new Request("http://localhost/api/personas/persona-test/soul/trace"),
+      requestWithUser("http://localhost/api/personas/persona-test/soul/trace", "user-1"),
       personaParams(),
     );
 
@@ -550,22 +526,22 @@ describe("persona routes", () => {
     expect(body.memoryClaims[0]?.id).toBe("claim-1");
   });
 
-  it("rejects production soul traces when the requester is not an admin", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    authGetUserMock.mockResolvedValueOnce({
-      data: { user: { email: "not-admin@example.com" } },
-      error: null,
+  it("rejects soul traces when the requester does not own the persona", async () => {
+    verifyPersonaOwnershipMock.mockResolvedValueOnce({
+      authorized: false,
+      error: "Forbidden. You do not own this persona.",
+      status: 403,
     });
 
     const response = await soulTraceGet(
-      new Request("http://localhost/api/personas/persona-test/soul/trace"),
+      requestWithUser("http://localhost/api/personas/persona-test/soul/trace", "user-2"),
       personaParams(),
     );
 
-    await expectJsonError(response, 403, "Forbidden. Admin access required.");
+    await expectJsonError(response, 403, "Forbidden. You do not own this persona.");
   });
 
-  it("verifies ownership for production soul traces after admin auth passes", async () => {
+  it("applies the same ownership check in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     verifyPersonaOwnershipMock.mockResolvedValueOnce({
       authorized: false,
@@ -574,7 +550,7 @@ describe("persona routes", () => {
     });
 
     const response = await soulTraceGet(
-      new Request("http://localhost/api/personas/persona-test/soul/trace"),
+      requestWithUser("http://localhost/api/personas/persona-test/soul/trace", "user-1"),
       personaParams(),
     );
 

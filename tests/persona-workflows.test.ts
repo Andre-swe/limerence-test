@@ -46,6 +46,7 @@ import {
   resetStoreForTests,
   updatePersona,
 } from "@/lib/store";
+import { requestWithUser } from "@/tests/helpers/route-helpers";
 import type { MemoryClaim } from "@/lib/types";
 
 function withoutReasoningProviders<T>(operation: () => Promise<T>) {
@@ -986,7 +987,7 @@ describe("persona workflows", () => {
     expect(metrics["active-kept"]).toBeTruthy();
     expect(completedCount).toBeLessThanOrEqual(8);
 
-    const response = await getSoulTraceRoute(new Request("http://localhost"), {
+    const response = await getSoulTraceRoute(requestWithUser("http://localhost", "user-demo"), {
       params: Promise.resolve({ personaId: "persona-mom" }),
     });
     const body = await response.json();
@@ -1002,7 +1003,7 @@ describe("persona workflows", () => {
         channel: "web",
       });
 
-      const response = await getSoulTraceRoute(new Request("http://localhost"), {
+      const response = await getSoulTraceRoute(requestWithUser("http://localhost", "user-demo"), {
         params: Promise.resolve({ personaId: "persona-mom" }),
       });
       const body = await response.json();

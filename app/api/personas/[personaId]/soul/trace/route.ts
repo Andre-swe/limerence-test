@@ -1,8 +1,5 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
-import { getAuthenticatedUserId, verifyPersonaOwnership } from "@/lib/auth";
-import { getPersona } from "@/lib/store";
-import { withUserStore } from "@/lib/store-context";
+import { verifyPersonaOwnership } from "@/lib/auth";
 import { buildMemoryRetrievalPack } from "@/lib/memory-v2";
 
 /** Debug route: returns the persona's cognitive state, memory claims, and trace. */
@@ -10,68 +7,13 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ personaId: string }> },
 ) {
-  const isDev = process.env.NODE_ENV !== "production";
-
-  if (!isDev) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json(
-        { error: "Server misconfiguration." },
-        { status: 500 }
-      );
-    }
-
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        getAll() {
-          const cookieHeader = request.headers.get("cookie") ?? "";
-          return cookieHeader.split(";").map((c) => {
-            const [name, ...rest] = c.trim().split("=");
-            return { name, value: rest.join("=") };
-          });
-        },
-        setAll() {},
-      },
-    });
-
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    const adminEmails = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim());
-    const isAdmin = user && adminEmails.includes(user.email ?? "");
-
-    if (error || !user || !isAdmin) {
-      return NextResponse.json(
-        { error: "Forbidden. Admin access required." },
-        { status: 403 }
-      );
-    }
-  }
-
   try {
     const { personaId } = await context.params;
-
-    // In production, also verify ownership (unless admin already passed)
-    if (!isDev) {
-      const ownership = await verifyPersonaOwnership(request, personaId);
-      if (!ownership.authorized) {
-        return NextResponse.json({ error: ownership.error }, { status: ownership.status });
-      }
+    const ownership = await verifyPersonaOwnership(request, personaId);
+    if (!ownership.authorized) {
+      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
     }
-
-    // Get userId from ownership check or from request header
-    const userId = getAuthenticatedUserId(request);
-    const persona = userId
-      ? await withUserStore(userId, () => getPersona(personaId))
-      : await getPersona(personaId);
-
-    if (!persona) {
-      return NextResponse.json({ error: "Persona not found." }, { status: 404 });
-    }
+    const persona = ownership.persona;
 
     return NextResponse.json({
       personaId: persona.id,

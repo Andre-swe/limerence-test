@@ -19,7 +19,7 @@ import {
   createRelationshipModel,
 } from "@/lib/mind-runtime";
 import { getSupabaseAdminClient, getSupabaseRuntimeConfig } from "@/lib/supabase";
-import { getCurrentUserId } from "@/lib/store-context";
+import { getCurrentUserId, withUserStore } from "@/lib/store-context";
 import { houseVoicePresets } from "@/lib/voice-presets";
 import { slugify } from "@/lib/utils";
 
@@ -745,15 +745,47 @@ async function mutateStore<T>(
 //                 This is acceptable for single-instance Vercel deployment.
 // ---------------------------------------------------------------------------
 
+function sortPersonasByUpdatedAt(personas: Persona[]) {
+  return [...personas].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
 /** List all personas sorted by most recently updated. */
 export async function listPersonas() {
   const store = await readStore();
-  return [...store.personas].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return sortPersonasByUpdatedAt(store.personas);
 }
 
 export async function getPersona(personaId: string) {
   const store = await readStore();
   return store.personas.find((persona) => persona.id === personaId) ?? null;
+}
+
+/** List personas owned by a specific user across both storage modes. */
+export async function listPersonasForUser(userId: string) {
+  const loadOwnedPersonas = async () =>
+    sortPersonasByUpdatedAt(
+      (await listPersonas()).filter((persona) => persona.userId === userId),
+    );
+
+  if (isSupabaseRuntimeStoreEnabled()) {
+    return withUserStore(userId, loadOwnedPersonas);
+  }
+
+  return loadOwnedPersonas();
+}
+
+/** Get a persona only if it belongs to the requested user. */
+export async function getPersonaForUser(userId: string, personaId: string) {
+  const loadOwnedPersona = async () => {
+    const persona = await getPersona(personaId);
+    return persona?.userId === userId ? persona : null;
+  };
+
+  if (isSupabaseRuntimeStoreEnabled()) {
+    return withUserStore(userId, loadOwnedPersona);
+  }
+
+  return loadOwnedPersona();
 }
 
 export async function savePersona(persona: Persona) {

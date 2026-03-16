@@ -80,3 +80,27 @@ export function getSupabaseAdminClient() {
 
   return adminClient;
 }
+
+/** List configured runtime-store keys for shared Supabase scheduling. */
+export async function listSupabaseRuntimeStoreKeys() {
+  const config = getSupabaseRuntimeConfig();
+  const client = getSupabaseAdminClient();
+
+  if (!config || !client) {
+    return [];
+  }
+
+  const { data, error } = await client
+    .from(config.table)
+    .select("store_key");
+
+  if (error) {
+    throw new Error(`Unable to list Supabase runtime stores: ${error.message}`);
+  }
+
+  return [...new Set(
+    (data ?? [])
+      .map((row) => (typeof row.store_key === "string" ? row.store_key.trim() : ""))
+      .filter(Boolean),
+  )].sort();
+}
