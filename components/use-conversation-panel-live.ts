@@ -281,6 +281,11 @@ export function useConversationPanelLive({
     void poll();
     const interval = setInterval(() => {
       if (consecutiveFailures >= 8) {
+        // Back off instead of stopping forever — try once every ~30s to recover.
+        if (consecutiveFailures % 10 === 0) {
+          void poll();
+        }
+        consecutiveFailures += 1;
         return;
       }
 

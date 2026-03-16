@@ -309,11 +309,13 @@ function upsertClaim(input: {
 
   const existing = claims[existingIndex];
   const nextStatus =
-    existing.status === "contradicted"
-      ? existing.status
-      : input.candidate.status === "confirmed" || existing.status === "confirmed"
-        ? "confirmed"
-        : existing.status;
+    existing.status === "contradicted" && input.candidate.status === "confirmed"
+      ? "confirmed"
+      : existing.status === "contradicted"
+        ? existing.status
+        : input.candidate.status === "confirmed" || existing.status === "confirmed"
+          ? "confirmed"
+          : existing.status;
   const nextClaim: MemoryClaim = {
     ...existing,
     detail: input.candidate.detail
@@ -329,14 +331,14 @@ function upsertClaim(input: {
     importance: clamp(
       Math.max(existing.importance, input.candidate.importance ?? existing.importance),
     ),
-    sourceIds: unique([...existing.sourceIds, ...(input.candidate.sourceIds ?? [])]),
+    sourceIds: unique([...existing.sourceIds, ...(input.candidate.sourceIds ?? [])]).slice(0, 32),
     reinforcementCount: existing.reinforcementCount + 1,
     lastObservedAt: input.candidate.createdAt,
     lastConfirmedAt:
       nextStatus === "confirmed"
         ? input.candidate.createdAt
         : existing.lastConfirmedAt,
-    tags: unique([...existing.tags, ...(input.candidate.tags ?? [])]),
+    tags: unique([...existing.tags, ...(input.candidate.tags ?? [])]).slice(0, 24),
   };
   claims[existingIndex] = nextClaim;
 
@@ -733,7 +735,10 @@ export function applyFeedbackToMemoryClaims(input: {
 }
 
 function claimRecencyScore(claim: MemoryClaim, now: Date) {
-  const ageMs = Math.max(0, now.getTime() - new Date(claim.lastObservedAt).getTime());
+  const lastObserved = new Date(claim.lastObservedAt).getTime();
+  const ageMs = Number.isFinite(lastObserved)
+    ? Math.max(0, now.getTime() - lastObserved)
+    : 30 * 24 * 60 * 60 * 1000;
   const days = ageMs / (1000 * 60 * 60 * 24);
   return Math.max(0, 1 - days / 30);
 }
