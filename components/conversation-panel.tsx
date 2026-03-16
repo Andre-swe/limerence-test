@@ -1,7 +1,13 @@
 "use client";
 
-import { VoiceProvider, useVoice } from "@humeai/voice-react";
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { VoiceProvider } from "@humeai/voice-react";
+import {
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import {
   Camera,
   Loader2,
@@ -12,194 +18,25 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
+import {
+  isAssistantMessageEvent,
+  isObject,
+  isSocketErrorEvent,
+  isUserMessageEvent,
+  modeLabel,
+  resolveErrorMessage,
+  resolveEventText,
+  resolveProsodyScores,
+  type LiveState,
+  type VoiceEvent,
+} from "@/components/conversation-panel-live-utils";
+import { useConversationPanelLive } from "@/components/use-conversation-panel-live";
 import type { LiveSessionMode, PersonaStatus, SoulSessionFrame } from "@/lib/types";
-
-type LiveSessionResponse = {
-  accessToken: string;
-  hostname: string;
-  mode: LiveSessionMode;
-  soulFrame: SoulSessionFrame;
-  sessionSettings: {
-    context?: {
-      text: string;
-      type: "persistent";
-    };
-    customSessionId: string;
-    systemPrompt: string;
-    type: "session_settings";
-    variables?: Record<string, string | number | boolean>;
-    voiceId?: string;
-  };
-  voiceStatus: "ready" | "preview_only" | "unavailable";
-};
-
-type LivePerceptionResponse = {
-  sessionFrame?: SoulSessionFrame;
-};
 
 type LiveTranscriptResponse = {
   contextualUpdate?: string;
   sessionFrame?: SoulSessionFrame;
 };
-
-type LiveContextResponse = {
-  pendingJobs?: number;
-  sessionFrame?: SoulSessionFrame;
-};
-
-type LiveState = "idle" | "listening" | "thinking" | "replying";
-
-type VoiceEvent = {
-  type: string;
-  receivedAt: Date;
-  [key: string]: unknown;
-};
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isUserMessageEvent(
-  event: VoiceEvent,
-): event is VoiceEvent & {
-  fromText?: boolean;
-  interim?: boolean;
-  language?: string;
-  message?: { content?: string };
-  models?: {
-    prosody?: {
-      scores?: Record<string, number>;
-    };
-  };
-  time?: { begin?: number; end?: number };
-  type: "user_message";
-} {
-  return event.type === "user_message";
-}
-
-function isAssistantMessageEvent(
-  event: VoiceEvent,
-): event is VoiceEvent & {
-  fromText?: boolean;
-  id?: string;
-  language?: string;
-  message?: { content?: string };
-  models?: {
-    prosody?: {
-      scores?: Record<string, number>;
-    };
-  };
-  type: "assistant_message";
-} {
-  return event.type === "assistant_message";
-}
-
-function isSocketErrorEvent(
-  event: VoiceEvent,
-): event is VoiceEvent & {
-  code?: string;
-  message?: string;
-  slug?: string;
-  type: "error";
-} {
-  return event.type === "error";
-}
-
-function resolveEventText(event: VoiceEvent) {
-  const maybeMessage = isObject(event.message) ? event.message : null;
-  return typeof maybeMessage?.content === "string" ? maybeMessage.content.trim() : "";
-}
-
-function resolveProsodyScores(event: VoiceEvent) {
-  const maybeModels = isObject(event.models) ? event.models : null;
-  const maybeProsody = maybeModels && isObject(maybeModels.prosody) ? maybeModels.prosody : null;
-  const maybeScores = maybeProsody && isObject(maybeProsody.scores) ? maybeProsody.scores : null;
-
-  if (!maybeScores) {
-    return undefined;
-  }
-
-  const entries = Object.entries(maybeScores).filter((entry): entry is [string, number] => {
-    return typeof entry[1] === "number";
-  });
-
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function resolveErrorMessage(error: unknown) {
-  if (typeof error === "string") {
-    return error;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (isObject(error) && typeof error.message === "string") {
-    return error.message;
-  }
-
-  return "Something went wrong.";
-}
-
-function averageLevel(values: number[]) {
-  if (values.length === 0) {
-    return 0;
-  }
-
-  const sample = values.slice(0, 24);
-  const total = sample.reduce((sum, value) => sum + value, 0);
-  return total / sample.length;
-}
-
-function statusCopyFor(state: LiveState) {
-  switch (state) {
-    case "listening":
-      return "Listening";
-    case "thinking":
-      return "Thinking";
-    case "replying":
-      return "Speaking";
-    case "idle":
-      return "Ready";
-  }
-}
-
-function modeLabel(mode: LiveSessionMode) {
-  switch (mode) {
-    case "voice":
-      return "Talk";
-    case "screen":
-      return "Screen";
-    case "camera":
-      return "Camera";
-  }
-}
-
-function optimisticVisualContextText(
-  current: string,
-  mode: Extract<LiveSessionMode, "screen" | "camera">,
-  active: boolean,
-) {
-  const note = active
-    ? mode === "screen"
-      ? "VISUAL_CONTEXT\nScreen sharing is active right now. You can see the user's shared screen, even if detailed observations are still arriving."
-      : "VISUAL_CONTEXT\nCamera sharing is active right now. You can see the user's camera view, even if detailed observations are still arriving."
-    : mode === "screen"
-      ? "VISUAL_CONTEXT\nScreen sharing has ended. Do not imply you can still see the user's screen."
-      : "VISUAL_CONTEXT\nCamera sharing has ended. Do not imply you can still see the user's surroundings.";
-
-  if (!current.trim()) {
-    return note;
-  }
-
-  const cleaned = current.replace(
-    /VISUAL_CONTEXT\n[\s\S]*?(?=\n\n[A-Z_]+\n|$)/g,
-    "",
-  ).trim();
-
-  return `${cleaned}\n\n${note}`;
-}
 
 type ConversationPanelProps = {
   personaId: string;
@@ -366,7 +203,8 @@ export function ConversationPanel({
         const closingSessionId = sessionId;
         const closingMode = activeMode;
         const endedByUser = userEndedLiveRef.current;
-        if (!userEndedLiveRef.current) {
+
+        if (!endedByUser) {
           const reason = event.reason?.trim();
           const message =
             reason ||
@@ -375,6 +213,7 @@ export function ConversationPanel({
               : "The live session ended unexpectedly.");
           setLiveError(message);
         }
+
         if (closingSessionId && !endedByUser) {
           void fetch(`/api/personas/${personaId}/live/end`, {
             method: "POST",
@@ -388,6 +227,7 @@ export function ConversationPanel({
             }),
           }).catch(() => undefined);
         }
+
         setLiveState("idle");
         setSessionContextText("");
         setSessionContextVersion(0);
@@ -443,537 +283,43 @@ type ConversationPanelInnerProps = {
   sessionContextText: string;
   sessionContextVersion: number;
   sessionId: string | null;
-  setActiveMode: (value: LiveSessionMode) => void;
-  setActiveVisualMode: (value: Extract<LiveSessionMode, "screen" | "camera"> | null) => void;
-  setIsPreparingLive: (value: boolean) => void;
-  setLiveError: (value: string | null) => void;
-  setLiveState: (value: LiveState | ((current: LiveState) => LiveState)) => void;
-  setPendingSessionFrame: (value: SoulSessionFrame | null) => void;
-  setSessionContextText: (value: string) => void;
-  setSessionContextVersion: (value: number) => void;
-  setSessionId: (value: string | null) => void;
-  setVisualError: (value: string | null) => void;
+  setActiveMode: Dispatch<SetStateAction<LiveSessionMode>>;
+  setActiveVisualMode: Dispatch<
+    SetStateAction<Extract<LiveSessionMode, "screen" | "camera"> | null>
+  >;
+  setIsPreparingLive: Dispatch<SetStateAction<boolean>>;
+  setLiveError: Dispatch<SetStateAction<string | null>>;
+  setLiveState: Dispatch<SetStateAction<LiveState>>;
+  setPendingSessionFrame: Dispatch<SetStateAction<SoulSessionFrame | null>>;
+  setSessionContextText: Dispatch<SetStateAction<string>>;
+  setSessionContextVersion: Dispatch<SetStateAction<number>>;
+  setSessionId: Dispatch<SetStateAction<string | null>>;
+  setVisualError: Dispatch<SetStateAction<string | null>>;
   userEndedLiveRef: MutableRefObject<boolean>;
   visualError: string | null;
 };
 
-function ConversationPanelInner({
-  activeMode,
-  activeVisualMode,
-  isLocked,
-  isPreparingLive,
-  liveError,
-  liveState,
-  pendingSessionFrame,
-  personaId,
-  personaName,
-  resetLiveSessionArtifacts,
-  sessionContextText,
-  sessionContextVersion,
-  sessionId,
-  setActiveMode,
-  setActiveVisualMode,
-  setIsPreparingLive,
-  setLiveError,
-  setLiveState,
-  setPendingSessionFrame,
-  setSessionContextText,
-  setSessionContextVersion,
-  setSessionId,
-  setVisualError,
-  userEndedLiveRef,
-  visualError,
-}: ConversationPanelInnerProps) {
+function ConversationPanelInner(props: ConversationPanelInnerProps) {
   const {
     callDurationTimestamp,
-    connect,
-    disconnect,
-    fft,
+    callIssue,
+    endLiveSession,
+    hiddenVideoRef,
     isAudioMuted,
     isMuted,
-    isPlaying,
-    micFft,
+    liveConnected,
+    liveConnecting,
+    minimalStatus,
     mute,
     muteAudio,
-    sendSessionSettings,
-    status,
+    orbScale,
+    startLiveSession,
+    switchMode,
     unmute,
     unmuteAudio,
-  } = useVoice();
-  // Ref mirrors sessionContextVersion so the polling effect can read the
-  // latest value without being in its dependency array (which would tear
-  // down and recreate the interval on every delivery).
-  const contextVersionRef = useRef(sessionContextVersion);
-  contextVersionRef.current = sessionContextVersion;
-  const hiddenVideoRef = useRef<HTMLVideoElement | null>(null);
-  const visualStreamRef = useRef<MediaStream | null>(null);
-  const captureIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const captureInFlightRef = useRef(false);
+  } = useConversationPanelLive(props);
 
-  const liveConnected = status.value === "connected";
-  const liveConnecting = status.value === "connecting" || isPreparingLive;
-  const micLevel = averageLevel(micFft);
-  const assistantLevel = averageLevel(fft);
-  const liveLevel = Math.max(micLevel, assistantLevel);
-  const orbScale = liveConnected ? 1 + Math.min(liveLevel / 380, 0.1) : 1;
-  const minimalStatus = liveConnecting ? "Connecting" : statusCopyFor(liveState);
-
-  useEffect(() => {
-    if (status.value !== "connected") {
-      return;
-    }
-
-    if (isPlaying) {
-      setLiveState("replying");
-      return;
-    }
-
-    setLiveState((current) => (current === "replying" ? "listening" : current));
-  }, [isPlaying, setLiveState, status.value]);
-
-  useEffect(() => {
-    if (!pendingSessionFrame || status.value !== "connected") {
-      return;
-    }
-
-    if (pendingSessionFrame.liveDeliveryVersion <= sessionContextVersion) {
-      setPendingSessionFrame(null);
-      return;
-    }
-
-    // Omit systemPrompt — Hume preserves the bootstrap systemPrompt when it
-    // is not included in a session settings update. Mid-call deliveries only
-    // send the compact volatile context overlay and updated variables.
-    sendSessionSettings({
-      context: {
-        text: pendingSessionFrame.contextText,
-        type: "persistent",
-      },
-      variables: pendingSessionFrame.variables,
-    });
-    setSessionContextText(pendingSessionFrame.contextText);
-    setSessionContextVersion(pendingSessionFrame.liveDeliveryVersion);
-    setPendingSessionFrame(null);
-  }, [
-    pendingSessionFrame,
-    sendSessionSettings,
-    sessionContextVersion,
-    setPendingSessionFrame,
-    setSessionContextText,
-    setSessionContextVersion,
-    status.value,
-  ]);
-
-  useEffect(() => {
-    if (!liveConnected || !sessionId) {
-      return;
-    }
-    let consecutiveFailures = 0;
-
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const response = await fetch(
-          `/api/personas/${personaId}/live/context?sessionId=${encodeURIComponent(
-            sessionId,
-          )}&afterVersion=${contextVersionRef.current}`,
-        );
-
-        if (!response.ok || cancelled) {
-          consecutiveFailures++;
-          return;
-        }
-
-        consecutiveFailures = 0;
-        const payload = (await response.json()) as LiveContextResponse;
-        if (payload.sessionFrame && !cancelled) {
-          setPendingSessionFrame(payload.sessionFrame);
-        }
-      } catch {
-        consecutiveFailures++;
-        // Keep the live experience steady if a poll misses.
-      }
-    };
-
-    void poll();
-    const interval = setInterval(() => {
-      // Back off if polls are consistently failing (max ~24s between polls)
-      if (consecutiveFailures >= 8) return;
-      void poll();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [liveConnected, personaId, sessionId, setPendingSessionFrame]);
-
-  useEffect(() => {
-    return () => {
-      void stopVisualSharing(true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function postVisualPerception(input: {
-    mode: Extract<LiveSessionMode, "screen" | "camera">;
-    event: "frame" | "start" | "end";
-    sessionIdentifier?: string;
-    imageFile?: File;
-  }) {
-    const currentSessionId = input.sessionIdentifier ?? sessionId;
-    if (!currentSessionId) {
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("mode", input.mode);
-    formData.append("event", input.event);
-    formData.append("sessionId", currentSessionId);
-    formData.append("timestamp", new Date().toISOString());
-    if (input.imageFile) {
-      formData.append("image", input.imageFile);
-    }
-
-    const response = await fetch(`/api/personas/${personaId}/live/perception`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(payload.error ?? "Unable to process visual context.");
-    }
-
-    const payload = (await response.json()) as LivePerceptionResponse;
-    if (payload.sessionFrame) {
-      setPendingSessionFrame(payload.sessionFrame);
-    }
-  }
-
-  async function requestVisualStream(mode: Extract<LiveSessionMode, "screen" | "camera">) {
-    if (mode === "screen") {
-      return navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
-    }
-
-    return navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: "user",
-      },
-      audio: false,
-    });
-  }
-
-  async function captureAndSendFrame(
-    mode: Extract<LiveSessionMode, "screen" | "camera">,
-    stream: MediaStream,
-    sessionIdentifier?: string,
-  ) {
-    if (captureInFlightRef.current) {
-      return;
-    }
-
-    const video = hiddenVideoRef.current;
-    if (!video || stream !== visualStreamRef.current) {
-      return;
-    }
-
-    if (video.videoWidth === 0 || video.videoHeight === 0) {
-      return;
-    }
-
-    captureInFlightRef.current = true;
-
-    try {
-      const canvas = document.createElement("canvas");
-      const scale = Math.min(960 / video.videoWidth, 1);
-      canvas.width = Math.max(320, Math.round(video.videoWidth * scale));
-      canvas.height = Math.max(180, Math.round(video.videoHeight * scale));
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        return;
-      }
-
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, "image/jpeg", 0.72);
-      });
-
-      if (!blob) {
-        return;
-      }
-
-      const imageFile = new File([blob], `${mode}-${Date.now()}.jpg`, {
-        type: "image/jpeg",
-      });
-
-      await postVisualPerception({
-        mode,
-        event: "frame",
-        sessionIdentifier,
-        imageFile,
-      });
-    } catch (error) {
-      setVisualError(resolveErrorMessage(error));
-    } finally {
-      captureInFlightRef.current = false;
-    }
-  }
-
-  async function activateVisualSharing(
-    mode: Extract<LiveSessionMode, "screen" | "camera">,
-    stream: MediaStream,
-    sessionIdentifier?: string,
-  ) {
-    if (captureIntervalRef.current) {
-      clearInterval(captureIntervalRef.current);
-      captureIntervalRef.current = null;
-    }
-
-    visualStreamRef.current?.getTracks().forEach((track) => track.stop());
-    visualStreamRef.current = stream;
-
-    const video = hiddenVideoRef.current;
-    if (video) {
-      video.srcObject = stream;
-      await video.play().catch(() => undefined);
-    }
-
-    const primaryTrack = stream.getVideoTracks()[0];
-    if (primaryTrack) {
-      primaryTrack.onended = () => {
-        setVisualError(
-          mode === "screen" ? "Screen sharing ended." : "Camera sharing ended.",
-        );
-        void stopVisualSharing();
-      };
-    }
-
-    setActiveMode(mode);
-    setActiveVisualMode(mode);
-    setVisualError(null);
-
-    const optimisticContext = optimisticVisualContextText(sessionContextText, mode, true);
-    sendSessionSettings({
-      context: {
-        text: optimisticContext,
-        type: "persistent",
-      },
-      variables: {
-        soul_visual_active: true,
-        soul_visual_mode: mode,
-      },
-    });
-    setSessionContextText(optimisticContext);
-
-    try {
-      await postVisualPerception({
-        mode,
-        event: "start",
-        sessionIdentifier,
-      });
-      await captureAndSendFrame(mode, stream, sessionIdentifier);
-    } catch (error) {
-      setVisualError(resolveErrorMessage(error));
-    }
-
-    captureIntervalRef.current = setInterval(() => {
-      void captureAndSendFrame(mode, stream, sessionIdentifier);
-    }, 12000);
-  }
-
-  async function stopVisualSharing(silent = false) {
-    const currentMode = activeVisualMode;
-
-    if (captureIntervalRef.current) {
-      clearInterval(captureIntervalRef.current);
-      captureIntervalRef.current = null;
-    }
-
-    if (currentMode && sessionId && !silent) {
-      try {
-        await postVisualPerception({
-          mode: currentMode,
-          event: "end",
-        });
-      } catch {
-        // Keep the voice session alive even if the perception loop fails.
-      }
-    }
-
-    visualStreamRef.current?.getTracks().forEach((track) => track.stop());
-    visualStreamRef.current = null;
-    if (hiddenVideoRef.current) {
-      hiddenVideoRef.current.srcObject = null;
-    }
-
-    if (currentMode && status.value === "connected") {
-      const optimisticContext = optimisticVisualContextText(sessionContextText, currentMode, false);
-      sendSessionSettings({
-        context: {
-          text: optimisticContext,
-          type: "persistent",
-        },
-        variables: {
-          soul_visual_active: false,
-          soul_visual_mode: "none",
-        },
-      });
-      setSessionContextText(optimisticContext);
-    }
-
-    setActiveVisualMode(null);
-    setActiveMode("voice");
-  }
-
-  async function startLiveSession(mode: LiveSessionMode) {
-    if (isLocked || liveConnected || liveConnecting) {
-      return;
-    }
-
-    setLiveError(null);
-    setVisualError(null);
-    setIsPreparingLive(true);
-    setLiveState("thinking");
-    userEndedLiveRef.current = false;
-    resetLiveSessionArtifacts();
-
-    let preparedVisualStream: MediaStream | null = null;
-
-    try {
-      if (mode !== "voice") {
-        try {
-          preparedVisualStream = await requestVisualStream(mode);
-        } catch (error) {
-          setVisualError(resolveErrorMessage(error));
-        }
-      }
-
-      const response = await fetch(`/api/personas/${personaId}/live`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mode,
-        }),
-      });
-      const payload = (await response.json()) as LiveSessionResponse | { error?: string };
-
-      if (!response.ok) {
-        throw new Error("error" in payload ? payload.error : "Unable to start live conversation.");
-      }
-
-      const session = payload as LiveSessionResponse;
-      setActiveMode(preparedVisualStream && session.mode !== "voice" ? session.mode : "voice");
-      setSessionId(session.sessionSettings.customSessionId);
-      setSessionContextText(session.sessionSettings.context?.text ?? "");
-      setSessionContextVersion(session.soulFrame.liveDeliveryVersion);
-
-      // Connect with only auth — full session settings are too large
-      // for WebSocket URL query parameters (~5KB+ of context). Send
-      // them as the first WebSocket message instead.
-      await connect({
-        auth: {
-          type: "accessToken",
-          value: session.accessToken,
-        },
-        hostname: session.hostname,
-        verboseTranscription: false,
-      });
-
-      // Bootstrap the session with full settings including systemPrompt
-      // and voiceId. Mid-call updates will omit these (Hume preserves them).
-      sendSessionSettings({
-        ...session.sessionSettings,
-      });
-
-      if (preparedVisualStream && session.mode !== "voice") {
-        await activateVisualSharing(
-          session.mode,
-          preparedVisualStream,
-          session.sessionSettings.customSessionId,
-        );
-      }
-    } catch (error) {
-      preparedVisualStream?.getTracks().forEach((track) => track.stop());
-      setSessionContextText("");
-      setSessionContextVersion(0);
-      setSessionId(null);
-      setActiveMode("voice");
-      setLiveError(resolveErrorMessage(error));
-      setLiveState("idle");
-    } finally {
-      setIsPreparingLive(false);
-    }
-  }
-
-  async function endLiveSession() {
-    setLiveError(null);
-    userEndedLiveRef.current = true;
-    await stopVisualSharing(true);
-    if (sessionId) {
-      await fetch(`/api/personas/${personaId}/live/end`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sessionId,
-          mode: activeMode,
-          reason: "user_end",
-        }),
-      }).catch(() => undefined);
-    }
-    await disconnect().catch((error) => {
-      userEndedLiveRef.current = false;
-      setLiveError(resolveErrorMessage(error));
-    });
-    setSessionContextText("");
-    setSessionContextVersion(0);
-    setPendingSessionFrame(null);
-    setSessionId(null);
-    setLiveState("idle");
-  }
-
-  async function switchMode(nextMode: LiveSessionMode) {
-    if (isLocked || liveConnecting) {
-      return;
-    }
-
-    if (
-      liveConnected &&
-      ((nextMode === "voice" && !activeVisualMode) || activeVisualMode === nextMode)
-    ) {
-      return;
-    }
-
-    if (!liveConnected) {
-      await startLiveSession(nextMode);
-      return;
-    }
-
-    if (nextMode === "voice") {
-      setVisualError(null);
-      await stopVisualSharing();
-      return;
-    }
-
-    try {
-      const stream = await requestVisualStream(nextMode);
-      await stopVisualSharing();
-      await activateVisualSharing(nextMode, stream);
-    } catch (error) {
-      setVisualError(resolveErrorMessage(error));
-    }
-  }
-
-  const callIssue = liveError || visualError;
+  const { activeMode, activeVisualMode, isLocked, liveState, personaName } = props;
 
   return (
     <section className="paper-panel mx-auto max-w-3xl rounded-[42px] px-4 py-4 sm:px-6 sm:py-6">
@@ -1033,7 +379,9 @@ function ConversationPanelInner({
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             {(["voice", "screen", "camera"] as const).map((mode) => {
-              const active = activeMode === mode && (mode === "voice" ? !activeVisualMode : activeVisualMode === mode);
+              const active =
+                activeMode === mode &&
+                (mode === "voice" ? !activeVisualMode : activeVisualMode === mode);
               const Icon = mode === "voice" ? Mic : mode === "screen" ? MonitorUp : Camera;
 
               return (
@@ -1077,6 +425,13 @@ function ConversationPanelInner({
           <button
             type="button"
             disabled={isLocked || liveConnecting}
+            aria-label={
+              liveConnecting
+                ? "Connecting live session"
+                : liveConnected
+                  ? "End live session"
+                  : `Start ${modeLabel(activeMode)} live session`
+            }
             onClick={() => {
               if (liveConnected) {
                 void endLiveSession();
