@@ -457,7 +457,7 @@ export function planConversationSoul(input: {
   messages: MessageEntry[];
   feedbackNotes: string[];
   latestUserText: string;
-  channel: "web" | "telegram";
+  channel: "web";
   voiceNote?: boolean;
 }): SoulConversationPlan {
   const process =
@@ -728,7 +728,7 @@ export function planFastTurnResponse(input: {
   messages: MessageEntry[];
   feedbackNotes: string[];
   latestUserText: string;
-  channel: "web" | "telegram";
+  channel: "web";
   visualContext?: Array<{
     summary: string;
     situationalSignals: string[];
@@ -873,7 +873,7 @@ export function planInternalMonologue(input: {
   messages: MessageEntry[];
   feedbackNotes: string[];
   latestUserText: string;
-  channel: "web" | "telegram" | "live";
+  channel: "web" | "live";
 }): SoulInternalMonologuePlan {
   const memories = baseMemories(input.persona, input.messages, input.feedbackNotes);
   const internalState = input.persona.mindState.internalState;

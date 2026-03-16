@@ -173,8 +173,6 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
     updatedAt: now,
     lastActiveAt: undefined,
     lastHeartbeatAt: undefined,
-    telegramChatId: undefined,
-    telegramUsername: undefined,
     pastedText,
     screenshotSummaries: assemblyInput.screenshotSummaries,
     interviewAnswers,
@@ -286,7 +284,6 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
       replyMode: "text",
       delivery: {
         webInbox: true,
-        telegramStatus: "not_requested",
         attempts: 0,
       },
     }),

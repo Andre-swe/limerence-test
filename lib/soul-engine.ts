@@ -38,7 +38,7 @@ import type {
 } from "@/lib/types";
 import { truncate } from "@/lib/utils";
 
-type ReplyChannel = "web" | "telegram";
+type ReplyChannel = "web";
 
 type ReasoningAdapter = {
   respondToUserTurn(input: {
@@ -1024,7 +1024,7 @@ function modelName() {
 /**
  * Execute a compressed single-pass cognitive turn for fast message replies.
  * Collapses appraise → select → deliberate → render into one Gemini call.
- * Used for channels where latency matters more than depth (e.g. Telegram).
+ * Used for fast message replies where latency matters more than depth.
  * For web messages, prefer executeSoulTurn which runs the full pipeline.
  */
 export async function executeFastMessageTurn(

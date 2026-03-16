@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { flushPendingTelegramMessages, runDueHeartbeats } from "@/lib/services";
+import { runDueHeartbeats } from "@/lib/services";
 
 export const runtime = "nodejs";
 
-/** Cron-style endpoint that runs all due persona heartbeats and flushes any pending Telegram outbound messages. */
+/** Cron-style endpoint that runs all due persona heartbeats. */
 export async function POST(request: Request) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
@@ -17,11 +17,9 @@ export async function POST(request: Request) {
 
   try {
     const results = await runDueHeartbeats();
-    const telegram = await flushPendingTelegramMessages();
 
     return NextResponse.json({
       results,
-      telegram,
     });
   } catch (error) {
     return NextResponse.json(

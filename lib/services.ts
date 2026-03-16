@@ -2,18 +2,14 @@ import { randomUUID } from "node:crypto";
 import {
   appendMessages,
   appendPerceptionObservations,
-  bindTelegramChat,
   claimPersonaShadowTurn,
   claimPersonaShadowTurnById,
   enqueuePersonaShadowTurn,
-  findPersonaByTelegramChat,
   getPersona,
-  hasProcessedTelegramUpdate,
   listFeedback,
   listMessages,
   listPerceptionObservations,
   listPersonas,
-  markTelegramUpdateProcessed,
   replacePersonaIfRevision,
   updateMessage,
   updatePersona,
@@ -49,11 +45,6 @@ import {
 } from "@/lib/debug-observability";
 import { createMessage, persistMessageAttachment } from "@/lib/services/assets";
 import { soulLogger } from "@/lib/soul-logger";
-import { flushPendingTelegramMessages, sendTelegramText } from "@/lib/services/telegram";
-import {
-  isTelegramBindCodeValid,
-  parseTelegramBindCommand,
-} from "@/lib/telegram-bind";
 import {
   type ConversationChannel,
   type LiveSessionMode,
@@ -81,8 +72,6 @@ import {
 export { createPersonaFromForm } from "@/lib/services/persona";
 export { synthesizeStoredReply } from "@/lib/services/messaging";
 export { addPersonaFeedback } from "@/lib/services/feedback";
-export { flushPendingTelegramMessages } from "@/lib/services/telegram";
-
 type PreferenceUpdate = {
   kind: "avoid_work_hours" | "prefer_text" | "prefer_voice" | "less_often" | "more_often" | "schedule_awakening" | "cancel_awakening";
   interpretation: string;
@@ -999,7 +988,7 @@ async function runVersionedSoulTurn(input: {
   throw new Error("Unable to commit soul turn after revision retries.");
 }
 
-// Retained for channels where latency matters more than depth (e.g. Telegram).
+// Retained for fast message replies where latency matters more than depth.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function runVersionedFastMessageTurn(input: {
   personaId: string;
@@ -2357,7 +2346,6 @@ async function executeAwakeningOccurrence(
     audioStatus: "unavailable",
     delivery: {
       webInbox: true,
-      telegramStatus: persona.telegramChatId ? "pending" : "not_requested",
       attempts: 0,
     },
   });
@@ -2586,7 +2574,6 @@ export async function sendPersonaMessage(
     createdAt: userMessageCreatedAt,
     delivery: {
       webInbox: true,
-      telegramStatus: "not_requested",
       attempts: 0,
     },
   });
@@ -2696,7 +2683,7 @@ export async function sendPersonaMessage(
     messages: await listMessages(personaId),
     feedbackNotes,
     latestUserText: userText,
-    channel: (payload.channel ?? "web") as "web" | "telegram" | "live",
+    channel: (payload.channel ?? "web") as "web" | "live",
   });
   const monologue = await providers.reasoning.generateInternalMonologue(
     renderInternalMonologuePrompt(monologuePlan),
@@ -2741,7 +2728,7 @@ export async function sendPersonaMessage(
       perception,
       latestUserText: userText,
       reasoning: providers.reasoning,
-      replyChannel: payload.channel === "telegram" ? "telegram" : "web",
+      replyChannel: "web",
       renderReply: !preferenceUpdate && !leaveOnRead,
       replyAsVoiceNote: monologue.replyFormat === "voice_note",
       boundaryTriggered: Boolean(preferenceUpdate),
@@ -2788,7 +2775,6 @@ export async function sendPersonaMessage(
   // The monologue decides the reply format — text or voice note.
   // The persona reasons about this based on mood, energy, and context.
   const shouldReplyWithVoiceNote =
-    payload.channel === "telegram" ||
     Boolean(audioAttachment) ||
     (monologue.replyFormat === "voice_note" &&
       activePersona.voice.provider === "hume" &&
@@ -2822,8 +2808,6 @@ export async function sendPersonaMessage(
     replyMode: synthesized.audioUrl ? "voice_note" : "text",
     delivery: {
       webInbox: true,
-      telegramStatus:
-        payload.channel === "telegram" || activePersona.telegramChatId ? "pending" : "not_requested",
       attempts: 0,
     },
   });
@@ -3152,7 +3136,6 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     replyMode: isAssistant ? "voice_note" : undefined,
     delivery: {
       webInbox: true,
-      telegramStatus: "not_requested",
       attempts: 0,
     },
   });
@@ -3778,7 +3761,6 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
       replyMode: decision.action === "VOICE_NOTE" ? "voice_note" : "text",
       delivery: {
         webInbox: true,
-        telegramStatus: activePersona.telegramChatId ? "pending" : "not_requested",
         attempts: 0,
       },
     });
@@ -3842,77 +3824,3 @@ export async function runDueHeartbeats() {
   return results;
 }
 
-type TelegramUpdate = {
-  update_id: number;
-  message?: {
-    message_id: number;
-    text?: string;
-    voice?: { file_id: string };
-    chat: { id: number; username?: string };
-  };
-};
-
-export async function processTelegramWebhook(update: TelegramUpdate) {
-  const updateId = String(update.update_id);
-
-  if (await hasProcessedTelegramUpdate(updateId)) {
-    return {
-      duplicate: true,
-      handled: false,
-    };
-  }
-
-  await markTelegramUpdateProcessed(updateId);
-
-  const message = update.message;
-  if (!message) {
-    return {
-      duplicate: false,
-      handled: false,
-    };
-  }
-
-  const text = message.text?.trim();
-  const bindRequest = text ? parseTelegramBindCommand(text) : null;
-  if (bindRequest) {
-    const persona = await getPersona(bindRequest.personaId);
-
-    if (!persona) {
-      await sendTelegramText(message.chat.id, "Persona not found. Use an existing persona id.");
-      return { duplicate: false, handled: true };
-    }
-
-    if (!bindRequest.code || !isTelegramBindCodeValid(persona, bindRequest.code)) {
-      await sendTelegramText(
-        message.chat.id,
-        `Unauthorized bind request. Use the secure command from ${persona.name}'s Messages page.`,
-      );
-      return { duplicate: false, handled: true };
-    }
-
-    await bindTelegramChat(persona.id, message.chat.id, message.chat.username);
-    await sendTelegramText(message.chat.id, `Bound this chat to ${persona.name}.`);
-    return { duplicate: false, handled: true };
-  }
-
-  const boundPersona = await findPersonaByTelegramChat(message.chat.id);
-  if (!boundPersona) {
-    await sendTelegramText(
-      message.chat.id,
-      "No persona is bound to this chat yet. Use the secure /bind command from the persona's Messages page.",
-    );
-    return { duplicate: false, handled: true };
-  }
-
-  await sendPersonaMessage(boundPersona.id, {
-    text: text || (message.voice ? "Voice note received on Telegram." : ""),
-    channel: "telegram",
-  });
-
-  await flushPendingTelegramMessages();
-
-  return {
-    duplicate: false,
-    handled: true,
-  };
-}

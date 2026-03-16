@@ -132,7 +132,7 @@ type ReplyRequest = {
   messages: MessageEntry[];
   latestUserText: string;
   feedbackNotes: string[];
-  channel: "web" | "telegram";
+  channel: "web";
   /** When true, write for speaking aloud — shorter, more conversational, no visual formatting. */
   voiceNote?: boolean;
 };
@@ -165,7 +165,7 @@ type FastTurnRequest = {
   messages: MessageEntry[];
   latestUserText: string;
   feedbackNotes: string[];
-  channel: "web" | "telegram";
+  channel: "web";
   createdAt?: string;
   visualContext?: Array<{
     summary: string;
