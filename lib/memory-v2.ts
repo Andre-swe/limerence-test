@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type {
+  AwakeningSchedule,
   ClaimSource,
   EpisodeRecord,
   FeedbackEvent,
+  InternalScheduledEvent,
   LearningArtifact,
   MemoryClaim,
   MemoryClaimKind,
@@ -470,12 +472,37 @@ export function applyLearningArtifactsToMemoryClaims(input: {
           excerpt: input.latestUserText || artifact.summary,
           tags: ["open_loop", ...tokenize(artifact.summary).slice(0, 4)],
         };
+      case "schedule_awakening": {
+        const awakeningSchedule = inferAwakeningScheduleFromText(
+          `${artifact.summary} ${artifact.effectSummary ?? ""}`,
+        );
+        if (!awakeningSchedule) return null;
+        return {
+          kind: "ritual",
+          summary: artifact.summary,
+          detail: artifact.effectSummary,
+          status: "confirmed" as MemoryClaimStatus,
+          confidence: 0.82,
+          importance: 0.8,
+          sourceIds: [artifact.sourcePerceptionId, artifact.sourceMessageId, ...artifact.memoryKeys].filter(
+            Boolean,
+          ) as string[],
+          createdAt: artifact.createdAt,
+          sourceMessageId: artifact.sourceMessageId,
+          sessionId: input.perceptionSessionId,
+          sourceType: "inference" as const,
+          excerpt: artifact.summary,
+          tags: ["awakening", awakeningSchedule.awakeningKind, ...tokenize(artifact.summary).slice(0, 4)],
+        };
+      }
       case "learn_about_self_consistency":
       case "consolidate_episode":
       default:
         return null;
     }
   };
+
+  const pendingAwakeningEvents: InternalScheduledEvent[] = [];
 
   for (const artifact of input.artifacts) {
     const candidate = claimCandidateForArtifact(artifact);
@@ -484,6 +511,33 @@ export function applyLearningArtifactsToMemoryClaims(input: {
       claims = write.claims;
       claimSources = write.sources;
       changedResults.push(write.result);
+
+      // For schedule_awakening artifacts, attach the awakeningSchedule and materialize event
+      if (artifact.kind === "schedule_awakening") {
+        const awakeningSchedule = inferAwakeningScheduleFromText(
+          `${artifact.summary} ${artifact.effectSummary ?? ""}`,
+        );
+        if (awakeningSchedule) {
+          const claimId = write.result.claim.id;
+          claims = claims.map((c) =>
+            c.id === claimId
+              ? {
+                  ...c,
+                  kind: "ritual" as const,
+                  awakeningSchedule: awakeningSchedule,
+                  tags: [...new Set([...c.tags, "awakening", awakeningSchedule.awakeningKind, "scheduled"])],
+                }
+              : c,
+          );
+          const updatedClaim = claims.find((c) => c.id === claimId)!;
+          const timezone = input.persona.timezone
+            ? input.persona.timezone
+            : "UTC";
+          pendingAwakeningEvents.push(
+            buildAwakeningInternalEvent(updatedClaim, timezone, new Date()),
+          );
+        }
+      }
     }
 
     if (artifact.kind === "consolidate_episode") {
@@ -520,6 +574,7 @@ export function applyLearningArtifactsToMemoryClaims(input: {
     episodes: episodes.slice(0, MAX_EPISODES),
     changedClaims,
     writeResults: changedResults,
+    pendingAwakeningEvents,
   };
 }
 
@@ -991,3 +1046,475 @@ export function renderClaimForContext(claim: MemoryClaim) {
 export function renderEpisodeForContext(episode: EpisodeRecord) {
   return `- ${truncate(episode.summary, 180)}${episode.keyPhrases.length > 0 ? ` Key phrases: ${episode.keyPhrases.slice(0, 4).join(", ")}.` : ""}`;
 }
+
+// ---------------------------------------------------------------------------
+// Ritual schedule inference — extract scheduling intent from natural language.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Timezone-aware date helpers.
+// ---------------------------------------------------------------------------
+
+function getLocalWeekday(date: Date, timezone: string): number {
+  const dayStr = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "long",
+  }).format(date);
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return days.indexOf(dayStr);
+}
+
+function getLocalDateParts(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
+}
+
+/**
+ * Compute the timezone offset in ms for a given instant and timezone.
+ * Recomputed per-date so DST transitions are handled correctly.
+ */
+function tzOffsetMs(date: Date, timezone: string): number {
+  const local = getLocalDateParts(date, timezone);
+  const utc = getLocalDateParts(date, "UTC");
+  const localMs = Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute);
+  const utcMs = Date.UTC(utc.year, utc.month - 1, utc.day, utc.hour, utc.minute);
+  return localMs - utcMs;
+}
+
+/**
+ * Convert a local-timezone (year, month, day, hour, minute) to a UTC
+ * timestamp, recomputing the DST offset for that specific date.
+ */
+function localToUtcMs(
+  year: number, month: number, day: number,
+  hour: number, minute: number,
+  timezone: string,
+): number {
+  // Build a rough UTC estimate, then compute the offset AT that instant
+  const roughUtcMs = Date.UTC(year, month - 1, day, hour, minute);
+  const offset = tzOffsetMs(new Date(roughUtcMs), timezone);
+  return roughUtcMs - offset;
+}
+
+/**
+ * Compute the UTC readyAt for the next awakening occurrence.
+ * Uses the persona's timezone for local-hour targeting and applies
+ * bell-curve jitter (triangular distribution).
+ *
+ * DST-safe: the offset is recomputed for the candidate date, not the
+ * current instant, so spring-forward / fall-back transitions are handled.
+ *
+ * For "once" recurrence, returns the exact target time without recurrence
+ * loop — fires once at the specified hour.
+ */
+export function computeNextAwakeningReadyAt(input: {
+  targetHour: number;
+  jitterMinutes: number;
+  recurrence: "daily" | "weekdays" | "weekends" | "once";
+  timezone: string;
+  now: Date;
+}): string {
+  // Triangular jitter: sum of 2 uniforms gives bell-curve bias toward center
+  const u1 = Math.random();
+  const u2 = Math.random();
+  const jitterFraction = (u1 + u2) / 2 - 0.5; // range -0.5 to 0.5, biased toward 0
+  const jitterMs = Math.round(jitterFraction * 2 * input.jitterMinutes * 60_000);
+
+  // Get user's current local date
+  const local = getLocalDateParts(input.now, input.timezone);
+
+  // Build today's target in UTC (DST-safe: offset computed for the target date)
+  let candidateMs = localToUtcMs(
+    local.year, local.month, local.day,
+    input.targetHour, 0, input.timezone,
+  ) + jitterMs;
+
+  // If already past, advance to tomorrow
+  if (candidateMs <= input.now.getTime()) {
+    // Recompute for tomorrow to get the correct DST offset
+    const tomorrow = new Date(input.now.getTime() + 86_400_000);
+    const tomorrowLocal = getLocalDateParts(tomorrow, input.timezone);
+    candidateMs = localToUtcMs(
+      tomorrowLocal.year, tomorrowLocal.month, tomorrowLocal.day,
+      input.targetHour, 0, input.timezone,
+    ) + jitterMs;
+  }
+
+  // Advance to match recurrence (up to 7 days), recomputing offset each day
+  for (let i = 0; i < 7; i++) {
+    const candidate = new Date(candidateMs);
+    const weekday = getLocalWeekday(candidate, input.timezone);
+    const isWeekend = weekday === 0 || weekday === 6;
+
+    if (input.recurrence === "once" || input.recurrence === "daily") break;
+    if (input.recurrence === "weekdays" && !isWeekend) break;
+    if (input.recurrence === "weekends" && isWeekend) break;
+
+    // Advance one day and recompute with correct DST offset
+    const nextDay = new Date(candidateMs + 86_400_000);
+    const nextLocal = getLocalDateParts(nextDay, input.timezone);
+    candidateMs = localToUtcMs(
+      nextLocal.year, nextLocal.month, nextLocal.day,
+      input.targetHour, 0, input.timezone,
+    ) + jitterMs;
+  }
+
+  return new Date(candidateMs).toISOString();
+}
+
+
+/**
+ * Build an InternalScheduledEvent for the next awakening occurrence.
+ * The event fires through the normal internal-event pipeline and carries
+ * the awakeningClaimId in perception.metadata for clean attribution.
+ */
+export function buildAwakeningInternalEvent(
+  claim: MemoryClaim,
+  timezone: string,
+  now: Date,
+): InternalScheduledEvent {
+  const schedule = claim.awakeningSchedule!;
+  const readyAt = computeNextAwakeningReadyAt({
+    targetHour: schedule.targetHour,
+    jitterMinutes: schedule.jitterMinutes,
+    recurrence: schedule.recurrence,
+    timezone,
+    now,
+  });
+
+  const eventId = `awakening_${claim.id}_${readyAt.slice(0, 10)}`;
+  return {
+    id: eventId,
+    dedupeKey: `awakening:${claim.id}`,
+    readyAt,
+    origin: "awakening",
+    status: "pending",
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    perception: {
+      id: `awakening-perception_${eventId}`,
+      kind: "scheduled_followup_ready",
+      channel: "heartbeat",
+      modality: "text",
+      content: schedule.sourceUtterance,
+      createdAt: readyAt,
+      internal: true,
+      metadata: {
+        awakeningClaimId: claim.id,
+        awakeningKind: schedule.awakeningKind,
+        sourceUtterance: schedule.sourceUtterance,
+        reason: schedule.reason,
+      },
+    },
+  };
+}
+
+
+/**
+ * Deactivate awakening claims that match the cancellation text.
+ * Matches by keyword overlap between cancellation text and the awakening's
+ * sourceUtterance/summary, rather than deactivating all awakenings.
+ */
+export function deactivateMatchingAwakeningClaims(
+  claims: MemoryClaim[],
+  cancellationText: string,
+  now: string,
+): { claims: MemoryClaim[]; deactivatedIds: string[] } {
+  const cancelTokens = new Set(
+    cancellationText
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length > 2),
+  );
+
+  // Time-of-day keywords map to target hours for matching
+  const hourKeywords: Record<string, [number, number]> = {
+    morning: [6, 10],
+    goodnight: [20, 23],
+    bedtime: [20, 23],
+    evening: [17, 21],
+    lunch: [11, 13],
+    weekend: [-1, -1], // special: match recurrence
+  };
+
+  const deactivatedIds: string[] = [];
+
+  const updated = claims.map((claim) => {
+    if (claim.kind !== "ritual" || !claim.awakeningSchedule?.active) return claim;
+    if (claim.status === "contradicted" || claim.status === "stale") return claim;
+
+    const schedule = claim.awakeningSchedule;
+    let matches = false;
+
+    // Check keyword overlap with sourceUtterance/summary
+    const awakeningText = `${schedule.sourceUtterance} ${claim.summary}`.toLowerCase();
+    const awakeningTokens = awakeningText.split(/\s+/).filter((t) => t.length > 2);
+    const tokenOverlap = awakeningTokens.filter((t) => cancelTokens.has(t)).length;
+    if (tokenOverlap >= 2) matches = true;
+
+    // Check time-of-day keywords against targetHour
+    for (const [keyword, [minHour, maxHour]] of Object.entries(hourKeywords)) {
+      if (!cancelTokens.has(keyword)) continue;
+      if (keyword === "weekend" && schedule.recurrence === "weekends") {
+        matches = true;
+        break;
+      }
+      if (minHour >= 0 && schedule.targetHour >= minHour && schedule.targetHour <= maxHour) {
+        matches = true;
+        break;
+      }
+    }
+
+    if (!matches) return claim;
+
+    deactivatedIds.push(claim.id);
+    return {
+      ...claim,
+      awakeningSchedule: { ...schedule, active: false },
+      status: "stale" as const,
+      lastObservedAt: now,
+    };
+  });
+
+  return { claims: updated, deactivatedIds };
+}
+
+
+/** Extract an AwakeningSchedule from a natural-language scheduling utterance. */
+export function inferAwakeningScheduleFromText(
+  text: string,
+): AwakeningSchedule | null {
+  const lower = text.toLowerCase();
+
+  // --- Recurring ritual patterns ---
+
+  // Morning patterns
+  if (/(good morning|morning text|wake.?up text|morning message)/i.test(lower)) {
+    return {
+      recurrence: "daily",
+      targetHour: 8,
+      jitterMinutes: 45,
+      reason: "User likes good morning texts",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "ritual",
+    };
+  }
+
+  // Goodnight / bedtime patterns
+  if (/(good\s?night|bedtime|before.*(bed|sleep)|night.?time text)/i.test(lower)) {
+    return {
+      recurrence: "daily",
+      targetHour: 22,
+      jitterMinutes: 30,
+      reason: "User likes goodnight texts",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "ritual",
+    };
+  }
+
+  // After-work patterns
+  if (/(after work|end of.*(work|day)|evening check|when.*(done|off) work)/i.test(lower)) {
+    return {
+      recurrence: "weekdays",
+      targetHour: 18,
+      jitterMinutes: 60,
+      reason: "User wants check-ins after work",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "ritual",
+    };
+  }
+
+  // Lunch / midday patterns
+  if (/(lunch|midday|middle of the day|noon)/i.test(lower)) {
+    return {
+      recurrence: "daily",
+      targetHour: 12,
+      jitterMinutes: 30,
+      reason: "User wants midday check-ins",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "ritual",
+    };
+  }
+
+  // Weekend patterns
+  if (/(weekend|saturday|sunday)/i.test(lower) && /(check|text|message|reach)/i.test(lower)) {
+    return {
+      recurrence: "weekends",
+      targetHour: 10,
+      jitterMinutes: 60,
+      reason: "User wants weekend check-ins",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "ritual",
+    };
+  }
+
+  // --- One-shot reminder/followup patterns ---
+
+  // "remind me ... tomorrow morning"
+  if (/\btomorrow morning\b/.test(lower)) {
+    return {
+      recurrence: "once",
+      targetHour: 9,
+      jitterMinutes: 30,
+      reason: "One-shot reminder for tomorrow morning",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "reminder",
+    };
+  }
+
+  // "remind me ... tonight" / "this evening"
+  if (/\b(tonight|this evening)\b/.test(lower)) {
+    return {
+      recurrence: "once",
+      targetHour: 21,
+      jitterMinutes: 15,
+      reason: "One-shot reminder for tonight",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "reminder",
+    };
+  }
+
+  // "remind me ... tomorrow" (generic)
+  if (/\btomorrow\b/.test(lower)) {
+    return {
+      recurrence: "once",
+      targetHour: 10,
+      jitterMinutes: 30,
+      reason: "One-shot reminder for tomorrow",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "reminder",
+    };
+  }
+
+  // "in N hours"
+  const hoursMatch = lower.match(/\bin (\d+) hours?\b/);
+  if (hoursMatch) {
+    const hours = Number(hoursMatch[1]);
+    const targetHour = (new Date().getHours() + hours) % 24;
+    return {
+      recurrence: "once",
+      targetHour,
+      jitterMinutes: 10,
+      reason: `One-shot reminder in ${hours} hour(s)`,
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "reminder",
+    };
+  }
+
+  // "this afternoon"
+  if (/\bthis afternoon\b/.test(lower)) {
+    return {
+      recurrence: "once",
+      targetHour: 15,
+      jitterMinutes: 30,
+      reason: "One-shot reminder for this afternoon",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "reminder",
+    };
+  }
+
+  // "remind me about" (generic — default to ~4 hours from now)
+  if (/\bremind me\b/.test(lower)) {
+    const targetHour = (new Date().getHours() + 4) % 24;
+    return {
+      recurrence: "once",
+      targetHour,
+      jitterMinutes: 30,
+      reason: "One-shot reminder (user requested)",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "reminder",
+    };
+  }
+
+  // Persona-initiated patterns: "think about that", "get back to you", "let me think"
+  // (must come before followup to avoid "get back to" matching as followup)
+  if (/\b(think about that|get back to you|let me think|i'll think)\b/.test(lower)) {
+    const targetHour = (new Date().getHours() + 2) % 24;
+    return {
+      recurrence: "once",
+      targetHour,
+      jitterMinutes: 30,
+      reason: "Deferred action — persona will return",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "deferred",
+    };
+  }
+
+  // Persona-initiated patterns: "check back", "follow up", "circle back"
+  if (/\b(check back|follow up|circle back)\b/.test(lower)) {
+    const targetHour = (new Date().getHours() + 4) % 24;
+    return {
+      recurrence: "once",
+      targetHour,
+      jitterMinutes: 45,
+      reason: "Self-initiated followup",
+      sourceUtterance: text,
+      active: true,
+      lastFiredAt: null,
+      fireCount: 0,
+      skipCount: 0,
+      awakeningKind: "followup",
+    };
+  }
+
+  return null;
+}
+

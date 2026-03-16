@@ -12,7 +12,9 @@ export type SoulHeartbeatProcess =
   | "protective_reach"
   | "grief_presence"
   | "celebratory_ping"
-  | "gentle_presence";
+  | "gentle_presence"
+  | "ritual_fire"
+  | "awakening_fire";
 
 export type SoulConversationPlan = {
   process: SoulConversationProcess;
@@ -491,6 +493,35 @@ export function renderMockConversationReply(plan: SoulConversationPlan, persona:
   return fallbackReplyForProcess(plan.process, persona);
 }
 
+// ---------------------------------------------------------------------------
+// Ritual scheduling — self-scheduled persona awakenings.
+// Rituals fire through the internal-event pipeline with exact readyAt
+// timestamps rather than being scanned on coarse heartbeat intervals.
+// ---------------------------------------------------------------------------
+
+/**
+ * Personality-driven reliability roll for awakening firing.
+ * Returns a probability 0-0.95 that the persona follows through.
+ *
+ * Formula: rituality * 0.35 + warmth * 0.2 + initiative * 0.15 + (1-reserve) * 0.1 + energy * 0.15
+ * Capped at 0.95 — nobody's perfect.
+ */
+export function computeAwakeningReliability(persona: Persona): number {
+  const c = persona.personalityConstitution;
+  const energy = persona.mindState.internalState.energy;
+
+  const raw =
+    c.rituality * 0.35 +
+    c.warmth * 0.2 +
+    c.initiative * 0.15 +
+    (1 - c.reserve) * 0.1 +
+    energy * 0.15;
+
+  // Never above 95% — nobody's perfect
+  return Math.min(raw, 0.95);
+}
+
+
 /** Plan a heartbeat message — routes to boundary hold, open loop follow-up, grief, celebration, or gentle presence. */
 export function planHeartbeatSoul(input: {
   persona: Persona;
@@ -805,7 +836,7 @@ export function planLearningExtraction(input: {
       `You are the memory consolidation mechanism for ${input.persona.name}.`,
       "Review the recent exchange and extract vital learning artifacts.",
       "Return ONLY a strict JSON array of objects. Each object must have:",
-      "- kind: 'learn_about_user', 'learn_about_relationship', 'learn_about_self_consistency', 'repair_from_feedback', 'consolidate_episode', or 'update_open_loops'.",
+      "- kind: one of 'learn_about_user', 'learn_about_relationship', 'learn_about_self_consistency', 'repair_from_feedback', 'consolidate_episode', 'update_open_loops', or 'schedule_awakening'. Use 'schedule_awakening' if the conversation warrants waking up later (a reminder the user asked for, something you want to follow up on, a recurring ritual to maintain, or a deferred response). For schedule_awakening, the summary should describe WHAT to do when you wake up, and the effectSummary should contain WHEN (e.g. 'tomorrow morning', 'in 2 hours', 'every morning', 'tonight').",
       "- summary: A summary of the memory or learning.",
       "- effectSummary: (optional) Any specific effect this should have later.",
       "- memoryKeys: an array of strings like 'user.notes' where this might belong."

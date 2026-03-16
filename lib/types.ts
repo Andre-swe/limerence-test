@@ -108,6 +108,7 @@ export const learningSubprocessSchema = z.enum([
   "repair_from_feedback",
   "consolidate_episode",
   "update_open_loops",
+  "schedule_awakening",
 ]);
 
 export const scalarLocalMemoryValueSchema = z.union([z.string(), z.number(), z.boolean()]);
@@ -354,6 +355,20 @@ export const memoryClaimStatusSchema = z
   .enum(["tentative", "confirmed", "contradicted", "stale"])
   .default("tentative");
 
+export const awakeningScheduleSchema = z.object({
+  recurrence: z.enum(["daily", "weekdays", "weekends", "once"]).default("daily"),
+  targetHour: z.number().min(0).max(23),
+  jitterMinutes: z.number().min(0).max(120).default(45),
+  reason: z.string(),
+  sourceUtterance: z.string(),
+  active: z.boolean().default(true),
+  lastFiredAt: z.string().nullable().default(null),
+  fireCount: z.number().int().min(0).default(0),
+  skipCount: z.number().int().min(0).default(0),
+  awakeningKind: z.enum(["ritual", "reminder", "followup", "deferred"]).default("ritual"),
+});
+
+
 export const memoryClaimSchema = z.object({
   id: z.string(),
   kind: memoryClaimKindSchema,
@@ -371,6 +386,7 @@ export const memoryClaimSchema = z.object({
   lastUsedAt: z.string().optional(),
   expiresAt: z.string().optional(),
   tags: z.array(z.string()).default([]),
+  awakeningSchedule: awakeningScheduleSchema.optional(),
 });
 
 export const claimSourceSchema = z.object({
@@ -475,7 +491,7 @@ export const internalScheduledEventSchema = z.object({
   processHint: soulProcessSchema.optional(),
   perception: soulPerceptionSchema,
   readyAt: z.string(),
-  origin: z.enum(["open_loop", "user_state", "boundary", "process", "learning", "system"]),
+  origin: z.enum(["open_loop", "user_state", "boundary", "process", "learning", "system", "ritual", "awakening"]),
   status: z.enum(["pending", "queued", "executed", "cancelled"]).default("pending"),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -789,6 +805,7 @@ export const personaSchema = z.object({
   lastActiveAt: z.string().optional(),
   lastHeartbeatAt: z.string().optional(),
   nextHeartbeatAt: z.string().optional(),
+  timezone: z.string().optional(),
   telegramChatId: z.number().optional(),
   telegramUsername: z.string().optional(),
   pastedText: z.string(),
@@ -891,6 +908,7 @@ export type MemoryRegionSnapshot = z.infer<typeof memoryRegionSnapshotSchema>;
 export type MemoryClaimKind = z.infer<typeof memoryClaimKindSchema>;
 export type MemoryClaimScope = z.infer<typeof memoryClaimScopeSchema>;
 export type MemoryClaimStatus = z.infer<typeof memoryClaimStatusSchema>;
+export type AwakeningSchedule = z.infer<typeof awakeningScheduleSchema>;
 export type MemoryClaim = z.infer<typeof memoryClaimSchema>;
 export type ClaimSource = z.infer<typeof claimSourceSchema>;
 export type EpisodeRecord = z.infer<typeof episodeRecordSchema>;

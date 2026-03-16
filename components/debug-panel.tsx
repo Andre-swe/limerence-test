@@ -3,6 +3,19 @@
 import { useEffect, useState } from "react";
 import { Bug } from "lucide-react";
 
+type AwakeningScheduleData = {
+  recurrence: string;
+  targetHour: number;
+  jitterMinutes: number;
+  reason: string;
+  sourceUtterance: string;
+  active: boolean;
+  lastFiredAt: string | null;
+  fireCount: number;
+  skipCount: number;
+  awakeningKind?: string;
+};
+
 type TraceData = {
   personaName?: string;
   activeProcess?: string;
@@ -15,8 +28,16 @@ type TraceData = {
     engagementDrive: number;
     recentThoughts: Array<{ thought: string; createdAt: string }>;
   };
-  memoryClaims?: Array<{ summary: string; status: string; kind: string }>;
+  memoryClaims?: Array<{ summary: string; status: string; kind: string; awakeningSchedule?: AwakeningScheduleData }>;
   contradictedClaims?: Array<{ summary: string }>;
+  timezone?: string;
+  settingsDiagnostics?: {
+    nextHeartbeatAt?: string;
+    nextAwakeningAt?: string;
+    pendingInternalEventCount?: number;
+    pendingShadowTurnCount?: number;
+    quietReason?: string;
+  };
 };
 
 /** Debug panel that shows the persona's internal state and recent thoughts. */
@@ -117,6 +138,101 @@ export function DebugPanel({ personaId }: { personaId: string }) {
           <p className="text-[rgba(29,38,34,0.4)]">
             Process: <span className="font-mono">{trace.activeProcess}</span>
           </p>
+          {trace.timezone || trace.settingsDiagnostics ? (
+            <div className="mt-3 rounded-lg border border-[var(--line)] p-2">
+              <p className="font-medium text-[var(--sage-deep)]">Timing</p>
+              {trace.timezone ? (
+                <p className="mt-1 text-[rgba(29,38,34,0.5)]">
+                  Timezone: <span className="font-mono">{trace.timezone}</span>
+                </p>
+              ) : null}
+              {trace.settingsDiagnostics?.quietReason ? (
+                <p className="mt-1 text-[rgba(29,38,34,0.5)]">
+                  Quiet now: {trace.settingsDiagnostics.quietReason}
+                </p>
+              ) : (
+                <p className="mt-1 text-[rgba(29,38,34,0.5)]">Quiet now: no active silence boundary</p>
+              )}
+              <div className="mt-1 grid grid-cols-2 gap-1 text-[rgba(29,38,34,0.4)]">
+                <p>
+                  Next heartbeat:{" "}
+                  <span className="font-mono">
+                    {trace.settingsDiagnostics?.nextHeartbeatAt
+                      ? new Date(trace.settingsDiagnostics.nextHeartbeatAt).toLocaleString()
+                      : "---"}
+                  </span>
+                </p>
+                <p>
+                  Next awakening:{" "}
+                  <span className="font-mono">
+                    {trace.settingsDiagnostics?.nextAwakeningAt
+                      ? new Date(trace.settingsDiagnostics.nextAwakeningAt).toLocaleString()
+                      : "---"}
+                  </span>
+                </p>
+                <p>
+                  Pending events:{" "}
+                  <span className="font-mono">
+                    {trace.settingsDiagnostics?.pendingInternalEventCount ?? 0}
+                  </span>
+                </p>
+                <p>
+                  Shadow turns:{" "}
+                  <span className="font-mono">
+                    {trace.settingsDiagnostics?.pendingShadowTurnCount ?? 0}
+                  </span>
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {(() => {
+            const awakenings = trace.memoryClaims?.filter(
+              (c) => c.kind === "ritual" && c.awakeningSchedule?.active,
+            );
+            if (!awakenings || awakenings.length === 0) return null;
+            return (
+              <div className="mt-3">
+                <p className="font-medium text-[var(--sage-deep)]">Scheduled Awakenings</p>
+                <div className="mt-1 space-y-2">
+                  {awakenings.map((r, i) => {
+                    const s = r.awakeningSchedule!;
+                    const windowStart = Math.max(0, s.targetHour * 60 - s.jitterMinutes);
+                    const windowEnd = Math.min(1439, s.targetHour * 60 + s.jitterMinutes);
+                    const fmtTime = (mins: number) =>
+                      `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, "0")}`;
+                    return (
+                      <div key={i} className="rounded-lg border border-[var(--line)] p-2">
+                        <p className="text-[rgba(29,38,34,0.7)]">{r.summary}</p>
+                        {s.awakeningKind && s.awakeningKind !== "ritual" ? (
+                          <p className="mt-0.5 text-[rgba(29,38,34,0.5)] italic">{s.awakeningKind}</p>
+                        ) : null}
+                        <div className="mt-1 grid grid-cols-2 gap-1 text-[rgba(29,38,34,0.4)]">
+                          <p>
+                            Schedule: <span className="font-mono">{s.recurrence} ~{s.targetHour}:00</span>
+                          </p>
+                          <p>
+                            Window: <span className="font-mono">{fmtTime(windowStart)}-{fmtTime(windowEnd)}</span>
+                          </p>
+                          <p>
+                            Fired: <span className="font-mono">{s.fireCount}</span>
+                          </p>
+                          <p>
+                            Skipped: <span className="font-mono">{s.skipCount}</span>
+                          </p>
+                        </div>
+                        {s.lastFiredAt ? (
+                          <p className="mt-1 text-[rgba(29,38,34,0.35)]">
+                            Last: {new Date(s.lastFiredAt).toLocaleString()}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {trace.contradictedClaims && trace.contradictedClaims.length > 0 ? (
             <div className="mt-2">

@@ -10,7 +10,7 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ personaId: string }> },
 ) {
-  const isDev = process.env.NODE_ENV === "development";
+  const isDev = process.env.NODE_ENV !== "production";
 
   if (!isDev) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
