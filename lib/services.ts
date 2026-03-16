@@ -2721,14 +2721,12 @@ export async function sendPersonaMessage(
   // The latency feels human — like being left on "delivered" then seeing typing.
   // -----------------------------------------------------------------------
   const cognitiveStartedAt = Date.now();
-  const allMessages = await listMessages(personaId);
-  const allObservations = await listPerceptionObservations(personaId);
 
   // Step 0: Internal monologue — the persona thinks privately before acting.
   // This is the OpenSouls-inspired "think before you speak" pattern.
   const monologuePlan = planInternalMonologue({
     persona: activePersona,
-    messages: allMessages,
+    messages: await listMessages(personaId),
     feedbackNotes,
     latestUserText: userText,
     channel: (payload.channel ?? "web") as "web" | "telegram" | "live",
@@ -2763,23 +2761,30 @@ export async function sendPersonaMessage(
   const leaveOnRead = !preferenceUpdate && !monologue.shouldReply;
 
   // Step 1+: Full cognitive turn — appraise → deliberate → reply → learn
-  const soulTurnResult = await executeSoulTurn({
-    persona: activePersona,
-    messages: allMessages,
-    observations: allObservations,
-    feedbackNotes,
-    perception,
-    latestUserText: userText,
-    reasoning: providers.reasoning,
-    replyChannel: payload.channel === "telegram" ? "telegram" : "web",
-    renderReply: !preferenceUpdate && !leaveOnRead,
-    replyAsVoiceNote: monologue.replyFormat === "voice_note",
-    boundaryTriggered: Boolean(preferenceUpdate),
+  const turnCommittedAt = new Date().toISOString();
+  const soulTurnExecution = await runVersionedSoulTurn({
+    personaId,
+    basePersona: activePersona,
+    updatedAt: turnCommittedAt,
+    lastActiveAt: turnCommittedAt,
+    build: async () => ({
+      messages: await listMessages(personaId),
+      observations: await listPerceptionObservations(personaId),
+      feedbackNotes,
+      perception,
+      latestUserText: userText,
+      reasoning: providers.reasoning,
+      replyChannel: payload.channel === "telegram" ? "telegram" : "web",
+      renderReply: !preferenceUpdate && !leaveOnRead,
+      replyAsVoiceNote: monologue.replyFormat === "voice_note",
+      boundaryTriggered: Boolean(preferenceUpdate),
+    }),
   });
   fastTurnMs = Date.now() - cognitiveStartedAt;
+  const soulTurnResult = soulTurnExecution.turnResult;
 
   const inferredUserState = soulTurnResult.userState ?? soulTurnResult.persona.mindState.lastUserState;
-  activePersona = soulTurnResult.persona;
+  activePersona = soulTurnExecution.persona;
   if (inferredUserState) {
     userMessage.userState = inferredUserState;
     await updateMessage(userMessage.id, (current) => ({
@@ -2788,20 +2793,7 @@ export async function sendPersonaMessage(
     }));
   }
 
-  // Commit the cognitive turn (learning applied) regardless of reply decision
-  const updatedAt = new Date().toISOString();
-
   if (leaveOnRead) {
-    // Persona read but chose not to reply — commit cognitive turn (learning still happens)
-    const updatedAt = new Date().toISOString();
-    const committed = await replacePersonaIfRevision(personaId, activePersona.revision, (current) => ({
-      ...soulTurnResult.persona,
-      updatedAt,
-      lastActiveAt: updatedAt,
-      lastHeartbeatAt: current.lastHeartbeatAt,
-    }));
-    activePersona = committed.persona;
-
     // The internal monologue thought already explains why they didn't reply
     soulLogger.debug(
       {
@@ -2872,14 +2864,6 @@ export async function sendPersonaMessage(
   const assistantAppendStartedAt = Date.now();
   await appendMessages([assistantMessage]);
   assistantAppendMs = Date.now() - assistantAppendStartedAt;
-
-  const committed = await replacePersonaIfRevision(personaId, activePersona.revision, (current) => ({
-    ...soulTurnResult.persona,
-    updatedAt,
-    lastActiveAt: updatedAt,
-    lastHeartbeatAt: current.lastHeartbeatAt,
-  }));
-  activePersona = committed.persona;
 
   const messagesWithReply = await listMessages(personaId);
 

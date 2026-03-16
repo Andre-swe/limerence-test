@@ -3,9 +3,11 @@ import {
   appendLiveTranscriptTurn,
   recordUserActivity,
   resetServiceRuntimeStateForTests,
+  sendPersonaMessage,
   runDueHeartbeats,
   runHeartbeat,
 } from "@/lib/services";
+import * as providersModule from "@/lib/providers";
 import {
   appendMessages,
   getPersona,
@@ -128,6 +130,52 @@ describe("service regressions", () => {
     const persona = await getPersona("persona-mom");
     expect(persona?.heartbeatPolicy.hourlyActivityCounts[8]).toBeGreaterThan(0);
     expect(persona?.heartbeatPolicy.hourlyActivityCounts[15]).toBe(0);
+  });
+
+  it("preserves learned state when a concurrent persona update forces a turn retry", async () => {
+    const before = await getPersona("persona-mom");
+    const actualProviders = providersModule.getProviders();
+    const extractLearningArtifacts = actualProviders.reasoning.extractLearningArtifacts.bind(
+      actualProviders.reasoning,
+    );
+    let forcedConflict = false;
+    const wrappedReasoning = Object.create(actualProviders.reasoning) as typeof actualProviders.reasoning;
+    wrappedReasoning.extractLearningArtifacts = async (
+      ...args: Parameters<typeof extractLearningArtifacts>
+    ) => {
+      if (!forcedConflict) {
+        forcedConflict = true;
+        await updatePersona("persona-mom", (persona) => ({
+          ...persona,
+          updatedAt: new Date("2026-03-16T15:00:01.000Z").toISOString(),
+        }));
+      }
+
+      return extractLearningArtifacts(...args);
+    };
+    const getProvidersSpy = vi.spyOn(providersModule, "getProviders").mockImplementation(() => ({
+      ...actualProviders,
+      reasoning: wrappedReasoning,
+    }));
+
+    try {
+      const result = await sendPersonaMessage("persona-mom", {
+        text: "i need to talk through something hard",
+        channel: "web",
+      });
+      const after = await getPersona("persona-mom");
+
+      expect(forcedConflict).toBe(true);
+      expect(result.appended).toHaveLength(2);
+      expect(after?.mindState.recentUserStates.length).toBeGreaterThan(
+        before?.mindState.recentUserStates.length ?? 0,
+      );
+      expect(after?.mindState.memoryRegions.episodicMemory.length).toBeGreaterThan(
+        before?.mindState.memoryRegions.episodicMemory.length ?? 0,
+      );
+    } finally {
+      getProvidersSpy.mockRestore();
+    }
   });
 
   it("runs only personas whose nextHeartbeatAt is due", async () => {

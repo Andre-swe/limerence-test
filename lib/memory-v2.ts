@@ -131,6 +131,35 @@ function tokenize(value: string) {
     .filter((token) => token.length > 2);
 }
 
+function stemFeedbackMatchToken(token: string) {
+  let stem = token;
+
+  if (stem.length > 5 && stem.endsWith("ing")) {
+    stem = stem.slice(0, -3);
+  } else if (stem.length > 4 && stem.endsWith("ied")) {
+    stem = `${stem.slice(0, -3)}y`;
+  } else if (stem.length > 4 && stem.endsWith("ed")) {
+    stem = stem.slice(0, -2);
+  }
+
+  if (stem.length > 4 && stem.endsWith("es")) {
+    stem = stem.slice(0, -2);
+  } else if (stem.length > 3 && stem.endsWith("s")) {
+    stem = stem.slice(0, -1);
+  }
+
+  return stem;
+}
+
+function tokenizeFeedbackMatch(value: string) {
+  return unique(
+    normalizeText(value)
+      .split(" ")
+      .map((token) => stemFeedbackMatchToken(token))
+      .filter((token) => token.length > 2),
+  );
+}
+
 function unique<T>(items: T[]) {
   return Array.from(new Set(items));
 }
@@ -593,17 +622,45 @@ export function applyFeedbackToMemoryClaims(input: {
   claimSources: ClaimSource[];
   feedback: FeedbackEvent;
 }) {
-  const noteTokens = tokenize(input.feedback.note);
+  const noteTokens = tokenizeFeedbackMatch(input.feedback.note);
   let claims = [...input.claims];
   let claimSources = [...input.claimSources];
   const changedClaims: MemoryClaim[] = [];
+  const claimIdsForMessage = new Set(
+    input.claimSources
+      .filter((source) => source.messageId === input.feedback.messageId)
+      .map((source) => source.claimId),
+  );
 
   const matchesClaim = (claim: MemoryClaim) => {
-    if (claim.sourceIds.includes(input.feedback.messageId)) {
+    if (
+      claim.sourceIds.includes(input.feedback.messageId) ||
+      claimIdsForMessage.has(claim.id)
+    ) {
       return true;
     }
-    const haystack = normalizeText([claim.summary, claim.detail ?? "", ...claim.tags].join(" "));
-    return noteTokens.filter((token) => haystack.includes(token)).length >= 2;
+
+    if (noteTokens.length < 2) {
+      return false;
+    }
+
+    const claimTokens = new Set(
+      tokenizeFeedbackMatch([claim.summary, claim.detail ?? "", ...claim.tags].join(" ")),
+    );
+    let sharedTokens = 0;
+
+    for (const token of noteTokens) {
+      if (!claimTokens.has(token)) {
+        continue;
+      }
+
+      sharedTokens += 1;
+      if (sharedTokens >= 2) {
+        return true;
+      }
+    }
+
+    return false;
   };
 
   claims = claims.map((claim) => {

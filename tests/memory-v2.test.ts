@@ -835,6 +835,69 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
       const contradicted = result.claims.find((c) => c.id === "token-match-target");
       expect(contradicted!.status).toBe("contradicted");
     });
+
+    it("does not contradict claims from substring-only overlap", () => {
+      const claim = makeClaim({
+        id: "substring-target",
+        summary: "User is starting a new role soon",
+        detail: "They start next month.",
+        status: "confirmed",
+        confidence: 0.8,
+        sourceIds: ["different-msg"],
+      });
+
+      const feedback: FeedbackEvent = {
+        id: "fb-substring",
+        personaId: "persona-1",
+        messageId: "other-msg",
+        note: "art",
+        createdAt: NOW,
+      };
+
+      const result = applyFeedbackToMemoryClaims({
+        claims: [claim],
+        claimSources: [],
+        feedback,
+      });
+
+      expect(result.claims.find((entry) => entry.id === "substring-target")?.status).toBe(
+        "confirmed",
+      );
+    });
+
+    it("contradicts claims linked through claim sources even for terse feedback", () => {
+      const claim = makeClaim({
+        id: "claim-source-target",
+        summary: "User likes being called honey.",
+        status: "confirmed",
+        confidence: 0.82,
+        sourceIds: ["unrelated-msg"],
+      });
+
+      const feedback: FeedbackEvent = {
+        id: "fb-terse",
+        personaId: "persona-1",
+        messageId: "assistant-msg-1",
+        note: "wrong",
+        createdAt: NOW,
+      };
+
+      const result = applyFeedbackToMemoryClaims({
+        claims: [claim],
+        claimSources: [
+          makeSource({
+            claimId: "claim-source-target",
+            messageId: "assistant-msg-1",
+            sourceType: "message",
+          }),
+        ],
+        feedback,
+      });
+
+      expect(result.claims.find((entry) => entry.id === "claim-source-target")?.status).toBe(
+        "contradicted",
+      );
+    });
   });
 
   describe("staleness", () => {
