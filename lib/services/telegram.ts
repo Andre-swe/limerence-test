@@ -2,7 +2,7 @@ import { getPersona, listPendingTelegramMessages, updateMessage } from "@/lib/st
 
 const TELEGRAM_DELIVERY_TIMEOUT_MS = 15_000;
 
-async function sendTelegramText(chatId: number, text: string) {
+export async function sendTelegramText(chatId: number, text: string) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
   if (!botToken) {

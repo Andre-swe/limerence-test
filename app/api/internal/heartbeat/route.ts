@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       {
         error: error instanceof Error ? error.message : "Unable to run due heartbeats.",
       },
-      { status: 400 },
+      { status: 500 },
     );
   }
 }

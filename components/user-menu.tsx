@@ -15,9 +15,16 @@ export function UserMenu({ email }: UserMenuProps) {
 
   const handleSignOut = async () => {
     setLoading(true);
-    await fetch("/api/auth/sign-out", { method: "POST" });
-    router.push("/login");
-    router.refresh();
+    try {
+      const response = await fetch("/api/auth/sign-out", { method: "POST" });
+      if (!response.ok) {
+        throw new Error("Unable to sign out.");
+      }
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

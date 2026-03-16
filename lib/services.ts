@@ -34,7 +34,7 @@ import {
 } from "@/lib/memory-v2";
 import { buildSoulHarness, renderLiveContextOverlay } from "@/lib/soul-harness";
 import { computeAwakeningReliability, planInternalMonologue, renderInternalMonologuePrompt } from "@/lib/soul-runtime";
-import { resolvePersonaTimeZone } from "@/lib/persona-schedule";
+import { getPersonaLocalHour, resolvePersonaTimeZone } from "@/lib/persona-schedule";
 import {
   buildDebugContext,
   summarizeLiveSessionMetrics,
@@ -42,7 +42,11 @@ import {
 } from "@/lib/debug-observability";
 import { createMessage, persistMessageAttachment } from "@/lib/services/assets";
 import { soulLogger } from "@/lib/soul-logger";
-import { flushPendingTelegramMessages } from "@/lib/services/telegram";
+import { flushPendingTelegramMessages, sendTelegramText } from "@/lib/services/telegram";
+import {
+  isTelegramBindCodeValid,
+  parseTelegramBindCommand,
+} from "@/lib/telegram-bind";
 import {
   type ConversationChannel,
   type LiveSessionMode,
@@ -86,7 +90,6 @@ type PreferenceUpdate = {
 const localShadowExecutionQueues = new Map<string, Promise<void>>();
 const MIN_LIVE_DELIVERY_INTERVAL_MS = 4500;
 const MAX_COMPLETED_LIVE_SESSION_METRICS = 8;
-const TELEGRAM_DELIVERY_TIMEOUT_MS = 15_000;
 
 function scheduleLocalShadowExecution(personaId: string, jobId: string) {
   const previous = localShadowExecutionQueues.get(personaId) ?? Promise.resolve();
@@ -264,9 +267,8 @@ function currentLiveDeliveryMetricReason(persona: Persona) {
  * Uses exponential decay to gradually forget old patterns.
  */
 export async function recordUserActivity(personaId: string, now: Date = new Date()) {
-  const currentHour = now.getHours();
-  
   await updatePersona(personaId, (persona) => {
+    const currentHour = getPersonaLocalHour(persona, now);
     const policy = persona.heartbeatPolicy;
     const hourlyActivity = [...(policy.hourlyActivityCounts ?? Array(24).fill(0))];
     
@@ -596,7 +598,10 @@ function detectPreferenceUpdate(persona: Persona, text: string): PreferenceUpdat
   }
 
   // Schedule awakening patterns — inferred from natural language
-  const awakeningSchedule = inferAwakeningScheduleFromText(text);
+  const awakeningSchedule = inferAwakeningScheduleFromText(text, {
+    referenceDate: new Date(),
+    timezone: persona.timezone,
+  });
   if (awakeningSchedule) {
     return {
       kind: "schedule_awakening",
@@ -674,7 +679,10 @@ async function applyPreferenceSignalIfNeeded(
 
   // Handle awakening scheduling — create via proper claim upsert + materialize event
   if (preferenceUpdate.kind === "schedule_awakening") {
-    const awakeningSchedule = inferAwakeningScheduleFromText(userText);
+    const awakeningSchedule = inferAwakeningScheduleFromText(userText, {
+      referenceDate: new Date(signal.createdAt),
+      timezone: persona.timezone,
+    });
     const updatedPersona = await updatePersona(persona.id, (current) => {
       // Build claim through proper upsert with full lifecycle support
       const boundaryWrite = applyBoundaryClaimUpdate({
@@ -2561,7 +2569,7 @@ export async function sendPersonaMessage(
   let userText = originalText;
   
   // Record user activity for circadian pattern learning
-  await recordUserActivity(personaId);
+  await recordUserActivity(personaId, new Date(requestStartedAt));
   const imageFiles = (payload.images ?? []).filter((file) => file.size > 0);
   let audioAttachment: MessageAttachment | undefined;
   let transcriptionMs = 0;
@@ -3132,13 +3140,15 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
     throw new Error("A transcript body is required.");
   }
 
-  const existingLiveMessage = (await listMessages(personaId)).find(
-    (message) =>
-      message.channel === "live" &&
-      message.role === parsed.role &&
-      message.metadata?.humeMessageId === parsed.eventId &&
-      message.metadata?.sessionId === parsed.sessionId,
-  );
+  const existingLiveMessage = parsed.eventId
+    ? (await listMessages(personaId)).find(
+        (message) =>
+          message.channel === "live" &&
+          message.role === parsed.role &&
+          message.metadata?.humeMessageId === parsed.eventId &&
+          message.metadata?.sessionId === parsed.sessionId,
+      )
+    : undefined;
 
   if (existingLiveMessage) {
     return {
@@ -3881,31 +3891,6 @@ export async function runDueHeartbeats() {
   return results;
 }
 
-async function sendTelegramText(chatId: number, text: string) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-
-  if (!botToken) {
-    return false;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TELEGRAM_DELIVERY_TIMEOUT_MS);
-
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-    }),
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timer));
-
-  return response.ok;
-}
-
 type TelegramUpdate = {
   update_id: number;
   message?: {
@@ -3937,16 +3922,24 @@ export async function processTelegramWebhook(update: TelegramUpdate) {
   }
 
   const text = message.text?.trim();
-  if (text?.startsWith("/bind ")) {
-    const personaId = text.replace("/bind ", "").trim();
-    const persona = await getPersona(personaId);
+  const bindRequest = text ? parseTelegramBindCommand(text) : null;
+  if (bindRequest) {
+    const persona = await getPersona(bindRequest.personaId);
 
     if (!persona) {
       await sendTelegramText(message.chat.id, "Persona not found. Use an existing persona id.");
       return { duplicate: false, handled: true };
     }
 
-    await bindTelegramChat(personaId, message.chat.id, message.chat.username);
+    if (!bindRequest.code || !isTelegramBindCodeValid(persona, bindRequest.code)) {
+      await sendTelegramText(
+        message.chat.id,
+        `Unauthorized bind request. Use the secure command from ${persona.name}'s Messages page.`,
+      );
+      return { duplicate: false, handled: true };
+    }
+
+    await bindTelegramChat(persona.id, message.chat.id, message.chat.username);
     await sendTelegramText(message.chat.id, `Bound this chat to ${persona.name}.`);
     return { duplicate: false, handled: true };
   }
@@ -3955,7 +3948,7 @@ export async function processTelegramWebhook(update: TelegramUpdate) {
   if (!boundPersona) {
     await sendTelegramText(
       message.chat.id,
-      "No persona is bound to this chat yet. Use /bind <persona-id> from the web app.",
+      "No persona is bound to this chat yet. Use the secure /bind command from the persona's Messages page.",
     );
     return { duplicate: false, handled: true };
   }

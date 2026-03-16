@@ -21,6 +21,7 @@ import { getReadyScheduledPerceptions } from "@/lib/soul-kernel";
 import { buildSoulHarness, buildStableSystemPrompt, renderLiveContextOverlay, renderSoulHarnessContext } from "@/lib/soul-harness";
 import { computeNextAwakeningReadyAt, inferAwakeningScheduleFromText } from "@/lib/memory-v2";
 import { planConversationSoul, renderMockConversationReply } from "@/lib/soul-runtime";
+import { buildTelegramBindCommand } from "@/lib/telegram-bind";
 import {
   addPersonaFeedback,
   appendLiveTranscriptTurn,
@@ -329,11 +330,16 @@ describe("persona workflows", () => {
   });
 
   it("handles telegram binding and avoids duplicate updates", async () => {
+    const persona = await getPersona("persona-mom");
+
     await processTelegramWebhook({
       update_id: 100,
       message: {
         message_id: 1,
-        text: "/bind persona-mom",
+        text: buildTelegramBindCommand({
+          id: "persona-mom",
+          userId: persona!.userId,
+        }),
         chat: {
           id: 4242,
           username: "demo_user",
@@ -2191,5 +2197,14 @@ describe("persona workflows", () => {
     const deferred = inferAwakeningScheduleFromText("let me think about that and get back to you");
     expect(deferred?.awakeningKind).toBe("deferred");
     expect(deferred?.recurrence).toBe("once");
+  });
+
+  it("anchors relative awakening reminders to the persona's local timezone", () => {
+    const reminder = inferAwakeningScheduleFromText("remind me in 2 hours", {
+      referenceDate: new Date("2026-03-16T15:00:00.000Z"),
+      timezone: "America/Los_Angeles",
+    });
+
+    expect(reminder?.targetHour).toBe(10);
   });
 });

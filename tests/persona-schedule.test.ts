@@ -5,6 +5,7 @@ import {
   getPersonaLocalDateKey,
   getPersonaLocalHour,
   getPersonaLocalWeekday,
+  getNextHeartbeatAt,
   isPersonaInQuietHours,
   isPersonaInWorkHours,
   isValidTimeZone,
@@ -472,5 +473,32 @@ describe("isPersonaInWorkHours", () => {
     expect(isPersonaInWorkHours(persona, new Date("2025-01-15T17:00:00Z"))).toBe(false);
     // 2025-01-15 (Wed) at 16:30 => still within
     expect(isPersonaInWorkHours(persona, new Date("2025-01-15T16:30:00Z"))).toBe(true);
+  });
+
+  it("supports overnight work windows that wrap past midnight", () => {
+    const persona = makePersona({
+      timezone: "UTC",
+      heartbeatPolicy: {
+        ...DEFAULT_HEARTBEAT,
+        workHoursEnabled: true,
+        workHoursStart: 22,
+        workHoursEnd: 6,
+      },
+    });
+
+    expect(isPersonaInWorkHours(persona, new Date("2025-01-15T23:00:00Z"))).toBe(true);
+    expect(isPersonaInWorkHours(persona, new Date("2025-01-16T05:30:00Z"))).toBe(true);
+    expect(isPersonaInWorkHours(persona, new Date("2025-01-16T12:00:00Z"))).toBe(false);
+  });
+});
+
+describe("getNextHeartbeatAt", () => {
+  it("falls back to now when lastHeartbeatAt is malformed", () => {
+    const persona = makePersona({
+      lastHeartbeatAt: "not-a-date",
+    });
+    const now = new Date("2025-01-15T12:00:00Z");
+
+    expect(getNextHeartbeatAt(persona, now)).toBe(now.toISOString());
   });
 });

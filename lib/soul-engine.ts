@@ -1385,6 +1385,7 @@ export async function executeFastMessageTurn(
       lastCoalescedLiveDeliveryVersion:
         seededPersona.mindState.lastCoalescedLiveDeliveryVersion,
       liveSessionMetrics: seededPersona.mindState.liveSessionMetrics,
+      internalState: seededPersona.mindState.internalState,
       memoryClaims: seededPersona.mindState.memoryClaims,
       claimSources: seededPersona.mindState.claimSources,
       episodes: seededPersona.mindState.episodes,
@@ -1874,15 +1875,26 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     process: preLearnPersona.mindState.activeProcess,
   });
   
-  const rawProviderArtifacts = await input.reasoning.extractLearningArtifacts({
-    persona: preLearnPersona,
-    userState: appraisedUserState,
-    perception,
-    feedbackNotes: input.feedbackNotes,
-    messages: input.messages,
-    process: preLearnPersona.mindState.activeProcess,
-    replyText,
-  });
+  let rawProviderArtifacts = fallbackLearningArtifacts;
+  try {
+    rawProviderArtifacts = await input.reasoning.extractLearningArtifacts({
+      persona: preLearnPersona,
+      userState: appraisedUserState,
+      perception,
+      feedbackNotes: input.feedbackNotes,
+      messages: input.messages,
+      process: preLearnPersona.mindState.activeProcess,
+      replyText,
+    });
+  } catch (error) {
+    soulLogger.warn(
+      {
+        personaId: input.persona.id,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      "Learning extraction failed; falling back to heuristic artifacts",
+    );
+  }
 
   if (replyText) {
     const [renderStarted, renderCompleted] = createStepLifecycleEvents({

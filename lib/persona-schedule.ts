@@ -136,12 +136,15 @@ export function isPersonaInWorkHours(persona: Persona, now: Date) {
   const policy = persona.heartbeatPolicy;
   const hour = getPersonaLocalHour(persona, now);
   const weekday = getPersonaLocalWeekday(persona, now);
+  const withinWorkWindow =
+    policy.workHoursStart > policy.workHoursEnd
+      ? hour >= policy.workHoursStart || hour < policy.workHoursEnd
+      : hour >= policy.workHoursStart && hour < policy.workHoursEnd;
 
   return (
     policy.workHoursEnabled &&
     policy.workDays.includes(weekday) &&
-    hour >= policy.workHoursStart &&
-    hour < policy.workHoursEnd
+    withinWorkWindow
   );
 }
 
@@ -197,9 +200,13 @@ export function getNextHeartbeatAt(persona: Persona, now: Date) {
     return now.toISOString();
   }
 
+  const lastHeartbeatMs = new Date(persona.lastHeartbeatAt).getTime();
+  if (!Number.isFinite(lastHeartbeatMs)) {
+    return now.toISOString();
+  }
+
   const nextMs =
-    new Date(persona.lastHeartbeatAt).getTime() +
-    calculateCircadianInterval(persona, now) * 60 * 60 * 1000;
+    lastHeartbeatMs + calculateCircadianInterval(persona, now) * 60 * 60 * 1000;
 
   return new Date(Math.max(nextMs, now.getTime())).toISOString();
 }

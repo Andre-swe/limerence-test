@@ -73,7 +73,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  if (!pathname.startsWith("/api/personas")) {
+  const needsAuthenticatedUserHeader =
+    pathname.startsWith("/api/personas") || pathname === "/api/health/store";
+
+  if (!needsAuthenticatedUserHeader) {
     return applyHeaders(response, corsHeaders);
   }
 

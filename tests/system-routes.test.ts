@@ -165,7 +165,7 @@ describe("system routes", () => {
     expect(body.telegram[0]?.messageId).toBe("msg-1");
   });
 
-  it("returns a 400 when heartbeat execution fails", async () => {
+  it("returns a 500 when heartbeat execution fails", async () => {
     runDueHeartbeatsMock.mockRejectedValueOnce(new Error("scheduler offline"));
 
     const response = await internalHeartbeatPost(
@@ -177,7 +177,7 @@ describe("system routes", () => {
       }),
     );
 
-    await expectJsonError(response, 400, "scheduler offline");
+    await expectJsonError(response, 500, "scheduler offline");
   });
 
   it("rejects Telegram webhooks with the wrong secret", async () => {

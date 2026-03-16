@@ -16,6 +16,7 @@ import type {
   MemoryRetrievalPack,
   ClaimWriteResult,
 } from "@/lib/types";
+import { getPersonaLocalHour } from "@/lib/persona-schedule";
 import { truncate } from "@/lib/utils";
 
 type ClaimCandidate = {
@@ -68,7 +69,7 @@ function clamp(value: number, min = 0, max = 1) {
 function calculateClaimWeight(claim: MemoryClaim): number {
   const now = Date.now();
   const lastObserved = new Date(claim.lastObservedAt).getTime();
-  const ageMs = now - lastObserved;
+  const ageMs = Number.isFinite(lastObserved) ? Math.max(0, now - lastObserved) : 365 * 24 * 60 * 60 * 1000;
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
   
   // Recency decay: claims lose value over time (half-life of ~30 days)
@@ -475,6 +476,10 @@ export function applyLearningArtifactsToMemoryClaims(input: {
       case "schedule_awakening": {
         const awakeningSchedule = inferAwakeningScheduleFromText(
           `${artifact.summary} ${artifact.effectSummary ?? ""}`,
+          {
+            referenceDate: new Date(artifact.createdAt),
+            timezone: input.persona.timezone,
+          },
         );
         if (!awakeningSchedule) return null;
         return {
@@ -516,6 +521,10 @@ export function applyLearningArtifactsToMemoryClaims(input: {
       if (artifact.kind === "schedule_awakening") {
         const awakeningSchedule = inferAwakeningScheduleFromText(
           `${artifact.summary} ${artifact.effectSummary ?? ""}`,
+          {
+            referenceDate: new Date(artifact.createdAt),
+            timezone: input.persona.timezone,
+          },
         );
         if (awakeningSchedule) {
           const claimId = write.result.claim.id;
@@ -1293,8 +1302,14 @@ export function deactivateMatchingAwakeningClaims(
 /** Extract an AwakeningSchedule from a natural-language scheduling utterance. */
 export function inferAwakeningScheduleFromText(
   text: string,
+  options?: {
+    referenceDate?: Date;
+    timezone?: Persona["timezone"] | string | null;
+  },
 ): AwakeningSchedule | null {
   const lower = text.toLowerCase();
+  const referenceDate = options?.referenceDate ?? new Date();
+  const referenceHour = getPersonaLocalHour(options?.timezone ?? undefined, referenceDate);
 
   // --- Recurring ritual patterns ---
 
@@ -1432,7 +1447,7 @@ export function inferAwakeningScheduleFromText(
   const hoursMatch = lower.match(/\bin (\d+) hours?\b/);
   if (hoursMatch) {
     const hours = Number(hoursMatch[1]);
-    const targetHour = (new Date().getHours() + hours) % 24;
+    const targetHour = (referenceHour + hours) % 24;
     return {
       recurrence: "once",
       targetHour,
@@ -1465,7 +1480,7 @@ export function inferAwakeningScheduleFromText(
 
   // "remind me about" (generic — default to ~4 hours from now)
   if (/\bremind me\b/.test(lower)) {
-    const targetHour = (new Date().getHours() + 4) % 24;
+    const targetHour = (referenceHour + 4) % 24;
     return {
       recurrence: "once",
       targetHour,
@@ -1483,7 +1498,7 @@ export function inferAwakeningScheduleFromText(
   // Persona-initiated patterns: "think about that", "get back to you", "let me think"
   // (must come before followup to avoid "get back to" matching as followup)
   if (/\b(think about that|get back to you|let me think|i'll think)\b/.test(lower)) {
-    const targetHour = (new Date().getHours() + 2) % 24;
+    const targetHour = (referenceHour + 2) % 24;
     return {
       recurrence: "once",
       targetHour,
@@ -1500,7 +1515,7 @@ export function inferAwakeningScheduleFromText(
 
   // Persona-initiated patterns: "check back", "follow up", "circle back"
   if (/\b(check back|follow up|circle back)\b/.test(lower)) {
-    const targetHour = (new Date().getHours() + 4) % 24;
+    const targetHour = (referenceHour + 4) % 24;
     return {
       recurrence: "once",
       targetHour,
@@ -1517,4 +1532,3 @@ export function inferAwakeningScheduleFromText(
 
   return null;
 }
-

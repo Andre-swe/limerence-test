@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendLiveTranscriptTurn,
+  recordUserActivity,
   resetServiceRuntimeStateForTests,
   runDueHeartbeats,
   runHeartbeat,
@@ -87,6 +88,46 @@ describe("service regressions", () => {
     );
 
     expect(matchingEvents).toHaveLength(1);
+  });
+
+  it("does not collapse distinct live transcript turns when event id is missing", async () => {
+    await appendLiveTranscriptTurn("persona-mom", {
+      role: "user",
+      body: "still here",
+      sessionId: "live-session-no-event",
+    });
+    await appendLiveTranscriptTurn("persona-mom", {
+      role: "user",
+      body: "still here",
+      sessionId: "live-session-no-event",
+    });
+
+    const messages = await listMessages("persona-mom");
+    const sessionTurns = messages.filter(
+      (message) =>
+        message.channel === "live" &&
+        message.role === "user" &&
+        message.metadata?.sessionId === "live-session-no-event",
+    );
+
+    expect(sessionTurns).toHaveLength(2);
+  });
+
+  it("records activity in the persona's local hour instead of server time", async () => {
+    await updatePersona("persona-mom", (persona) => ({
+      ...persona,
+      timezone: "America/Los_Angeles",
+      heartbeatPolicy: {
+        ...persona.heartbeatPolicy,
+        hourlyActivityCounts: Array(24).fill(0),
+      },
+    }));
+
+    await recordUserActivity("persona-mom", new Date("2026-03-16T15:00:00.000Z"));
+
+    const persona = await getPersona("persona-mom");
+    expect(persona?.heartbeatPolicy.hourlyActivityCounts[8]).toBeGreaterThan(0);
+    expect(persona?.heartbeatPolicy.hourlyActivityCounts[15]).toBe(0);
   });
 
   it("runs only personas whose nextHeartbeatAt is due", async () => {

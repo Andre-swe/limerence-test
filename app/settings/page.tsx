@@ -117,7 +117,7 @@ export default function SettingsPage() {
                 rows: [
                   "Set TELEGRAM_BOT_TOKEN",
                   "Point the webhook at /api/telegram/webhook",
-                  "Use /bind <persona-id> to connect a chat",
+                  "Use the secure /bind command from a persona's Messages page",
                 ],
               },
             ].map(({ icon: Icon, title, rows }) => (

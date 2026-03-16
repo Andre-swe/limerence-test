@@ -809,7 +809,8 @@ export async function replacePersonaIfRevision(
 ) {
   if (!isSupabaseRuntimeStoreEnabled()) {
     return withStoreLock(async () => {
-      const store = (await readFileStoreSnapshot()).store;
+      const snapshot = await readFileStoreSnapshot();
+      const store = cloneStore(snapshot.store);
       const index = store.personas.findIndex((persona) => persona.id === personaId);
 
       if (index === -1) {

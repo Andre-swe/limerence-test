@@ -64,6 +64,14 @@ function isAbortError(error: unknown) {
   );
 }
 
+function normalizedMonologueValue(value: unknown, fallback: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
 function fetchWithTimeout(
   url: string | URL,
   init?: RequestInit & { timeoutMs?: number },
@@ -1414,10 +1422,10 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       return {
         thought: typeof parsed.thought === "string" ? parsed.thought : "I'm here.",
         mood: typeof parsed.mood === "string" ? parsed.mood : "present",
-        energy: typeof parsed.energy === "number" ? parsed.energy : 0.6,
-        patience: typeof parsed.patience === "number" ? parsed.patience : 0.8,
-        warmthTowardUser: typeof parsed.warmthTowardUser === "number" ? parsed.warmthTowardUser : 0.7,
-        engagementDrive: typeof parsed.engagementDrive === "number" ? parsed.engagementDrive : 0.65,
+        energy: normalizedMonologueValue(parsed.energy, 0.6),
+        patience: normalizedMonologueValue(parsed.patience, 0.8),
+        warmthTowardUser: normalizedMonologueValue(parsed.warmthTowardUser, 0.7),
+        engagementDrive: normalizedMonologueValue(parsed.engagementDrive, 0.65),
         shouldReply: typeof parsed.shouldReply === "boolean" ? parsed.shouldReply : true,
         replyFormat: parsed.replyFormat === "voice_note" ? "voice_note" : "text",
       };

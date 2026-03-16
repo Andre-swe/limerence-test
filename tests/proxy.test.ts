@@ -85,4 +85,15 @@ describe("proxy", () => {
     expect(response.headers.get("x-middleware-request-x-user-id")).toBe("user-42");
     expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
   });
+
+  it("injects x-user-id into the authenticated store health route", async () => {
+    getUserMock.mockResolvedValueOnce({
+      data: { user: { id: "user-42" } },
+    });
+
+    const response = await proxy(new NextRequest("http://localhost/api/health/store"));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-request-x-user-id")).toBe("user-42");
+  });
 });
