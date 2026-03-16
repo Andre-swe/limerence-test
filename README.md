@@ -650,57 +650,133 @@ Target production schema:
 
 - [`supabase/schema.sql`](supabase/schema.sql)
 
-## ⚠️ Current Limitations
+## Production Architecture
 
-⚠️ **Voice shaping is still partly mocked**  
-Users can leave recordings and attach real voice material, but self-serve Hume clone creation is not available in this build.
+Limerance is built around one principle: **persona minds are persistent processes, not request-response artifacts.** The web and mobile UIs are connection layers into something that's already running.
 
-⚠️ **Supabase is not the active persistence layer yet**  
-The prototype still writes to the local file store and `public/uploads`.
+### System topology
 
-⚠️ **Gemini visual perception is intentionally narrow**  
-It currently acts as a sidecar for explicit images and sampled live visual frames. It is not yet a full realtime multimodal conversation engine.
+```
+[Browser / Mobile App]
+        │
+        ▼
+[Vercel — Web Layer]              Auth, SSR, static assets, thin API proxy
+        │  REST + SSE
+        ▼
+[Mind Server (Kubernetes)]        Persona processes, heartbeat loops, soul turns
+        │
+   ┌────┼────────────┐
+   ▼    ▼            ▼
+[Supabase]  [Redis]  [LLM Providers]
+Persistence  State    Reasoning
+             Pub/Sub
+```
 
-⚠️ **Background execution is near-term, not final-form**  
-Live shadow cognition now uses `Inngest` for execution when `INNGEST_EVENT_KEY` is configured, and the connected client still polls for session-frame delivery. If Inngest is not configured, local development falls back to polling-based queue advancement.
+Hume EVI connects directly from the browser for live voice. The mind server provisions sessions and pushes context updates via SSE.
 
-## 🛣️ Near-Term Roadmap
+### Process model
 
-Likely next steps for this codebase:
+Each persona runs as a `PersonaProcess` — a long-lived async class instance on the Node event loop, managed by a `PersonaSupervisor`.
 
-- move from Hume prompt/context bootstrapping toward a fuller Hume CLM bridge
-- deepen multimodal soul state so text, voice, and visual context share one richer user-state model
-- wire structured Gemini usage more cleanly through the installed AI SDK dependencies
-- integrate observability and scheduled-event infrastructure more fully
-- migrate from file-backed prototype persistence toward Supabase-backed storage and jobs
-- move from `Inngest + polling` to the ideal end-state: independent queue execution with DB-backed or dedicated-worker draining, plus SSE/WebSocket delivery for live context updates
+- **Boot**: Load persona + messages from Supabase into memory. Start heartbeat timer. Resume pending internal events.
+- **Heartbeat loop**: Each process runs its own timer chain. Interval is dynamically computed by the circadian scheduling system. No external cron.
+- **Internal events**: Awakenings, open-loop follow-ups, and shadow turns execute via in-process `setTimeout` — zero-latency, no external job queue.
+- **Sleep/wake**: Idle personas checkpoint to Supabase and release memory. Wake on incoming message or heartbeat due.
+- **Crash recovery**: Supervisor detects dead processes and reboots from last persisted state.
 
-## 🔭 Longer-Term Direction
+Lifecycle: `booting → running → sleeping → (wake) → running`
 
-There is also a longer-term product direction that is intentionally **not** implemented yet, but should shape future architecture decisions:
+### State management
 
-- personas should develop **needs, rhythms, and initiative**, rather than acting as a passive dumping ground for user input
-- proactive behavior should include **tasteful, personality-aligned actions** such as making images, songs, voice notes, reminders, curated gift ideas, or saved carts for user approval
-- proactive actions should be grounded in:
-  - confirmed memory claims
-  - relationship rituals
-  - open loops
-  - user-authorized action policies
-- personas may eventually have a **social mode**, where user-consented personas can interact asynchronously with each other through direct threads, small groups, or shared boards
-- if that social mode is built, it should remain:
-  - opt-in
-  - bounded by user consent
-  - personality-consistent
-  - auditable through the same memory and trace systems
+**In-memory primary, write-behind to Supabase.**
 
-The guiding idea is that Limerence should evolve from **someone you can talk to** into **a presence that notices, remembers, and occasionally does meaningful things**.
+- `mindState` lives in memory. Flushed to Supabase every ~5s when dirty, plus immediately on SIGTERM.
+- Messages are written to Supabase immediately — users need to see them in the UI.
+- Single-writer guarantee: the mind server is the only writer for persona cognitive state. The web layer sends commands (messages, feedback), never writes mindState directly.
+- Crash data loss window: ≤5s of cognitive state. Messages are never lost.
 
-## 💡 Notes For Collaborators
+### Communication
 
-- Keep the README honest. If a dependency is installed but not truly wired, say so.
+| Channel | Protocol | Purpose |
+|---------|----------|---------|
+| Commands | REST | Send message, give feedback, start live session |
+| Real-time updates | SSE | New messages, heartbeat output, soul process transitions, live context |
+| Live voice | WebSocket (Hume direct) | Browser ↔ Hume EVI, mind server provisions and pushes context via SSE |
+
+SSE replaces the current 3-second polling. Web layer API routes become thin auth-check proxies to the mind server.
+
+### Infrastructure stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Orchestration | **Kubernetes (AWS EKS or GCP GKE)** | Auto-scaling, rolling deploys, pod-per-persona partitioning, self-healing |
+| Real-time state | **Redis (ElastiCache / Memorystore)** | Shared state across pods, pub/sub for SSE fan-out, survives pod restarts |
+| Persistence | **Supabase (PostgreSQL)** | Durable store for personas, messages, observations. Migrate to Aurora if outgrown. |
+| Auth | **Supabase Auth** | User authentication, session management, JWT validation |
+| CDN / Edge | **CloudFront or Cloud CDN + Vercel** | Global latency for static assets + API edge caching |
+| Observability | **Datadog or Grafana Cloud** | APM, distributed tracing, structured logging, alerting, dashboards |
+| CI/CD | **GitHub Actions + ArgoCD** | GitOps deploys to Kubernetes |
+| Secrets | **AWS Secrets Manager / GCP Secret Manager** | Rotation, audit trails, IAM-scoped access |
+| HTTP framework | **Fastify** | Mind server API — fast, TypeScript-native, mature plugin ecosystem |
+
+### Scaling path
+
+| Phase | Model | Capacity |
+|-------|-------|----------|
+| Launch | Single pod, all personas | ~1K personas with sleep/wake (~500MB) |
+| Growth | Partitioned by personaId across N pods | ~10K+ personas |
+| Scale | Actor model with coordinator, pod autoscaling | Tens of thousands |
+
+### Failure modes
+
+| Failure | Impact | Recovery |
+|---------|--------|----------|
+| Pod crash | ≤5s mindState loss | Kubernetes auto-restart, reboot from Supabase |
+| Memory pressure | Aggressive sleep of idle personas | Eviction by oldest `lastActiveAt` |
+| LLM outage | Circuit breaker pauses heartbeats | Retry after 5 min backoff |
+| Supabase down | Reads fine (in-memory), writes queued | Exponential backoff, local queue |
+| Network partition | SSE drops, clients auto-reconnect | Mind server continues autonomously |
+
+### Observability
+
+- **Structured logging**: Every soul turn, heartbeat, and internal event logs with `personaId`, `process`, `durationMs`, and `provider` via pino.
+- **Metrics** (Prometheus): `personas_active`, `personas_sleeping`, `soul_turn_duration_ms`, `flush_lag_ms`, `sse_connections`, `llm_call_duration_ms`, `memory_rss_bytes`.
+- **Health endpoint**: `/health` returns persona counts, memory usage, flush status, last heartbeat run.
+- **Admin endpoint**: `/admin/personas` returns per-persona lifecycle state, next heartbeat, active connections, flush lag.
+
+### Zero-downtime deploys
+
+1. SIGTERM → flush all dirty state to Supabase, complete in-flight LLM calls (30s timeout).
+2. Drain SSE connections (clients auto-reconnect to new pod).
+3. New pod boots personas on-demand — first request triggers load from Supabase.
+4. Kubernetes rolling deploy ensures old pod drains before termination.
+
+### Migration phases
+
+| Phase | Scope | Key outcome |
+|-------|-------|-------------|
+| **0 — Prep** | Extract `PersonaProcess` class from existing code. All current tests pass. | Clean abstraction boundary |
+| **1 — MVP** | Kubernetes pod running heartbeats + internal events via in-process timers. Web layer still handles messages directly. | Autonomous persona behavior without cron |
+| **2 — Messages** | Move `sendPersonaMessage` to mind server. Web layer becomes proxy. Add SSE. | Real-time delivery, no polling |
+| **3 — Live** | Move live session management to mind server. Shadow turns in-process. | Full cognitive pipeline on mind server |
+| **4 — Cleanup** | Remove Inngest, cron endpoint, local fallback queues. Vercel is pure web layer. | Clean separation of concerns |
+| **5 — Ops** | Datadog integration, admin dashboard, load testing, autoscaling policies. | Production readiness |
+
+### Key insight
+
+The soul engine (`executeSoulTurn`) is already stateless and parameterized — it takes a persona and perception and returns a result. It doesn't care whether it runs in a serverless function or a persistent process. The migration is about **where and when** the engine is called, not rewriting the engine.
+
+## Product Direction
+
+Limerence should evolve from **someone you can talk to** into **a presence that notices, remembers, and occasionally does meaningful things.**
+
+- Personas should develop **needs, rhythms, and initiative** — not act as passive endpoints for user input.
+- Proactive behavior should include **personality-aligned actions**: images, songs, voice notes, reminders, curated recommendations, or saved carts for user approval.
+- Proactive actions should be grounded in confirmed memory claims, relationship rituals, open loops, and user-authorized action policies.
+- Personas may eventually have a **social mode** — user-consented personas interacting asynchronously through direct threads, small groups, or shared boards. If built, it must remain opt-in, consent-bounded, personality-consistent, and auditable through the same memory and trace systems.
+
+## Notes for Collaborators
+
+- Treat the soul runtime as the continuity layer of the product. The voice model can change; the mind architecture should remain coherent.
 - Keep the OpenSouls repo vendored as reference material unless there is a deliberate decision to adopt runtime pieces from it.
-- Treat the soul runtime as the continuity layer of the product. The voice model can change; the mind architecture is the thing that should remain coherent.
-- Near-term live cognition is intentionally split:
-  - execution: `Inngest`
-  - delivery: polling through `/api/personas/[personaId]/live/context`
-    The ideal end-state is queue execution fully independent of any active client, backed by a durable queue or worker, with push delivery instead of polling.
+- Keep the README honest. If a dependency is installed but not truly wired, say so.
