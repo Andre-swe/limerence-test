@@ -38,6 +38,7 @@ type StoreSnapshot = {
 };
 
 const remoteStoreRetryLimit = 6;
+export const MAX_PROCESSED_TELEGRAM_UPDATES = 2048;
 
 const seededHouseVoiceMap = {
   "persona-mom": houseVoicePresets[0].id,
@@ -1139,8 +1140,9 @@ export async function updateMessage(
       throw new Error(`Message ${messageId} was not found.`);
     }
 
-    store.messages[index] = updater(store.messages[index]);
-    return store.messages[index];
+    const updated = messageSchema.parse(updater(store.messages[index]));
+    store.messages[index] = updated;
+    return updated;
   });
 }
 
@@ -1165,9 +1167,14 @@ export async function hasProcessedTelegramUpdate(updateId: string) {
 
 export async function markTelegramUpdateProcessed(updateId: string) {
   return mutateStore(async (store) => {
-
     if (!store.processedTelegramUpdates.includes(updateId)) {
       store.processedTelegramUpdates.push(updateId);
+      if (store.processedTelegramUpdates.length > MAX_PROCESSED_TELEGRAM_UPDATES) {
+        store.processedTelegramUpdates.splice(
+          0,
+          store.processedTelegramUpdates.length - MAX_PROCESSED_TELEGRAM_UPDATES,
+        );
+      }
     }
   });
 }

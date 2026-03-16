@@ -5,7 +5,10 @@ import { MessagesPanel } from "@/components/messages-panel";
 import { DebugPanel } from "@/components/debug-panel";
 import { LogoMark } from "@/components/logo-mark";
 import { getPersona, listMessages } from "@/lib/store";
-import { buildTelegramBindCommand } from "@/lib/telegram-bind";
+import {
+  buildTelegramBindCommand,
+  telegramBindCodeLifetimeMinutes,
+} from "@/lib/telegram-bind";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +63,8 @@ export default async function PersonaMessagesPage({
               Telegram connect
             </p>
             <p className="mt-2 text-sm text-[rgba(29,38,34,0.74)]">
-              Use this secure command in Telegram to bind the chat to {persona.name}.
+              Use this secure command in Telegram to bind the chat to {persona.name}. It expires in{" "}
+              {telegramBindCodeLifetimeMinutes} minutes.
             </p>
             <code className="mt-3 block overflow-x-auto rounded-[16px] bg-[rgba(223,228,209,0.5)] px-3 py-3 text-sm text-[var(--sage-deep)]">
               {telegramBindCommand}

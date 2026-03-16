@@ -4,6 +4,7 @@ import {
   type HeartbeatDecision,
   intentResultSchema,
   learningArtifactPayloadSchema,
+  personaDossierSchema,
   type FastTurnResult,
   type LiveSessionMode,
   type MessageEntry,
@@ -595,10 +596,37 @@ function parseFastTurnResult(
   return candidate.data;
 }
 
+function normalizePersonaDossier(
+  rawText: string,
+  fallback: PersonaDossier,
+  provider: string,
+): PersonaDossier {
+  const parsed = safeJsonParse<unknown>(rawText, null);
+  if (typeof parsed !== "object" || parsed === null) {
+    soulLogger.warn({ provider }, "Persona dossier was not an object; using fallback");
+    return fallback;
+  }
+
+  const candidate = personaDossierSchema.safeParse(parsed);
+  if (!candidate.success) {
+    soulLogger.warn(
+      {
+        provider,
+        issues: candidate.error.issues.map((issue) => issue.message),
+      },
+      "Persona dossier failed validation; using fallback",
+    );
+    return fallback;
+  }
+
+  return candidate.data;
+}
+
 function normalizeLearningArtifacts(
   rawText: string,
   fallback: LearningArtifact[],
   provider: string,
+  input: Pick<LearningExtractionRequest, "perception">,
 ): LearningArtifact[] {
   const parsed = safeJsonParse<unknown>(rawText, fallback);
   if (!Array.isArray(parsed)) {
@@ -624,7 +652,8 @@ function normalizeLearningArtifacts(
       summary: payload.summary,
       effectSummary: payload.effectSummary,
       memoryKeys: normalizeMemoryKeys(payload.memoryKeys, provider),
-      createdAt: now,
+      sourcePerceptionId: input.perception.id,
+      createdAt: input.perception.createdAt || now,
     });
   }
 
@@ -663,7 +692,7 @@ class MockReasoningProvider implements ReasoningProvider {
 
     const routines = ["morning check-ins", "follow-up when the user mentions a milestone"];
 
-    return {
+    return personaDossierSchema.parse({
       essence: `${input.name} is reconstructed as a ${input.relationship.toLowerCase()} whose presence should feel ${input.description.toLowerCase()}.`,
       communicationStyle: input.pastedText
         ? `Patterned after uploaded text: ${input.pastedText.slice(0, 180)}`
@@ -690,7 +719,7 @@ class MockReasoningProvider implements ReasoningProvider {
         input.relationship,
         input.description,
       ),
-    };
+    });
   }
 
   async extractTextFromScreenshot(input: {
@@ -1002,18 +1031,20 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
   }
 
   override async buildPersonaDossier(input: PersonaAssemblyInput) {
+    const fallback = await super.buildPersonaDossier(input);
     try {
       const response = await this.callResponses({
         model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
         input: `Return strict JSON with keys essence, communicationStyle, signaturePhrases, favoriteTopics, emotionalTendencies, routines, guidance, sourceSummary, knowledgeProfile.\n\nknowledgeProfile must be an object with: domains (array of 3-6 subject areas this person would realistically know about given their life), deflectionStyle (one of "honest", "self_deprecating", "redirecting", "bluffing", "protective"), deflectionExamples (2-3 short phrases this person would say when asked something they don't know).\n\nName: ${input.name}\nRelationship: ${input.relationship}\nSource: ${input.source}\nDescription: ${input.description}\nPasted text: ${input.pastedText}\nInterview answers: ${JSON.stringify(input.interviewAnswers)}\nScreenshot summaries: ${JSON.stringify(input.screenshotSummaries)}`,
       });
 
-      return safeJsonParse(
+      return normalizePersonaDossier(
         response.output_text ?? "",
-        await super.buildPersonaDossier(input),
+        fallback,
+        "openai",
       );
     } catch {
-      return super.buildPersonaDossier(input);
+      return fallback;
     }
   }
 
@@ -1086,7 +1117,7 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
         model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
         input: renderLearningPrompt(plan),
       });
-      return normalizeLearningArtifacts(response.output_text ?? "", fallback, "openai");
+      return normalizeLearningArtifacts(response.output_text ?? "", fallback, "openai", input);
     } catch {
       return fallback;
     }
@@ -1203,6 +1234,7 @@ class GeminiReasoningProvider extends MockReasoningProvider {
   }
 
   override async buildPersonaDossier(input: PersonaAssemblyInput) {
+    const fallback = await super.buildPersonaDossier(input);
     try {
       const response = await this.callGenerateContent({
         system_instruction: {
@@ -1224,9 +1256,9 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         ],
       });
 
-      return safeJsonParse(this.extractText(response), await super.buildPersonaDossier(input));
+      return normalizePersonaDossier(this.extractText(response), fallback, "gemini");
     } catch {
-      return super.buildPersonaDossier(input);
+      return fallback;
     }
   }
 
@@ -1341,7 +1373,7 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         ],
       });
 
-      return normalizeLearningArtifacts(this.extractText(response), fallback, "gemini");
+      return normalizeLearningArtifacts(this.extractText(response), fallback, "gemini", input);
     } catch (error) {
       logProviderFailure("gemini", "extractLearningArtifacts", error);
       return fallback;
@@ -1652,6 +1684,7 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
   }
 
   override async buildPersonaDossier(input: PersonaAssemblyInput) {
+    const fallback = await super.buildPersonaDossier(input);
     try {
       const response = await this.callMessages({
         system:
@@ -1669,9 +1702,9 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
         ],
       });
 
-      return safeJsonParse(this.extractText(response), await super.buildPersonaDossier(input));
+      return normalizePersonaDossier(this.extractText(response), fallback, "anthropic");
     } catch {
-      return super.buildPersonaDossier(input);
+      return fallback;
     }
   }
 
@@ -1779,7 +1812,7 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
           },
         ],
       });
-      return normalizeLearningArtifacts(this.extractText(response), fallback, "anthropic");
+      return normalizeLearningArtifacts(this.extractText(response), fallback, "anthropic", input);
     } catch {
       return fallback;
     }

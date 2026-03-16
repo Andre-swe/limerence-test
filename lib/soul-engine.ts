@@ -136,6 +136,8 @@ export type FastMessageTurnExecutionResult = {
   processIntent: string;
   trace: SoulTraceEntry[];
   events: SoulEvent[];
+  learningArtifacts: LearningArtifact[];
+  pendingInternalEvents: InternalScheduledEvent[];
   contextDelta?: string;
   selectedArchetype?: SoulArchetypeId;
 };
@@ -1337,35 +1339,7 @@ export async function executeFastMessageTurn(
     };
   }
 
-  const commitSummary = `Fast message path committed process ${selectedProcess} with ${Object.keys(updatedCurrentInstance.localMemory).length} local memory keys.`;
-  const [commitStarted, commitCompleted] = createStepLifecycleEvents({
-    stepId: "commit_trace",
-    process: selectedProcess,
-    processInstanceId: updatedCurrentInstance.id,
-    perceptionId: perception.id,
-    sessionId: perception.sessionId,
-    channel: perception.channel,
-    summary: "Fast message trace committed",
-    inputSummary: `${trace.length} fast-path traces`,
-    outputSummary: commitSummary,
-    createdAt: perception.createdAt,
-  });
-  events.push(commitStarted, commitCompleted);
-  trace.push(
-    createStepTrace({
-      stepId: "commit_trace",
-      process: selectedProcess,
-      processInstanceId: updatedCurrentInstance.id,
-      eventId: commitCompleted.id,
-      correlationId: perception.correlationId,
-      causationId: perception.causationId,
-      inputSummary: `${trace.length} fast-path traces`,
-      outputSummary: commitSummary,
-      createdAt: perception.createdAt,
-    }),
-  );
-
-  const finalPersona: Persona = {
+  const preLearnPersona: Persona = {
     ...seededPersona,
     relationshipModel: updatedRelationshipModel,
     mindState: {
@@ -1412,6 +1386,206 @@ export async function executeFastMessageTurn(
         fast_turn_path: "true",
         ...(fastTurn.relationshipDelta ? { relationship_delta: fastTurn.relationshipDelta } : {}),
       },
+    },
+  };
+
+  // Fast path keeps latency low by skipping a second provider learning call,
+  // but it still runs the heuristic learning and internal-event pipeline so
+  // background continuity stays aligned with the full turn path.
+  const learningArtifacts = buildLearningArtifacts({
+    persona: preLearnPersona,
+    userState: fastTurn.userState,
+    perception,
+    latestUserText: input.latestUserText,
+    feedbackNotes: input.feedbackNotes,
+    messages: input.messages,
+    process: selectedProcess,
+  });
+  events.push(
+    ...learningArtifacts.map(
+      (artifact) =>
+        ({
+          id: createEventId(),
+          type: "learning_completed",
+          perceptionId: perception.id,
+          process: selectedProcess,
+          processInstanceId: updatedCurrentInstance.id,
+          channel: perception.channel,
+          sessionId: perception.sessionId,
+          summary: artifact.kind,
+          outputSummary: artifact.summary,
+          memoryKeys: artifact.memoryKeys,
+          fallback: true,
+          startedAt: artifact.createdAt,
+          completedAt: artifact.createdAt,
+          durationMs: 0,
+          metadata: {
+            path: "fast_message_path",
+            heuristic: true,
+          },
+        }) satisfies SoulEvent,
+    ),
+  );
+  const learningChanges = applyLearningArtifacts(
+    preLearnPersona,
+    learningArtifacts,
+    fastTurn.userState,
+    input.latestUserText,
+    {
+      perception,
+    },
+  );
+  const [learningStarted, learningCompleted] = createStepLifecycleEvents({
+    stepId: "run_learning_subprocesses",
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast-path learning subprocesses completed",
+    inputSummary: summarizePerception(perception),
+    outputSummary: learningArtifacts.map((artifact) => artifact.kind).join(", "),
+    createdAt: perception.createdAt,
+  });
+  events.push(learningStarted, learningCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "run_learning_subprocesses",
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      eventId: learningCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: summarizePerception(perception),
+      outputSummary: learningArtifacts.map((artifact) => artifact.summary).join(" | "),
+      createdAt: perception.createdAt,
+      memoryDiffs: learningArtifacts.flatMap((artifact) => artifact.memoryKeys),
+      fallback: true,
+    }),
+  );
+
+  const withLearningPersona: Persona = {
+    ...preLearnPersona,
+    mindState: {
+      ...preLearnPersona.mindState,
+      soulMemory: mergeSoulMemory(preLearnPersona.mindState.soulMemory, learningChanges.soulMemory),
+      learningState: nextLearningState(preLearnPersona, learningArtifacts, fastTurn.userState),
+      memoryRegions: {
+        ...preLearnPersona.mindState.memoryRegions,
+        episodicMemory: learningChanges.episodicMemory,
+        repairMemory: learningChanges.repairMemory,
+        learnedUserNotes: learningChanges.learnedUserNotes,
+        learnedRelationshipNotes: learningChanges.learnedRelationshipNotes,
+      },
+      memoryClaims: learningChanges.memoryClaims,
+      claimSources: learningChanges.claimSources,
+      episodes: learningChanges.episodes,
+      recentChangedClaims: learningChanges.recentChangedClaims,
+    },
+  };
+
+  const scheduledInternalEvents = toInternalScheduledEvents({
+    persona: withLearningPersona,
+    perception,
+  });
+  const pendingInternalEvents = [
+    ...scheduledInternalEvents,
+    ...(learningChanges.pendingAwakeningEvents ?? []),
+  ];
+  const [scheduleStarted, scheduleCompleted] = createStepLifecycleEvents({
+    stepId: "schedule_internal_events",
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast-path internal events scheduled",
+    inputSummary: `${withLearningPersona.mindState.scheduledPerceptions.length} scheduled perceptions`,
+    outputSummary: `${pendingInternalEvents.length} internal events pending`,
+    createdAt: perception.createdAt,
+  });
+  events.push(scheduleStarted, scheduleCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "schedule_internal_events",
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      eventId: scheduleCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: `${withLearningPersona.mindState.scheduledPerceptions.length} scheduled perceptions`,
+      outputSummary: `${pendingInternalEvents.length} internal events pending`,
+      createdAt: perception.createdAt,
+      memoryDiffs: pendingInternalEvents.map((event) => event.dedupeKey),
+      fallback: true,
+    }),
+  );
+  events.push(
+    ...pendingInternalEvents.map(
+      (event) =>
+        ({
+          id: createEventId(),
+          type: "internal_event_scheduled",
+          perceptionId: event.perception.id,
+          process: event.processHint,
+          processInstanceId: updatedCurrentInstance.id,
+          channel: event.perception.channel,
+          sessionId: event.perception.sessionId,
+          summary: event.dedupeKey,
+          outputSummary: `ready at ${event.readyAt}`,
+          memoryKeys: [],
+          fallback: true,
+          startedAt: perception.createdAt,
+          completedAt: perception.createdAt,
+          durationMs: 0,
+          metadata: {
+            path: "fast_message_path",
+            heuristic: true,
+          },
+        }) satisfies SoulEvent,
+    ),
+  );
+
+  const commitSummary = `Fast message path committed ${trace.length + 1} traces, ${events.length} events, ${learningArtifacts.length} learning artifacts.`;
+  const [commitStarted, commitCompleted] = createStepLifecycleEvents({
+    stepId: "commit_trace",
+    process: selectedProcess,
+    processInstanceId: updatedCurrentInstance.id,
+    perceptionId: perception.id,
+    sessionId: perception.sessionId,
+    channel: perception.channel,
+    summary: "Fast message trace committed",
+    inputSummary: `${trace.length} fast-path traces`,
+    outputSummary: commitSummary,
+    createdAt: perception.createdAt,
+  });
+  events.push(commitStarted, commitCompleted);
+  trace.push(
+    createStepTrace({
+      stepId: "commit_trace",
+      process: selectedProcess,
+      processInstanceId: updatedCurrentInstance.id,
+      eventId: commitCompleted.id,
+      correlationId: perception.correlationId,
+      causationId: perception.causationId,
+      inputSummary: `${trace.length} fast-path traces`,
+      outputSummary: commitSummary,
+      createdAt: perception.createdAt,
+      fallback: true,
+    }),
+  );
+
+  const finalPersona: Persona = {
+    ...withLearningPersona,
+    relationshipModel: updatedRelationshipModel,
+    mindState: {
+      ...withLearningPersona.mindState,
+      pendingInternalEvents,
+      pendingShadowTurns: withLearningPersona.mindState.pendingShadowTurns,
+      recentEvents: boundedArray([...events, ...withLearningPersona.mindState.recentEvents], 32),
+      traceHead: boundedArray([...trace, ...withLearningPersona.mindState.traceHead], 40),
+      contextVersion: withLearningPersona.mindState.contextVersion + 1,
+      traceVersion: withLearningPersona.mindState.traceVersion + trace.length,
     },
   };
 
@@ -1471,6 +1645,8 @@ export async function executeFastMessageTurn(
     processIntent: fastTurn.processIntent,
     trace,
     events,
+    learningArtifacts,
+    pendingInternalEvents,
     contextDelta: `Fast message path replied through ${selectedProcess}.`,
     selectedArchetype,
   };

@@ -987,9 +987,9 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
     it("contradicted claims stay contradicted on non-confirmed learning reinforcement", () => {
       const contradicted = makeClaim({
         id: "stay-contradicted",
-        kind: "fact",
+        kind: "user_fact",
         summary: "User likes coffee",
-        scope: "user",
+        scope: "global_user",
         status: "contradicted",
         confidence: 0.2,
         importance: 0.5,
@@ -1010,7 +1010,7 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
         },
         artifacts: [{
           id: "art-1",
-          kind: "claim",
+          kind: "learn_about_user",
           summary: "User likes coffee",
           memoryKeys: ["user.notes"],
           createdAt: NOW,
