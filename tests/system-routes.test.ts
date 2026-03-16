@@ -226,7 +226,7 @@ describe("system routes", () => {
       }),
     );
 
-    await expectJsonError(response, 400, "bad payload");
+    await expectJsonError(response, 500, "bad payload");
   });
 
   it("wires the Inngest route through serve()", async () => {

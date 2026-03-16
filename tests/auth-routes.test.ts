@@ -87,12 +87,12 @@ describe("auth routes", () => {
     expect(createServerClientMock).not.toHaveBeenCalled();
   });
 
-  it("signs up and uses the request origin for redirect", async () => {
+  it("signs up and uses an allowed origin for redirect", async () => {
     const response = await signUpPost(
       jsonRequest(
         "http://localhost/api/auth/sign-up",
         { email: "user@example.com", password: "secret" },
-        { method: "POST", headers: { origin: "https://app.example" } },
+        { method: "POST", headers: { origin: "http://localhost:3000" } },
       ),
     );
 
@@ -102,7 +102,27 @@ describe("auth routes", () => {
       email: "user@example.com",
       password: "secret",
       options: {
-        emailRedirectTo: "https://app.example/auth/callback",
+        emailRedirectTo: "http://localhost:3000/auth/callback",
+      },
+    });
+  });
+
+  it("falls back to default origin when Origin header is not in allowlist", async () => {
+    const response = await signUpPost(
+      jsonRequest(
+        "http://localhost/api/auth/sign-up",
+        { email: "user@example.com", password: "secret" },
+        { method: "POST", headers: { origin: "https://evil.com" } },
+      ),
+    );
+
+    const body = await expectJsonResponse<{ message: string; user: { email: string } }>(response);
+    expect(body.message).toContain("confirmation link");
+    expect(signUpMock).toHaveBeenCalledWith({
+      email: "user@example.com",
+      password: "secret",
+      options: {
+        emailRedirectTo: "https://limerance.vercel.app/auth/callback",
       },
     });
   });
@@ -192,7 +212,7 @@ describe("auth routes", () => {
     expect(createServerClientMock).not.toHaveBeenCalled();
   });
 
-  it("requests a magic link and falls back to localhost origin", async () => {
+  it("requests a magic link and falls back to default allowed origin", async () => {
     const response = await magicLinkPost(
       jsonRequest(
         "http://localhost/api/auth/magic-link",
@@ -206,7 +226,7 @@ describe("auth routes", () => {
     expect(signInWithOtpMock).toHaveBeenCalledWith({
       email: "user@example.com",
       options: {
-        emailRedirectTo: "http://localhost:3000/auth/callback",
+        emailRedirectTo: "https://limerance.vercel.app/auth/callback",
       },
     });
   });

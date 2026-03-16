@@ -37,12 +37,26 @@ describe("startup environment", () => {
     ).toThrow("Supabase is required in production");
   });
 
-  it("accepts a production environment with a provider and Supabase", () => {
+  it("throws in production when SUPABASE_SERVICE_ROLE_KEY is missing", () => {
+    expect(() =>
+      assertStartupEnvironment(
+        {
+          OPENAI_API_KEY: "openai-test",
+          NEXT_PUBLIC_SUPABASE_URL: "https://supabase.test",
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-test",
+        },
+        "production",
+      ),
+    ).toThrow("SUPABASE_SERVICE_ROLE_KEY");
+  });
+
+  it("accepts a production environment with a provider, Supabase, and service role key", () => {
     const startup = assertStartupEnvironment(
       {
         OPENAI_API_KEY: "openai-test",
         NEXT_PUBLIC_SUPABASE_URL: "https://supabase.test",
         NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-test",
+        SUPABASE_SERVICE_ROLE_KEY: "service-role-test",
       },
       "production",
     );

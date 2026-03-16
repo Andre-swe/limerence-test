@@ -957,9 +957,9 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
   });
 
   describe("staleness", () => {
-    it("contradicted claims remain contradicted even when reinforced", () => {
+    it("contradicted claims recover when explicitly confirmed", () => {
       const contradicted = makeClaim({
-        id: "stay-contradicted",
+        id: "recover-contradicted",
         kind: "boundary",
         summary: "Do not text me while I am at work",
         scope: "relationship",
@@ -970,7 +970,7 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
         lastObservedAt: LAST_WEEK,
       });
 
-      // Try to re-upsert the same claim via boundary update
+      // Re-upsert via boundary update (which uses status: "confirmed")
       const result = applyBoundaryClaimUpdate({
         claims: [contradicted],
         claimSources: [],
@@ -978,9 +978,49 @@ describe("conflict resolution (reinforcement, contradiction, staleness)", () => 
         createdAt: NOW,
       });
 
+      const claim = result.claims.find((c) => c.id === "recover-contradicted");
+      expect(claim).toBeDefined();
+      // Contradicted claims can recover when explicitly reaffirmed as confirmed
+      expect(claim!.status).toBe("confirmed");
+    });
+
+    it("contradicted claims stay contradicted on non-confirmed learning reinforcement", () => {
+      const contradicted = makeClaim({
+        id: "stay-contradicted",
+        kind: "fact",
+        summary: "User likes coffee",
+        scope: "user",
+        status: "contradicted",
+        confidence: 0.2,
+        importance: 0.5,
+        reinforcementCount: 1,
+        lastObservedAt: LAST_WEEK,
+      });
+
+      // Learning artifacts produce tentative claims — should not recover contradicted
+      const result = applyLearningArtifactsToMemoryClaims({
+        persona: {
+          ...makePersona(),
+          mindState: {
+            ...makePersona().mindState,
+            memoryClaims: [contradicted],
+            claimSources: [],
+            episodes: [],
+          },
+        },
+        artifacts: [{
+          id: "art-1",
+          kind: "claim",
+          summary: "User likes coffee",
+          memoryKeys: ["user.notes"],
+          createdAt: NOW,
+        }],
+        latestUserText: "I like coffee",
+        perceptionChannel: "web",
+      });
+
       const claim = result.claims.find((c) => c.id === "stay-contradicted");
       expect(claim).toBeDefined();
-      // The status should remain contradicted -- contradicted is sticky
       expect(claim!.status).toBe("contradicted");
     });
   });
