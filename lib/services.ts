@@ -428,8 +428,11 @@ function buildHeartbeatDue(persona: Persona, now: Date) {
   }
 
   // Legacy fallback: calculate interval on the fly
-  const elapsedHours =
-    (now.getTime() - new Date(persona.lastHeartbeatAt).getTime()) / (1000 * 60 * 60);
+  const lastMs = new Date(persona.lastHeartbeatAt).getTime();
+  if (!Number.isFinite(lastMs)) {
+    return true; // corrupted timestamp — allow heartbeat
+  }
+  const elapsedHours = (now.getTime() - lastMs) / (1000 * 60 * 60);
   const requiredInterval = calculateNextHeartbeatInterval(persona, now);
   return elapsedHours >= requiredInterval;
 }
@@ -1801,6 +1804,13 @@ function shouldPeriodicSync(input: {
 /** Session-level state for tracking transition recency. */
 const sessionLastTransitionTurn = new Map<string, number>();
 
+/** Prevent unbounded growth of the ephemeral session transition map. */
+function pruneSessionTransitionMap() {
+  if (sessionLastTransitionTurn.size > 200) {
+    sessionLastTransitionTurn.clear();
+  }
+}
+
 function shouldEnqueueLiveShadowTurn(input: {
   persona: Persona;
   inferredUserState?: UserStateSnapshot;
@@ -1837,6 +1847,7 @@ function shouldEnqueueLiveShadowTurn(input: {
     // Record that a meaningful transition happened at this turn index
     if (input.sessionId) {
       sessionLastTransitionTurn.set(input.sessionId, sessionUserTurns.length);
+      pruneSessionTransitionMap();
     }
     return { enqueue: true, reason: transition.reason ?? "state_transition" };
   }
@@ -1854,6 +1865,7 @@ function shouldEnqueueLiveShadowTurn(input: {
   ) {
     if (input.sessionId) {
       sessionLastTransitionTurn.set(input.sessionId, sessionUserTurns.length);
+      pruneSessionTransitionMap();
     }
     return { enqueue: true, reason: "periodic_sync" };
   }
@@ -3540,13 +3552,13 @@ export async function finalizeLiveSession(
   const userStateTrajectory = stateSnapshots
     .map(
       (m) =>
-        `[${m.userState!.summary}] valence=${m.userState!.valence.toFixed(2)} vulnerability=${m.userState!.vulnerability.toFixed(2)} frustration=${m.userState!.frustration.toFixed(2)}`,
+        `[${m.userState?.summary ?? "unknown"}] valence=${(m.userState?.valence ?? 0).toFixed(2)} vulnerability=${(m.userState?.vulnerability ?? 0).toFixed(2)} frustration=${(m.userState?.frustration ?? 0).toFixed(2)}`,
     )
     .join(" → ");
 
   // Detect if repair may be needed (frustration or repair risk spiked during call)
-  const peakFrustration = Math.max(0, ...stateSnapshots.map((m) => m.userState!.frustration));
-  const peakRepairRisk = Math.max(0, ...stateSnapshots.map((m) => m.userState!.repairRisk));
+  const peakFrustration = Math.max(0, ...stateSnapshots.map((m) => m.userState?.frustration ?? 0));
+  const peakRepairRisk = Math.max(0, ...stateSnapshots.map((m) => m.userState?.repairRisk ?? 0));
   const repairWarning =
     peakFrustration >= 0.5 || peakRepairRisk >= 0.45 || sessionFeedback.length > 0;
 

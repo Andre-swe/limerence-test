@@ -923,8 +923,8 @@ export async function claimPersonaShadowTurn(personaId: string, sessionId?: stri
     }
 
     const persona = store.personas[index];
-    const jobIndex = persona.mindState.pendingShadowTurns.findIndex((job) => {
-      if (job.status !== "pending") {
+    const job = persona.mindState.pendingShadowTurns.find((j) => {
+      if (j.status !== "pending") {
         return false;
       }
 
@@ -932,19 +932,19 @@ export async function claimPersonaShadowTurn(personaId: string, sessionId?: stri
         return true;
       }
 
-      return job.sessionId === sessionId;
+      return j.sessionId === sessionId;
     });
 
-    if (jobIndex === -1) {
+    if (!job) {
       return null;
     }
 
     const claimedAt = new Date().toISOString();
     const claimedJob: PendingShadowTurn = {
-      ...persona.mindState.pendingShadowTurns[jobIndex],
+      ...job,
       status: "processing",
       claimedAt,
-      attempts: persona.mindState.pendingShadowTurns[jobIndex].attempts + 1,
+      attempts: job.attempts + 1,
       baseRevision: persona.revision + 1,
       lastError: undefined,
     };
@@ -954,8 +954,8 @@ export async function claimPersonaShadowTurn(personaId: string, sessionId?: stri
       updatedAt: claimedAt,
       mindState: {
         ...persona.mindState,
-        pendingShadowTurns: persona.mindState.pendingShadowTurns.map((job, entryIndex) =>
-          entryIndex === jobIndex ? claimedJob : job,
+        pendingShadowTurns: persona.mindState.pendingShadowTurns.map((entry) =>
+          entry.id === job.id ? claimedJob : entry,
         ),
       },
     });
@@ -1019,20 +1019,20 @@ export async function claimPersonaShadowTurnById(personaId: string, jobId: strin
     }
 
     const persona = store.personas[index];
-    const jobIndex = persona.mindState.pendingShadowTurns.findIndex(
-      (job) => job.id === jobId && job.status === "pending",
+    const job = persona.mindState.pendingShadowTurns.find(
+      (j) => j.id === jobId && j.status === "pending",
     );
 
-    if (jobIndex === -1) {
+    if (!job) {
       return null;
     }
 
     const claimedAt = new Date().toISOString();
     const claimedJob: PendingShadowTurn = {
-      ...persona.mindState.pendingShadowTurns[jobIndex],
+      ...job,
       status: "processing",
       claimedAt,
-      attempts: persona.mindState.pendingShadowTurns[jobIndex].attempts + 1,
+      attempts: job.attempts + 1,
       baseRevision: persona.revision + 1,
       lastError: undefined,
     };
@@ -1042,8 +1042,8 @@ export async function claimPersonaShadowTurnById(personaId: string, jobId: strin
       updatedAt: claimedAt,
       mindState: {
         ...persona.mindState,
-        pendingShadowTurns: persona.mindState.pendingShadowTurns.map((job, entryIndex) =>
-          entryIndex === jobIndex ? claimedJob : job,
+        pendingShadowTurns: persona.mindState.pendingShadowTurns.map((entry) =>
+          entry.id === job.id ? claimedJob : entry,
         ),
       },
     });
