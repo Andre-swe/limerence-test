@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
 import { createPersonaLiveSession } from "@/lib/hume-evi";
+import { checkRateLimit, RATE_LIMITS, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import { withUserStore } from "@/lib/store-context";
 import type { LiveSessionMode } from "@/lib/types";
 
@@ -17,6 +18,15 @@ async function handleSessionRequest(
     const ownership = await verifyPersonaOwnership(request, personaId);
     if (!ownership.authorized) {
       return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
+    // Rate limit: 5 live call initiations per hour per user
+    const rateCheck = checkRateLimit(
+      rateLimitKey(ownership.userId, "liveCalls"),
+      RATE_LIMITS.liveCalls,
+    );
+    if (!rateCheck.allowed) {
+      return rateLimitResponse(rateCheck.retryAfter);
     }
 
     const persona = ownership.persona;

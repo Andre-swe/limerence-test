@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyPersonaOwnership } from "@/lib/auth";
+import { checkRateLimit, RATE_LIMITS, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import { sendPersonaMessage } from "@/lib/services";
 import { withUserStore } from "@/lib/store-context";
 
@@ -16,6 +17,15 @@ export async function POST(
     const ownership = await verifyPersonaOwnership(request, personaId);
     if (!ownership.authorized) {
       return NextResponse.json({ error: ownership.error }, { status: ownership.status });
+    }
+
+    // Rate limit: 30 messages per minute per user
+    const rateCheck = checkRateLimit(
+      rateLimitKey(ownership.userId, "messages"),
+      RATE_LIMITS.messages,
+    );
+    if (!rateCheck.allowed) {
+      return rateLimitResponse(rateCheck.retryAfter);
     }
 
     const formData = await request.formData();
