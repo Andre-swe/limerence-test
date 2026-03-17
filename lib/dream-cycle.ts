@@ -34,7 +34,7 @@ import type { ReasoningProvider } from "@/lib/providers";
 // ---------------------------------------------------------------------------
 
 /** Minimum number of new memory items to justify a creative dream pass. */
-const MIN_DREAM_MATERIAL = 3;
+const _MIN_DREAM_MATERIAL = 3;
 
 /** Maximum age (in ms) for a dream cycle — don't re-dream within 18 hours. */
 const DREAM_CYCLE_COOLDOWN_MS = 18 * 60 * 60 * 1000;
@@ -368,7 +368,7 @@ export function applyConsolidation(
   const decaySet = new Set(consolidation.decayClaimIds);
   const now = new Date().toISOString();
 
-  let claims = persona.mindState.memoryClaims.map((claim) => {
+  const updatedClaims = persona.mindState.memoryClaims.map((claim) => {
     if (strengthenSet.has(claim.id)) {
       return {
         ...claim,
@@ -389,14 +389,14 @@ export function applyConsolidation(
   });
 
   // Add merged claims
-  for (const merged of consolidation.mergedClaims) {
-    if (!merged.summary) continue;
-    claims.push({
+  const mergedClaims: MemoryClaim[] = consolidation.mergedClaims
+    .filter((merged) => merged.summary)
+    .map((merged) => ({
       id: randomUUID(),
-      kind: "milestone",
+      kind: "milestone" as const,
       summary: merged.summary,
-      scope: "relationship",
-      status: "confirmed",
+      scope: "relationship" as const,
+      status: "confirmed" as const,
       confidence: 0.82,
       importance: typeof merged.importance === "number" ? merged.importance : 0.7,
       sourceIds: merged.sourceClaimIds ?? [],
@@ -405,8 +405,9 @@ export function applyConsolidation(
       lastObservedAt: now,
       lastConfirmedAt: now,
       tags: ["dream_consolidated"],
-    });
-  }
+    }));
+
+  const claims = [...updatedClaims, ...mergedClaims];
 
   return { memoryClaims: claims };
 }
