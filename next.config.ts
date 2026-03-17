@@ -3,9 +3,27 @@ import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
+  // Image domains for Supabase Storage
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "*.supabase.co",
+      },
+      {
+        protocol: "https",
+        hostname: "*.supabase.in",
+      },
+    ],
+  },
+
+  // External packages for serverless (avoid bundling large deps)
+  serverExternalPackages: ["pino", "pino-pretty"],
+
   turbopack: {
     root: path.resolve(__dirname),
   },
+
   async headers() {
     return [
       {
