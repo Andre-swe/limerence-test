@@ -328,7 +328,7 @@ function upsertClaim(input: {
       Math.max(
         existing.confidence,
         input.candidate.confidence ?? existing.confidence,
-      ) + 0.05,
+      ) + (existing.status !== "contradicted" ? 0.05 : 0),
     ),
     importance: clamp(
       Math.max(existing.importance, input.candidate.importance ?? existing.importance),
@@ -591,7 +591,8 @@ export function applyLearningArtifactsToMemoryClaims(input: {
         const epTokens = tokenize(episode.summary);
         if (epTokens.length === 0 || summaryTokens.size === 0) return false;
         const overlap = epTokens.filter((t) => summaryTokens.has(t)).length;
-        return overlap >= Math.min(summaryTokens.size, epTokens.length) * 0.6;
+        const union = new Set([...epTokens, ...summaryTokens]);
+        return union.size > 0 && overlap / union.size >= 0.45;
       });
       const nextEpisode: EpisodeRecord = {
         id: existingIndex >= 0 ? episodes[existingIndex].id : randomUUID(),
@@ -607,7 +608,13 @@ export function applyLearningArtifactsToMemoryClaims(input: {
       };
 
       if (existingIndex >= 0) {
-        episodes[existingIndex] = nextEpisode;
+        const existing = episodes[existingIndex];
+        episodes[existingIndex] = {
+          ...nextEpisode,
+          sourceMessageIds: [...new Set([...existing.sourceMessageIds, ...nextEpisode.sourceMessageIds])],
+          sourceObservationIds: [...new Set([...existing.sourceObservationIds, ...nextEpisode.sourceObservationIds])],
+          keyPhrases: [...new Set([...existing.keyPhrases, ...nextEpisode.keyPhrases])].slice(0, 12),
+        };
       } else {
         episodes.unshift(nextEpisode);
       }
@@ -784,7 +791,8 @@ function topicRelevanceBonus(claim: MemoryClaim, topicTokens: string[]) {
     return 0;
   }
   const haystack = normalizeText([claim.summary, claim.detail ?? "", ...claim.tags].join(" "));
-  const matches = topicTokens.filter((token) => haystack.includes(token)).length;
+  const haystackTokens = new Set(haystack.split(/\s+/).filter(t => t.length > 2));
+  const matches = topicTokens.filter((token) => haystackTokens.has(token)).length;
   return Math.min(matches * 0.18, 0.72);
 }
 
