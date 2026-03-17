@@ -254,6 +254,8 @@ function signatureCueForProcess(persona: Persona, process: SoulConversationProce
     case "follow_through":
     case "reengagement":
       return grouped.vocative[0] ?? grouped.general[0] ?? grouped.directive[0] ?? signatures[0];
+    default:
+      return grouped.vocative[0] ?? grouped.general[0] ?? signatures[0];
   }
 }
 

@@ -11,6 +11,7 @@ import type {
   UserStateSnapshot,
 } from "@/lib/types";
 import { addHours } from "@/lib/utils";
+import { soulLogger } from "@/lib/soul-logger";
 
 function defineProcess(
   definition: Omit<
@@ -403,7 +404,7 @@ export function scheduleSoulPerceptions(input: {
   relationship: RelationshipModel;
   timestamp: string;
 }) {
-  return dedupeScheduledPerceptions(
+  const deduped = dedupeScheduledPerceptions(
     [
       ...scheduleFromOpenLoops(input.openLoops),
       ...scheduleFromUserState({
@@ -419,7 +420,13 @@ export function scheduleSoulPerceptions(input: {
         relationship: input.relationship,
       }),
     ].sort((left, right) => left.readyAt.localeCompare(right.readyAt)),
-  ).slice(0, 12);
+  );
+
+  if (deduped.length > 12) {
+    soulLogger.warn({ total: deduped.length, kept: 12 }, "truncated scheduled perceptions");
+  }
+
+  return deduped.slice(0, 12);
 }
 
 /** Return all pending scheduled perceptions whose readyAt has passed. */

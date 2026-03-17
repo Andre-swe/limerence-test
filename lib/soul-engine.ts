@@ -716,7 +716,7 @@ function buildLearningArtifacts(input: {
           memoryKeys: ["repair.last_mismatch", "self.consistency"],
           sourcePerceptionId: input.perception.id,
           sourceMessageId: latestUserMessage?.id,
-          effectSummary: input.feedbackNotes.at(-1),
+          effectSummary: input.feedbackNotes.length > 0 ? input.feedbackNotes[input.feedbackNotes.length - 1] : undefined,
           createdAt: input.perception.createdAt,
         },
       ),
