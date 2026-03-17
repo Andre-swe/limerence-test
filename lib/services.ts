@@ -41,6 +41,17 @@ import {
   resolvePersonaTimeZone,
 } from "@/lib/persona-schedule";
 import {
+  applyConsolidation,
+  buildDreamEpisode,
+  collectDreamMaterial,
+  isDreamCycleDue,
+  isInDreamWindow,
+  runConsolidationPass,
+  runCreativeDreamPass,
+  shouldShareDream,
+  type DreamCycleResult,
+} from "@/lib/dream-cycle";
+import {
   buildDebugContext,
   summarizeLiveSessionMetrics,
   summarizePendingInternalEvents,
@@ -3694,6 +3705,117 @@ export async function finalizeLiveSession(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Dream Cycle — runs during quiet hours instead of heartbeats
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a full dream cycle for a persona: consolidation + optional creative
+ * dream. Called from the heartbeat dispatcher when the persona is in the sleep
+ * window and a dream cycle is due.
+ */
+export async function runDreamCycleForPersona(
+  personaId: string,
+): Promise<DreamCycleResult> {
+  const persona = await getPersona(personaId);
+  if (!persona) {
+    return { ran: false, reason: "Persona not found.", materialCount: 0 };
+  }
+
+  const now = new Date();
+
+  if (!isDreamCycleDue(persona, now)) {
+    return {
+      ran: false,
+      reason: "Dream cycle not yet due (cooldown).",
+      materialCount: 0,
+    };
+  }
+
+  const material = collectDreamMaterial(persona);
+
+  if (material.totalItems === 0) {
+    // Nothing to consolidate — just mark cycle timestamp
+    await updatePersona(personaId, (current) => ({
+      ...current,
+      lastDreamCycleAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }));
+    return {
+      ran: true,
+      reason: "No material to consolidate — silent cycle.",
+      materialCount: 0,
+    };
+  }
+
+  const providers = getProviders();
+
+  // Step 1: Consolidation pass (merge, strengthen, decay)
+  const consolidation = await runConsolidationPass(
+    providers.reasoning,
+    persona,
+    material,
+  );
+  const { memoryClaims } = applyConsolidation(persona, consolidation);
+
+  // Step 2: Creative dream pass (only if enough material)
+  let dream: DreamCycleResult["dream"];
+  let dreamEpisode: ReturnType<typeof buildDreamEpisode> | undefined;
+
+  if (material.totalItems >= 3) {
+    dream = await runCreativeDreamPass(
+      providers.reasoning,
+      persona,
+      material,
+      consolidation,
+    );
+    if (dream.narrative) {
+      dreamEpisode = buildDreamEpisode(persona, dream);
+    }
+  }
+
+  // Step 3: Persist consolidated state + dream episode
+  await updatePersona(personaId, (current) => {
+    const episodes = dreamEpisode
+      ? [dreamEpisode, ...current.mindState.episodes].slice(0, 48)
+      : current.mindState.episodes;
+
+    return {
+      ...current,
+      lastDreamCycleAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      mindState: {
+        ...current.mindState,
+        memoryClaims,
+        episodes,
+        lastDreamSummary: dream?.narrative ?? current.mindState.lastDreamSummary,
+        lastDreamVividness:
+          dream?.vividness ?? current.mindState.lastDreamVividness,
+      },
+    };
+  });
+
+  soulLogger.info(
+    {
+      personaId,
+      materialCount: material.totalItems,
+      strengthened: consolidation.strengthenClaimIds.length,
+      decayed: consolidation.decayClaimIds.length,
+      merged: consolidation.mergedClaims.length,
+      dreamVividness: dream?.vividness ?? null,
+    },
+    "Dream cycle completed",
+  );
+
+  return {
+    ran: true,
+    reason: "Dream cycle completed.",
+    consolidation,
+    dream,
+    materialCount: material.totalItems,
+  };
+}
+
 /** Run a heartbeat check for a persona — may produce a text or voice note message. */
 export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision> {
   const persona = await getPersona(personaId);
@@ -3704,6 +3826,26 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
 
   const now = new Date();
   let activePersona = persona;
+
+  // During quiet hours, run dream cycle instead of heartbeat
+  if (isInDreamWindow(activePersona, now)) {
+    if (isDreamCycleDue(activePersona, now)) {
+      await runDreamCycleForPersona(personaId);
+    }
+    // Schedule next heartbeat check for after quiet hours end
+    const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);
+    await updatePersona(personaId, (current) => ({
+      ...current,
+      lastHeartbeatAt: now.toISOString(),
+      nextHeartbeatAt,
+      updatedAt: now.toISOString(),
+    }));
+    return {
+      action: "SILENT",
+      reason: "Quiet hours — dream cycle active.",
+    };
+  }
+
   const feedback = await listFeedback(personaId);
   const feedbackNotes = feedback.map((entry) => entry.note);
 
@@ -3716,6 +3858,38 @@ export async function runHeartbeat(personaId: string): Promise<HeartbeatDecision
   }
 
   const messages = await listMessages(personaId);
+
+  // Morning dream sharing: check if the first heartbeat after sleep has a dream
+  if (activePersona.mindState.lastDreamSummary) {
+    const dreamCheck = shouldShareDream(activePersona, { isPremium: true });
+    if (dreamCheck.share) {
+      // Clear dream after checking — only attempt once
+      const dreamContent = activePersona.mindState.lastDreamSummary;
+      await updatePersona(personaId, (current) => ({
+        ...current,
+        mindState: {
+          ...current.mindState,
+          lastDreamSummary: undefined,
+          lastDreamVividness: undefined,
+        },
+      }));
+      // Return the dream as a heartbeat message
+      return {
+        action: "TEXT",
+        content: dreamContent,
+        reason: "Sharing a vivid dream from last night.",
+      };
+    }
+    // Clear dream if not sharing
+    await updatePersona(personaId, (current) => ({
+      ...current,
+      mindState: {
+        ...current.mindState,
+        lastDreamSummary: undefined,
+        lastDreamVividness: undefined,
+      },
+    }));
+  }
 
   if (countOutboundTodayForPersona(messages, activePersona, now) >= activePersona.heartbeatPolicy.maxOutboundPerDay) {
     const nextHeartbeatAt = nextHeartbeatAtFor(activePersona, now);

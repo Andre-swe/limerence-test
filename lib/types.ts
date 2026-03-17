@@ -646,6 +646,8 @@ export const soulStateSchema = z.object({
   memoryClaims: z.array(memoryClaimSchema).default([]),
   claimSources: z.array(claimSourceSchema).default([]),
   episodes: z.array(episodeRecordSchema).default([]),
+  lastDreamSummary: z.string().optional(),
+  lastDreamVividness: z.number().min(0).max(1).optional(),
   recentChangedClaims: z.array(memoryClaimSchema).default([]),
   lastRetrievalPack: memoryRetrievalPackSchema.optional(),
   internalState: personaInternalStateSchema.default({
@@ -801,6 +803,7 @@ export const personaSchema = z.object({
   lastActiveAt: z.string().optional(),
   lastHeartbeatAt: z.string().optional(),
   nextHeartbeatAt: z.string().optional(),
+  lastDreamCycleAt: z.string().optional(),
   timezone: z.string().optional(),
   pastedText: z.string(),
   screenshotSummaries: z.array(z.string()),
