@@ -102,7 +102,7 @@ function fetchWithTimeout(
       if (abortedByTimeout && isAbortError(error)) {
         throw new ProviderTimeoutError(ms);
       }
-
+      soulLogger.debug({ error: error instanceof Error ? error.message : String(error) }, "fetch error (not timeout)");
       throw error;
     })
     .finally(() => {
@@ -1046,7 +1046,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
         fallback,
         "openai",
       );
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "buildPersonaDossier", error);
       return fallback;
     }
   }
@@ -1077,7 +1078,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
       });
 
       return response.output_text?.trim() || super.extractTextFromScreenshot(input);
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "extractTextFromScreenshot", error);
       return super.extractTextFromScreenshot(input);
     }
   }
@@ -1093,7 +1095,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
       });
 
       return parseFastTurnResult(response.output_text ?? "", fallback, "openai");
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "respondToUserTurn", error);
       return fallback;
     }
   }
@@ -1107,7 +1110,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
         input: renderIntentPrompt(plan),
       });
       return parseIntentResult(response.output_text ?? "", fallback, "openai");
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "deliberateIntent", error);
       return fallback;
     }
   }
@@ -1121,7 +1125,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
         input: renderLearningPrompt(plan),
       });
       return normalizeLearningArtifacts(response.output_text ?? "", fallback, "openai", input);
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "extractLearningArtifacts", error);
       return fallback;
     }
   }
@@ -1135,7 +1140,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
       });
 
       return response.output_text?.trim() || renderMockConversationReply(plan, input.persona);
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "generateReply", error);
       return renderMockConversationReply(plan, input.persona);
     }
   }
@@ -1157,7 +1163,8 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
         ...plan.decision,
         content: response.output_text?.trim() || renderMockHeartbeatContent(plan, input.persona),
       };
-    } catch {
+    } catch (error) {
+      logProviderFailure("openai", "runHeartbeatDecision", error);
       return {
         ...plan.decision,
         content: renderMockHeartbeatContent(plan, input.persona),
@@ -1429,7 +1436,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return normalizePersonaDossier(this.extractText(response), fallback, "gemini");
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "buildPersonaDossier", error);
       return fallback;
     }
   }
@@ -1465,7 +1473,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
       });
 
       return this.extractText(response) || super.extractTextFromScreenshot(input);
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "extractTextFromScreenshot", error);
       return super.extractTextFromScreenshot(input);
     }
   }
@@ -1600,7 +1609,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         ...plan.decision,
         content: this.extractText(response) || renderMockHeartbeatContent(plan, input.persona),
       };
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "runHeartbeatDecision", error);
       return {
         ...plan.decision,
         content: renderMockHeartbeatContent(plan, input.persona),
@@ -1803,7 +1813,8 @@ class GeminiReasoningProvider extends MockReasoningProvider {
         attentionTarget:
           typeof parsed.attentionTarget === "string" ? parsed.attentionTarget : undefined,
       };
-    } catch {
+    } catch (error) {
+      logProviderFailure("gemini", "observeVisualContext", error);
       return super.observeVisualContext(input);
     }
   }
@@ -1875,7 +1886,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
       });
 
       return normalizePersonaDossier(this.extractText(response), fallback, "anthropic");
-    } catch {
+    } catch (error) {
+      logProviderFailure("anthropic", "buildPersonaDossier", error);
       return fallback;
     }
   }
@@ -1914,7 +1926,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
       });
 
       return this.extractText(response) || super.extractTextFromScreenshot(input);
-    } catch {
+    } catch (error) {
+      logProviderFailure("anthropic", "extractTextFromScreenshot", error);
       return super.extractTextFromScreenshot(input);
     }
   }
@@ -1939,7 +1952,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
       });
 
       return parseFastTurnResult(this.extractText(response), fallback, "anthropic");
-    } catch {
+    } catch (error) {
+      logProviderFailure("anthropic", "respondToUserTurn", error);
       return fallback;
     }
   }
@@ -1962,7 +1976,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
         ],
       });
       return parseIntentResult(this.extractText(response), fallback, "anthropic");
-    } catch {
+    } catch (error) {
+      logProviderFailure("anthropic", "deliberateIntent", error);
       return fallback;
     }
   }
@@ -1985,7 +2000,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
         ],
       });
       return normalizeLearningArtifacts(this.extractText(response), fallback, "anthropic", input);
-    } catch {
+    } catch (error) {
+      logProviderFailure("anthropic", "extractLearningArtifacts", error);
       return fallback;
     }
   }
@@ -2040,7 +2056,8 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
         ...plan.decision,
         content: this.extractText(response) || renderMockHeartbeatContent(plan, input.persona),
       };
-    } catch {
+    } catch (error) {
+      logProviderFailure("anthropic", "runHeartbeatDecision", error);
       return {
         ...plan.decision,
         content: renderMockHeartbeatContent(plan, input.persona),
