@@ -41,9 +41,9 @@ export async function GET(
       recentEvents: persona.mindState.recentEvents,
       traceHead: persona.mindState.traceHead,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unable to load soul trace." },
+      { error: "Unable to load soul trace." },
       { status: 500 },
     );
   }

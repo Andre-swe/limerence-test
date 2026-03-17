@@ -19,11 +19,9 @@ export async function POST(
       return NextResponse.json({ error: ownership.error }, { status: ownership.status });
     }
 
-    const payload = (await request.json().catch(() => ({}))) as {
-      sessionId?: string;
-      mode?: LiveSessionMode;
-      reason?: "user_end" | "disconnect";
-    };
+    // Lenient parsing: finalization must succeed even if the client sent a garbled body (e.g. disconnect).
+    const payload: { sessionId?: string; mode?: LiveSessionMode; reason?: "user_end" | "disconnect" } =
+      await request.json().catch(() => ({}));
 
     const result = await withUserStore(ownership.userId, () =>
       finalizeLiveSession(personaId, {
