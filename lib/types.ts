@@ -233,7 +233,10 @@ export const userStateSnapshotSchema = z.object({
     .array(
       z.enum([
         "heuristic",
+        "prosody_fast",
         "gemini",
+        "openai",
+        "anthropic",
         "hume_prosody",
         "visual_perception",
         "feedback",

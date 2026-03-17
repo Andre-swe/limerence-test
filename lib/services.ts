@@ -69,7 +69,7 @@ import {
   type UserStateSnapshot,
 } from "@/lib/types";
 import {
-  inferHeuristicUserState,
+  inferProsodyUserState,
 } from "@/lib/mind-runtime";
 // Preserve the historical public service entrypoints while the implementation
 // is split into narrower modules underneath this facade.
@@ -2484,8 +2484,7 @@ async function createDerivedVisualObservation(input: {
     source: input.source,
   });
 
-  const userState = inferHeuristicUserState({
-    text: "",
+  const userState = inferProsodyUserState({
     channel: input.source === "message_image" ? "web" : "live",
     createdAt: input.createdAt,
     visualContext: [derived],
@@ -3117,8 +3116,7 @@ export async function appendLiveTranscriptTurn(personaId: string, payload: unkno
   const currentObservations = await listPerceptionObservations(personaId);
   const inferredUserState =
     !isAssistant
-      ? inferHeuristicUserState({
-          text: body,
+      ? inferProsodyUserState({
           channel: "live",
           createdAt: liveMessageCreatedAt,
           prosodyScores: parsed.prosodyScores,

@@ -71,7 +71,7 @@ type ReasoningAdapter = {
       taskContext?: string;
       attentionTarget?: string;
     }>;
-  }): Promise<UserStateSnapshot>;
+  }): Promise<{ userState: UserStateSnapshot; recommendedProcess?: MindProcess }>;
   generateReply(input: {
     persona: Persona;
     messages: MessageEntry[];
@@ -1744,23 +1744,26 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
       ? perception.content ?? ""
       : "");
 
-  const appraisedUserState =
-    input.providedUserState ??
-    (latestUserText.trim() || perception.userStateId
-      ? await input.reasoning.inferUserState({
-          persona: seededPersona,
-          messages: input.messages,
-          latestUserText,
-          channel: perception.channel ?? "web",
-          createdAt: perception.createdAt,
-          prosodyScores:
-            typeof perception.metadata?.prosodyScores === "object" &&
-            perception.metadata?.prosodyScores
-              ? (perception.metadata.prosodyScores as Record<string, number>)
-              : undefined,
-          visualContext: buildVisualContext(input.observations),
-        })
-      : undefined);
+  const inferenceResult =
+    input.providedUserState
+      ? { userState: input.providedUserState, recommendedProcess: undefined as MindProcess | undefined }
+      : (latestUserText.trim() || perception.userStateId
+        ? await input.reasoning.inferUserState({
+            persona: seededPersona,
+            messages: input.messages,
+            latestUserText,
+            channel: perception.channel ?? "web",
+            createdAt: perception.createdAt,
+            prosodyScores:
+              typeof perception.metadata?.prosodyScores === "object" &&
+              perception.metadata?.prosodyScores
+                ? (perception.metadata.prosodyScores as Record<string, number>)
+                : undefined,
+            visualContext: buildVisualContext(input.observations),
+          })
+        : undefined);
+  const appraisedUserState = inferenceResult?.userState;
+  const recommendedProcess = inferenceResult?.recommendedProcess;
 
   const [appraiseStarted, appraiseCompleted] = createStepLifecycleEvents({
     stepId: "appraise_user_state",
@@ -1869,6 +1872,7 @@ export async function executeSoulTurn(input: ExecuteSoulTurnInput): Promise<Turn
     observations: input.observations,
     latestUserState: appraisedUserState,
     boundaryTriggered: input.boundaryTriggered,
+    recommendedProcess,
   });
 
   const processTransition = processInstanceFor(

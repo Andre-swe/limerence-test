@@ -442,35 +442,12 @@ function summaryFromSignals(signals: string[]) {
     .join(" and ")}.`;
 }
 
-function determineRepairRisk(text: string, prosodySignals: string[]) {
-  const lower = text.toLowerCase();
-  let score = scoreWords(lower, [
-    /\bwrong\b/,
-    /\boff\b/,
-    /you wouldn'?t say that/,
-    /that doesn'?t sound like/,
-    /not right/,
-  ]);
-
-  if (prosodySignals.includes("anger")) {
-    score += 0.22;
-  }
-
-  if (prosodySignals.includes("distress")) {
-    score += 0.16;
-  }
-
-  return clamp(score);
-}
-
 /**
- * Infer a user emotional state from text, prosody, and visual context using
- * heuristic scoring. Blends keyword detection, prosody signals, and visual
- * cues into a normalized UserStateSnapshot. Used as fallback when Gemini
- * inference is unavailable or as a fast pre-pass.
+ * Prosody-only fast path for user state inference. Uses only Hume prosody
+ * scores and structured visual context data — no text regex at all.
+ * Runs in <1ms and is suitable for latency-sensitive call sites.
  */
-export function inferHeuristicUserState(input: {
-  text: string;
+export function inferProsodyUserState(input: {
   channel: MessageEntry["channel"];
   createdAt?: string;
   prosodyScores?: Record<string, number>;
@@ -482,7 +459,6 @@ export function inferHeuristicUserState(input: {
     attentionTarget?: string;
   }>;
 }): UserStateSnapshot {
-  const lower = input.text.toLowerCase();
   const visualContext = input.visualContext ?? [];
   const visualContextSummary = visualContext.map((item) => item.summary).join(" ").trim();
   const situationalSignals = Array.from(
@@ -516,168 +492,59 @@ export function inferHeuristicUserState(input: {
     ),
   );
 
-  const positiveText = scoreWords(lower, [
-    /\bgood news\b/,
-    /\bgreat news\b/,
-    /\bgot the job\b/,
-    /\bexcited\b/,
-    /\bhappy\b/,
-    /\bproud\b/,
-    /\blove\b/,
-  ]);
-  const negativeText = scoreWords(lower, [
-    /\bnervous\b/,
-    /\banxious\b/,
-    /\boverwhelmed\b/,
-    /\bsad\b/,
-    /\blonely\b/,
-    /\bgrief\b/,
-    /\bmiss\b/,
-    /\bupset\b/,
-    /\bangry\b/,
-    /\bfrustrated\b/,
-    /\btired\b/,
-    /\bscared\b/,
-  ]);
-  const taskFocus = clamp(
-    scoreWords(lower, [
-      /\binterview\b/,
-      /\bexam\b/,
-      /\btest\b/,
-      /\bmeeting\b/,
-      /\bpresentation\b/,
-      /\bappointment\b/,
-      /\bdoctor\b/,
-      /\bneed to\b/,
-      /\bshould\b/,
-      /\btrying to\b/,
-    ]) +
-      scoreWords(visualContextSummary.toLowerCase(), [
-        /\bcalendar\b/,
-        /\bemail\b/,
-        /\bmeeting\b/,
-        /\bdocument\b/,
-        /\bdeadline\b/,
-        /\binterview\b/,
-        /\bwork\b/,
-      ], 0.12) +
-      activationProsody * 0.25,
-  );
+  const valence = clamp(0.5 + positiveProsody * 0.4 - negativeProsody * 0.4);
   const vulnerability = clamp(
-    scoreWords(lower, [
-      /\bnervous\b/,
-      /\banxious\b/,
-      /\bscared\b/,
-      /\bsad\b/,
-      /\blonely\b/,
-      /\bmiss\b/,
-      /\bheavy\b/,
-      /\bgrief\b/,
-      /\bneed you\b/,
-    ]) +
-      average([
-        input.prosodyScores?.sadness ?? 0,
-        input.prosodyScores?.distress ?? 0,
-        input.prosodyScores?.anxiety ?? 0,
-        input.prosodyScores?.empathicPain ?? 0,
-      ]) *
-        0.45,
-  );
-  const desireForCloseness = clamp(
-    scoreWords(lower, [
-      /\bi miss\b/,
-      /\bcan you stay\b/,
-      /\bi need you\b/,
-      /\btalk to me\b/,
-      /\bi love you\b/,
-      /\bcall me\b/,
-      /\bhear your voice\b/,
-    ]) +
-      average([
-        input.prosodyScores?.love ?? 0,
-        input.prosodyScores?.nostalgia ?? 0,
-        input.prosodyScores?.sympathy ?? 0,
-      ]) *
-        0.4,
-  );
-  const desireForSpace = clamp(
-    scoreWords(lower, [
-      /don'?t text me/,
-      /\bgive me space\b/,
-      /\bback off\b/,
-      /\bleave me alone\b/,
-      /\bnot now\b/,
-      /\btoo much\b/,
-      /\bless often\b/,
-    ]) +
-      (input.prosodyScores?.contempt ?? 0) * 0.2,
-  );
-  const boundaryPressure = clamp(
-    scoreWords(lower, [
-      /don'?t text me/,
-      /while i('| a)?m at work/,
-      /\bjust text me\b/,
-      /\bno voice notes\b/,
-      /\bless often\b/,
-      /\bmore often\b/,
-    ]) + desireForSpace * 0.35,
+    average([
+      input.prosodyScores?.sadness ?? 0,
+      input.prosodyScores?.distress ?? 0,
+      input.prosodyScores?.anxiety ?? 0,
+      input.prosodyScores?.empathicPain ?? 0,
+    ]) * 0.7,
   );
   const griefLoad = clamp(
-    scoreWords(lower, [
-      /\bgrief\b/,
-      /\bgrieving\b/,
-      /\bmiss\b/,
-      /\bnostalgic\b/,
-      /\bremember when\b/,
-      /\bwe used to\b/,
-      /\bheavy\b/,
-    ]) +
-      average([
-        input.prosodyScores?.nostalgia ?? 0,
-        input.prosodyScores?.sadness ?? 0,
-        input.prosodyScores?.empathicPain ?? 0,
-      ]) *
-        0.45,
+    average([
+      input.prosodyScores?.nostalgia ?? 0,
+      input.prosodyScores?.sadness ?? 0,
+      input.prosodyScores?.empathicPain ?? 0,
+    ]) * 0.7,
   );
   const frustration = clamp(
-    scoreWords(lower, [
-      /\bfrustrated\b/,
-      /\bangry\b/,
-      /\bmad\b/,
-      /\bannoyed\b/,
-      /\bupset\b/,
-      /\bseriously\b/,
-    ]) +
-      average([
-        input.prosodyScores?.anger ?? 0,
-        input.prosodyScores?.distress ?? 0,
-        input.prosodyScores?.disappointment ?? 0,
-      ]) *
-        0.5 +
-      environmentPressure * 0.08,
+    average([
+      input.prosodyScores?.anger ?? 0,
+      input.prosodyScores?.distress ?? 0,
+      input.prosodyScores?.disappointment ?? 0,
+    ]) * 0.7,
   );
   const playfulness = clamp(
-    scoreWords(lower, [/\blol\b/, /\blmao\b/, /\bhaha\b/, /\bteasing\b/, /\bjk\b/], 0.18) +
-      average([
-        input.prosodyScores?.amusement ?? 0,
-        input.prosodyScores?.joy ?? 0,
-      ]) *
-        0.4,
+    average([
+      input.prosodyScores?.amusement ?? 0,
+      input.prosodyScores?.joy ?? 0,
+    ]) * 0.6,
   );
   const certainty = clamp(
-    scoreWords(lower, [/\bi know\b/, /\bdefinitely\b/, /\bfor sure\b/, /\bgo ahead\b/], 0.16) +
-      average([
-        input.prosodyScores?.determination ?? 0,
-        input.prosodyScores?.concentration ?? 0,
-      ]) *
-        0.45,
+    average([
+      input.prosodyScores?.determination ?? 0,
+      input.prosodyScores?.concentration ?? 0,
+    ]) * 0.5,
   );
+  const desireForCloseness = clamp(
+    average([
+      input.prosodyScores?.love ?? 0,
+      input.prosodyScores?.nostalgia ?? 0,
+      input.prosodyScores?.sympathy ?? 0,
+    ]) * 0.45,
+  );
+  const desireForSpace = clamp((input.prosodyScores?.contempt ?? 0) * 0.25);
+  const boundaryPressure = clamp(desireForSpace * 0.35);
+  const taskFocus = clamp(activationProsody * 0.35 + environmentPressure * 0.15);
   const arousal = clamp(
     0.22 + positiveProsody * 0.28 + negativeProsody * 0.36 + activationProsody * 0.25 + environmentPressure * 0.08,
   );
   const activation = clamp(taskFocus * 0.5 + activationProsody * 0.35 + certainty * 0.15);
-  const valence = clamp(0.5 + positiveProsody * 0.32 + positiveText * 0.28 - negativeProsody * 0.38 - negativeText * 0.28);
-  const repairRisk = determineRepairRisk(lower, prosodySignals);
+  const repairRisk = clamp(
+    (prosodySignals.includes("anger") ? 0.22 : 0) +
+    (prosodySignals.includes("distress") ? 0.16 : 0),
+  );
 
   const topSignals = [
     visualContextSummary ? "bringing visual context into the conversation" : null,
@@ -701,7 +568,7 @@ export function inferHeuristicUserState(input: {
     modality: modalityForInput({
       channel: input.channel,
       hasVisualContext: visualContext.length > 0,
-      hasText: Boolean(input.text.trim()),
+      hasText: false,
     }),
     topSignals: Array.from(new Set(topSignals)).slice(0, 6),
     valence,
@@ -723,16 +590,15 @@ export function inferHeuristicUserState(input: {
     taskContext,
     attentionTarget,
     summary: summaryFromSignals(Array.from(new Set(topSignals)).slice(0, 3)),
-    evidence: truncate([input.text, visualContextSummary].filter(Boolean).join(" ").trim(), 180),
+    evidence: truncate(visualContextSummary || "", 180),
     confidence: clamp(
-      0.48 +
-        (input.text.trim().length > 0 ? 0.12 : 0) +
-        (visualContext.length > 0 ? 0.12 : 0) +
-        (prosodySignals.length > 0 ? 0.12 : 0),
+      0.35 +
+        (visualContext.length > 0 ? 0.1 : 0) +
+        (prosodySignals.length > 0 ? 0.1 : 0),
     ),
     provenance: Array.from(
       new Set([
-        "heuristic" as const,
+        "prosody_fast" as const,
         ...(visualContext.length > 0 ? (["visual_perception"] as const) : []),
         ...(prosodySignals.length > 0 ? (["hume_prosody"] as const) : []),
       ]),
@@ -958,72 +824,139 @@ function routeSoulProcess(input: {
   openLoops: OpenLoop[];
   boundaryTriggered: boolean;
   channel?: MessageEntry["channel"];
-}) {
+  recommendedProcess?: MindProcess;
+}): MindProcess {
+  const state = input.latestUserState;
+
+  // Safety: always override for explicit boundary triggers
+  if (input.boundaryTriggered) return "boundary_negotiation";
+
+  // Safety: override if LLM missed extreme repair risk
+  if ((state?.repairRisk ?? 0) >= 0.8 && input.recommendedProcess !== "repair") return "repair";
+
+  // Trust LLM when available
+  if (input.recommendedProcess) return input.recommendedProcess;
+
+  // Fallback: scored selection (no cliff edges)
+  return inferProcessFromState(input);
+}
+
+/** Scored fallback process selection — ranks processes by how well the state matches their triggers. */
+function inferProcessFromState(input: {
+  persona: PersonaMindLike;
+  latestUserText?: string;
+  latestUserState?: UserStateSnapshot;
+  openLoops: OpenLoop[];
+  boundaryTriggered: boolean;
+  channel?: MessageEntry["channel"];
+}): MindProcess {
   const constitution = createPersonalityConstitution(input.persona);
   const relationship = createRelationshipModel(input.persona);
   const state = input.latestUserState;
   const readyLoop = topOpenLoop(input.openLoops);
 
   if (!state && !input.latestUserText) {
-    return "arrival" as const;
+    return "arrival";
   }
 
-  if (input.boundaryTriggered || (state?.boundaryPressure ?? 0) >= 0.62) {
-    return "boundary_negotiation" as const;
-  }
+  const scores: Array<{ process: MindProcess; score: number }> = [];
 
-  if ((state?.repairRisk ?? 0) >= 0.6) {
-    return "repair" as const;
-  }
+  // Boundary negotiation
+  scores.push({
+    process: "boundary_negotiation",
+    score: (state?.boundaryPressure ?? 0) * 1.2 + (input.boundaryTriggered ? 1 : 0),
+  });
 
-  if ((state?.desireForSpace ?? 0) >= 0.72) {
-    return "silence_holding" as const;
-  }
+  // Repair
+  scores.push({
+    process: "repair",
+    score: (state?.repairRisk ?? 0) * 1.1,
+  });
 
-  if ((state?.griefLoad ?? 0) >= 0.66) {
-    return constitution.tenderness >= 0.7 ? "grief_presence" : "attunement";
-  }
+  // Silence holding
+  scores.push({
+    process: "silence_holding",
+    score: (state?.desireForSpace ?? 0) * 0.9,
+  });
 
-  if (readyLoop && completionPattern.test(input.latestUserText ?? "")) {
-    const lower = (input.latestUserText ?? "").toLowerCase();
-    if (readyLoop.keywords.some((kw) => lower.includes(kw.toLowerCase()))) {
-      return "follow_through" as const;
-    }
-  }
+  // Grief presence
+  scores.push({
+    process: "grief_presence",
+    score: (state?.griefLoad ?? 0) * (constitution.tenderness >= 0.6 ? 1.0 : 0.6),
+  });
 
-  if ((state?.valence ?? 0.5) >= 0.68 && (state?.activation ?? 0.5) >= 0.55) {
-    return constitution.playfulness >= 0.68 ? "play" : "celebration";
-  }
+  // Follow through
+  const hasCompletionMatch = readyLoop && completionPattern.test(input.latestUserText ?? "");
+  const keywordMatch = hasCompletionMatch && readyLoop.keywords.some((kw) =>
+    (input.latestUserText ?? "").toLowerCase().includes(kw.toLowerCase()),
+  );
+  scores.push({
+    process: "follow_through",
+    score: keywordMatch ? 0.8 : 0,
+  });
 
-  if ((state?.vulnerability ?? 0.5) >= 0.64 || (state?.frustration ?? 0.5) >= 0.56) {
-    if (constitution.protectiveness >= 0.72 && relationship.acceptablePushback >= 0.45) {
-      return "protective_check_in" as const;
-    }
+  // Celebration
+  scores.push({
+    process: "celebration",
+    score: Math.max(0, ((state?.valence ?? 0.5) - 0.5) * 1.2 + ((state?.activation ?? 0.5) - 0.5) * 0.8),
+  });
 
-    if (constitution.playfulness >= 0.68 && (state?.frustration ?? 0) < 0.45) {
-      return "play" as const;
-    }
+  // Play
+  scores.push({
+    process: "play",
+    score:
+      (state?.playfulness ?? 0) * 0.7 +
+      ((state?.valence ?? 0.5) - 0.5) * 0.5 +
+      constitution.playfulness * 0.3,
+  });
 
-    if (constitution.directness >= 0.72 && (state?.taskFocus ?? 0) >= 0.55) {
-      return "practical_guidance" as const;
-    }
+  // Protective check-in
+  scores.push({
+    process: "protective_check_in",
+    score:
+      ((state?.vulnerability ?? 0) + (state?.frustration ?? 0)) * 0.4 *
+      (constitution.protectiveness >= 0.6 && relationship.acceptablePushback >= 0.4 ? 1.2 : 0.5),
+  });
 
-    if (constitution.reserve >= 0.68 || (state?.desireForSpace ?? 0) >= 0.45) {
-      return "attunement" as const;
-    }
+  // Practical guidance
+  scores.push({
+    process: "practical_guidance",
+    score:
+      (state?.taskFocus ?? 0) * 0.6 +
+      ((state?.frustration ?? 0) > 0.3 ? 0.2 : 0) +
+      (constitution.directness >= 0.6 ? 0.15 : 0),
+  });
 
-    return "comfort" as const;
-  }
+  // Comfort
+  scores.push({
+    process: "comfort",
+    score: (state?.vulnerability ?? 0) * 0.8 + (state?.frustration ?? 0) * 0.3,
+  });
 
-  if (readyLoop && (state?.taskFocus ?? 0) >= 0.48) {
-    return "reengagement" as const;
-  }
+  // Reengagement
+  scores.push({
+    process: "reengagement",
+    score: readyLoop ? (state?.taskFocus ?? 0) * 0.6 + 0.2 : 0,
+  });
 
-  if ((state?.desireForCloseness ?? 0.5) >= 0.6) {
-    return constitution.playfulness >= 0.62 ? "play" : "attunement";
-  }
+  // Attunement (moderate baseline — the "good default")
+  scores.push({
+    process: "attunement",
+    score:
+      0.25 +
+      (state?.desireForCloseness ?? 0) * 0.3 +
+      (input.channel === "live" ? 0.15 : 0),
+  });
 
-  return input.channel === "live" ? ("attunement" as const) : ("arrival" as const);
+  // Arrival (low baseline for returning/new interactions)
+  scores.push({
+    process: "arrival",
+    score: input.channel !== "live" ? 0.18 : 0.05,
+  });
+
+  // Pick highest
+  scores.sort((a, b) => b.score - a.score);
+  return scores[0]?.process ?? (input.channel === "live" ? "attunement" : "arrival");
 }
 
 function driveForProcess(input: {
@@ -1291,6 +1224,7 @@ function buildStateFromMessages(input: {
   observations?: PerceptionObservation[];
   boundaryTriggered?: boolean;
   latestUserState?: UserStateSnapshot;
+  recommendedProcess?: MindProcess;
 }) {
   const timestamp = input.messages.at(-1)?.createdAt ?? new Date().toISOString();
   const constitution = createPersonalityConstitution(input.persona);
@@ -1335,8 +1269,7 @@ function buildStateFromMessages(input: {
         (input.latestUserState && message.id === input.messages.at(-1)?.id
           ? input.latestUserState
           : message.userState) ??
-        inferHeuristicUserState({
-          text: message.body,
+        inferProsodyUserState({
           channel: message.channel,
           createdAt: message.createdAt,
           prosodyScores: message.metadata?.prosodyScores,
@@ -1448,6 +1381,7 @@ function buildStateFromMessages(input: {
     openLoops,
     boundaryTriggered: Boolean(input.boundaryTriggered),
     channel: input.messages.at(-1)?.channel,
+    recommendedProcess: input.recommendedProcess,
   });
   const currentDrive = driveForProcess({
     process: activeProcess,
@@ -1604,6 +1538,7 @@ export function createInitialMindState(input: {
   observations?: PerceptionObservation[];
   boundaryTriggered?: boolean;
   latestUserState?: UserStateSnapshot;
+  recommendedProcess?: MindProcess;
 }) {
   return buildStateFromMessages({
     persona: input.persona,
@@ -1611,6 +1546,7 @@ export function createInitialMindState(input: {
     observations: input.observations,
     boundaryTriggered: input.boundaryTriggered,
     latestUserState: input.latestUserState,
+    recommendedProcess: input.recommendedProcess,
   });
 }
 

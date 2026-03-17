@@ -40,7 +40,7 @@ import {
   renderIntentPrompt,
   renderLearningPrompt,
 } from "@/lib/soul-runtime";
-import { createInitialMindState, inferHeuristicUserState } from "@/lib/mind-runtime";
+import { createInitialMindState, inferProsodyUserState } from "@/lib/mind-runtime";
 import { soulLogger } from "@/lib/soul-logger";
 import { safeJsonParse, slugify } from "@/lib/utils";
 import { getSupabaseStatus } from "@/lib/supabase";
@@ -72,6 +72,56 @@ function normalizedMonologueValue(value: unknown, fallback: number) {
   }
 
   return Math.max(0, Math.min(1, value));
+}
+
+const USER_STATE_SYSTEM_PROMPT = [
+  "Return only strict JSON for a user-state snapshot.",
+  "Use keys: topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, summary, evidence.",
+  "All numeric fields must be between 0 and 1.",
+  "Use the recent arc and, if provided, prosody hints.",
+  "Additionally, return a 'recommendedProcess' field selecting the most fitting soul process for this moment from: arrival, attunement, comfort, celebration, play, memory_recall, repair, boundary_negotiation, follow_through, silence_holding, grief_presence, practical_guidance, reengagement, protective_check_in. Consider the user's emotional state, the conversational arc, and the persona's personality.",
+].join(" ");
+
+function buildUserStateUserPrompt(input: UserStateRequest): string {
+  const pc = input.persona.personalityConstitution;
+  const personalityLine = pc
+    ? `Persona personality: warmth ${pc.warmth.toFixed(2)}, directness ${pc.directness.toFixed(2)}, playfulness ${pc.playfulness.toFixed(2)}, protectiveness ${pc.protectiveness.toFixed(2)}, tenderness ${pc.tenderness.toFixed(2)}, reserve ${pc.reserve.toFixed(2)}.`
+    : "";
+  return [
+    `Persona: ${input.persona.name} (${input.persona.relationship})`,
+    personalityLine,
+    `Latest user text: ${input.latestUserText}`,
+    `Channel: ${input.channel}`,
+    `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ")}`,
+    input.visualContext && input.visualContext.length > 0
+      ? `Visual context: ${input.visualContext
+          .map((item) => {
+            const signals =
+              item.situationalSignals.length > 0
+                ? ` Signals: ${item.situationalSignals.join(", ")}.`
+                : "";
+            const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
+            const target = item.attentionTarget
+              ? ` Attention target: ${item.attentionTarget}.`
+              : "";
+            return `${item.summary}${signals}${task}${target}`;
+          })
+          .join(" | ")}`
+      : "Visual context: none",
+    input.prosodyScores
+      ? `Prosody hints: ${Object.entries(input.prosodyScores)
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 8)
+          .map(([key, value]) => `${key}:${value.toFixed(2)}`)
+          .join(", ")}`
+      : "Prosody hints: none",
+  ].filter(Boolean).join("\n");
+}
+
+function parseRecommendedProcess(parsed: Record<string, unknown>): MindProcess | undefined {
+  if (typeof parsed.recommendedProcess !== "string") return undefined;
+  const result = soulProcessSchema.safeParse(parsed.recommendedProcess);
+  return result.success ? result.data : undefined;
 }
 
 function fetchWithTimeout(
@@ -284,12 +334,18 @@ export type InternalMonologueResult = {
   replyFormat: "text" | "voice_note";
 };
 
+/** Result of LLM user-state inference — includes the snapshot and an optional process recommendation. */
+export type UserStateInferenceResult = {
+  userState: UserStateSnapshot;
+  recommendedProcess?: MindProcess;
+};
+
 /** Structured reasoning adapter — implemented by Gemini, OpenAI, Anthropic, and a mock fallback. */
 export interface ReasoningProvider {
   buildPersonaDossier(input: PersonaAssemblyInput): Promise<PersonaDossier>;
   extractTextFromScreenshot(input: { buffer: Buffer; fileName: string; mimeType: string }): Promise<string>;
   observeVisualContext(input: VisualPerceptionRequest): Promise<VisualPerceptionResult>;
-  inferUserState(input: UserStateRequest): Promise<UserStateSnapshot>;
+  inferUserState(input: UserStateRequest): Promise<UserStateInferenceResult>;
   generateInternalMonologue(prompt: string): Promise<InternalMonologueResult>;
   respondToUserTurn(input: FastTurnRequest): Promise<FastTurnResult>;
   deliberateIntent(input: IntentRequest): Promise<IntentResult>;
@@ -444,8 +500,7 @@ function fallbackIntentResult(input: IntentRequest): IntentResult {
 }
 
 function fallbackFastTurnResult(input: FastTurnRequest): FastTurnResult {
-  const userState = inferHeuristicUserState({
-    text: input.latestUserText,
+  const userState = inferProsodyUserState({
     channel: input.channel,
     createdAt: input.createdAt,
     visualContext: input.visualContext,
@@ -734,14 +789,14 @@ class MockReasoningProvider implements ReasoningProvider {
     return `Screenshot notes from ${base}: affectionate shorthand, short reply length, and direct follow-up questions.`;
   }
 
-  async inferUserState(input: UserStateRequest) {
-    return inferHeuristicUserState({
-      text: input.latestUserText,
+  async inferUserState(input: UserStateRequest): Promise<UserStateInferenceResult> {
+    const userState = inferProsodyUserState({
       channel: input.channel,
       createdAt: input.createdAt,
       prosodyScores: input.prosodyScores,
       visualContext: input.visualContext,
     });
+    return { userState };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1196,82 +1251,48 @@ class OpenAIReasoningProvider extends MockReasoningProvider {
     }
   }
 
-  override async inferUserState(input: UserStateRequest) {
+  override async inferUserState(input: UserStateRequest): Promise<UserStateInferenceResult> {
     const fallback = await super.inferUserState(input);
 
     try {
-      const systemPrompt = [
-        "Return only strict JSON for a user-state snapshot.",
-        "Use keys: topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, summary, evidence.",
-        "All numeric fields must be between 0 and 1.",
-        "Use the recent arc and, if provided, prosody hints.",
-      ].join(" ");
-
-      const userPrompt = [
-        `Persona: ${input.persona.name} (${input.persona.relationship})`,
-        `Latest user text: ${input.latestUserText}`,
-        `Channel: ${input.channel}`,
-        `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ")}`,
-        input.visualContext && input.visualContext.length > 0
-          ? `Visual context: ${input.visualContext
-              .map((item) => {
-                const signals =
-                  item.situationalSignals.length > 0
-                    ? ` Signals: ${item.situationalSignals.join(", ")}.`
-                    : "";
-                const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
-                const target = item.attentionTarget
-                  ? ` Attention target: ${item.attentionTarget}.`
-                  : "";
-                return `${item.summary}${signals}${task}${target}`;
-              })
-              .join(" | ")}`
-          : "Visual context: none",
-        input.prosodyScores
-          ? `Prosody hints: ${Object.entries(input.prosodyScores)
-              .sort((left, right) => right[1] - left[1])
-              .slice(0, 8)
-              .map(([key, value]) => `${key}:${value.toFixed(2)}`)
-              .join(", ")}`
-          : "Prosody hints: none",
-      ].join("\n");
-
       const response = await this.callResponses({
         model: process.env.OPENAI_MODEL ?? "gpt-4.1-mini",
-        instructions: systemPrompt,
-        input: userPrompt,
+        instructions: USER_STATE_SYSTEM_PROMPT,
+        input: buildUserStateUserPrompt(input),
       });
 
       const parsed = safeJsonParse<Record<string, unknown>>(response.output_text ?? "", {});
       const candidate = userStateSnapshotSchema.safeParse({
-        ...fallback,
+        ...fallback.userState,
         ...parsed,
-        id: fallback.id,
-        modality: fallback.modality,
-        createdAt: input.createdAt ?? fallback.createdAt,
-        prosodyScores: input.prosodyScores ?? fallback.prosodyScores,
+        id: fallback.userState.id,
+        modality: fallback.userState.modality,
+        createdAt: input.createdAt ?? fallback.userState.createdAt,
+        prosodyScores: input.prosodyScores ?? fallback.userState.prosodyScores,
+        provenance: ["openai" as const, ...(fallback.userState.provenance?.filter((p) => p !== "prosody_fast" && p !== "heuristic") ?? [])],
         visualContextSummary:
           typeof parsed.visualContextSummary === "string"
             ? parsed.visualContextSummary
-            : fallback.visualContextSummary,
+            : fallback.userState.visualContextSummary,
         situationalSignals:
           Array.isArray(parsed.situationalSignals) &&
           parsed.situationalSignals.every((value) => typeof value === "string")
             ? parsed.situationalSignals
-            : fallback.situationalSignals,
+            : fallback.userState.situationalSignals,
         environmentPressure:
           typeof parsed.environmentPressure === "number"
             ? parsed.environmentPressure
-            : fallback.environmentPressure,
+            : fallback.userState.environmentPressure,
         taskContext:
-          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.taskContext,
+          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.userState.taskContext,
         attentionTarget:
           typeof parsed.attentionTarget === "string"
             ? parsed.attentionTarget
-            : fallback.attentionTarget,
+            : fallback.userState.attentionTarget,
       });
 
-      return candidate.success ? candidate.data : fallback;
+      const userState = candidate.success ? candidate.data : fallback.userState;
+      return { userState, recommendedProcess: parseRecommendedProcess(parsed) };
     } catch (error) {
       logProviderFailure("openai", "inferUserState", error);
       return fallback;
@@ -1649,7 +1670,7 @@ class GeminiReasoningProvider extends MockReasoningProvider {
     }
   }
 
-  override async inferUserState(input: UserStateRequest) {
+  override async inferUserState(input: UserStateRequest): Promise<UserStateInferenceResult> {
     const fallback = await super.inferUserState(input);
 
     try {
@@ -1658,86 +1679,48 @@ class GeminiReasoningProvider extends MockReasoningProvider {
           responseMimeType: "application/json",
         },
         system_instruction: {
-          parts: [
-            {
-              text: [
-                "Return only strict JSON for a user-state snapshot.",
-                "Use keys: topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, summary, evidence.",
-                "All numeric fields must be between 0 and 1.",
-                "Use the recent arc and, if provided, prosody hints.",
-              ].join(" "),
-            },
-          ],
+          parts: [{ text: USER_STATE_SYSTEM_PROMPT }],
         },
         contents: [
           {
             role: "user",
-            parts: [
-              {
-                text: [
-                  `Persona: ${input.persona.name} (${input.persona.relationship})`,
-                  `Latest user text: ${input.latestUserText}`,
-                  `Channel: ${input.channel}`,
-                  `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ")}`,
-                  input.visualContext && input.visualContext.length > 0
-                    ? `Visual context: ${input.visualContext
-                        .map((item) => {
-                          const signals =
-                            item.situationalSignals.length > 0
-                              ? ` Signals: ${item.situationalSignals.join(", ")}.`
-                              : "";
-                          const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
-                          const target = item.attentionTarget
-                            ? ` Attention target: ${item.attentionTarget}.`
-                            : "";
-                          return `${item.summary}${signals}${task}${target}`;
-                        })
-                        .join(" | ")}`
-                    : "Visual context: none",
-                  input.prosodyScores
-                    ? `Prosody hints: ${Object.entries(input.prosodyScores)
-                        .sort((left, right) => right[1] - left[1])
-                        .slice(0, 8)
-                        .map(([key, value]) => `${key}:${value.toFixed(2)}`)
-                        .join(", ")}`
-                    : "Prosody hints: none",
-                ].join("\n"),
-              },
-            ],
+            parts: [{ text: buildUserStateUserPrompt(input) }],
           },
         ],
       });
 
       const parsed = safeJsonParse<Record<string, unknown>>(this.extractText(response), {});
       const candidate = userStateSnapshotSchema.safeParse({
-        ...fallback,
+        ...fallback.userState,
         ...parsed,
-        id: fallback.id,
-        modality: fallback.modality,
-        createdAt: input.createdAt ?? fallback.createdAt,
-        prosodyScores: input.prosodyScores ?? fallback.prosodyScores,
+        id: fallback.userState.id,
+        modality: fallback.userState.modality,
+        createdAt: input.createdAt ?? fallback.userState.createdAt,
+        prosodyScores: input.prosodyScores ?? fallback.userState.prosodyScores,
+        provenance: ["gemini" as const, ...(fallback.userState.provenance?.filter((p) => p !== "prosody_fast" && p !== "heuristic") ?? [])],
         visualContextSummary:
           typeof parsed.visualContextSummary === "string"
             ? parsed.visualContextSummary
-            : fallback.visualContextSummary,
+            : fallback.userState.visualContextSummary,
         situationalSignals:
           Array.isArray(parsed.situationalSignals) &&
           parsed.situationalSignals.every((value) => typeof value === "string")
             ? parsed.situationalSignals
-            : fallback.situationalSignals,
+            : fallback.userState.situationalSignals,
         environmentPressure:
           typeof parsed.environmentPressure === "number"
             ? parsed.environmentPressure
-            : fallback.environmentPressure,
+            : fallback.userState.environmentPressure,
         taskContext:
-          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.taskContext,
+          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.userState.taskContext,
         attentionTarget:
           typeof parsed.attentionTarget === "string"
             ? parsed.attentionTarget
-            : fallback.attentionTarget,
+            : fallback.userState.attentionTarget,
       });
 
-      return candidate.success ? candidate.data : fallback;
+      const userState = candidate.success ? candidate.data : fallback.userState;
+      return { userState, recommendedProcess: parseRecommendedProcess(parsed) };
     } catch (error) {
       logProviderFailure("gemini", "inferUserState", error);
       return fallback;
@@ -2093,86 +2076,52 @@ class AnthropicReasoningProvider extends MockReasoningProvider {
     }
   }
 
-  override async inferUserState(input: UserStateRequest) {
+  override async inferUserState(input: UserStateRequest): Promise<UserStateInferenceResult> {
     const fallback = await super.inferUserState(input);
 
     try {
-      const systemPrompt = [
-        "Return only strict JSON for a user-state snapshot.",
-        "Use keys: topSignals, valence, arousal, activation, certainty, vulnerability, desireForCloseness, desireForSpace, repairRisk, boundaryPressure, taskFocus, griefLoad, playfulness, frustration, summary, evidence.",
-        "All numeric fields must be between 0 and 1.",
-        "Use the recent arc and, if provided, prosody hints.",
-      ].join(" ");
-
-      const userPrompt = [
-        `Persona: ${input.persona.name} (${input.persona.relationship})`,
-        `Latest user text: ${input.latestUserText}`,
-        `Channel: ${input.channel}`,
-        `Recent arc: ${input.messages.slice(-6).map((message) => `${message.role}:${message.body}`).join(" | ")}`,
-        input.visualContext && input.visualContext.length > 0
-          ? `Visual context: ${input.visualContext
-              .map((item) => {
-                const signals =
-                  item.situationalSignals.length > 0
-                    ? ` Signals: ${item.situationalSignals.join(", ")}.`
-                    : "";
-                const task = item.taskContext ? ` Task context: ${item.taskContext}.` : "";
-                const target = item.attentionTarget
-                  ? ` Attention target: ${item.attentionTarget}.`
-                  : "";
-                return `${item.summary}${signals}${task}${target}`;
-              })
-              .join(" | ")}`
-          : "Visual context: none",
-        input.prosodyScores
-          ? `Prosody hints: ${Object.entries(input.prosodyScores)
-              .sort((left, right) => right[1] - left[1])
-              .slice(0, 8)
-              .map(([key, value]) => `${key}:${value.toFixed(2)}`)
-              .join(", ")}`
-          : "Prosody hints: none",
-      ].join("\n");
-
       const response = await this.callMessages({
-        system: systemPrompt,
+        system: USER_STATE_SYSTEM_PROMPT,
         messages: [
           {
             role: "user",
-            content: [{ type: "text", text: userPrompt }],
+            content: [{ type: "text", text: buildUserStateUserPrompt(input) }],
           },
         ],
       });
 
       const parsed = safeJsonParse<Record<string, unknown>>(this.extractText(response), {});
       const candidate = userStateSnapshotSchema.safeParse({
-        ...fallback,
+        ...fallback.userState,
         ...parsed,
-        id: fallback.id,
-        modality: fallback.modality,
-        createdAt: input.createdAt ?? fallback.createdAt,
-        prosodyScores: input.prosodyScores ?? fallback.prosodyScores,
+        id: fallback.userState.id,
+        modality: fallback.userState.modality,
+        createdAt: input.createdAt ?? fallback.userState.createdAt,
+        prosodyScores: input.prosodyScores ?? fallback.userState.prosodyScores,
+        provenance: ["anthropic" as const, ...(fallback.userState.provenance?.filter((p) => p !== "prosody_fast" && p !== "heuristic") ?? [])],
         visualContextSummary:
           typeof parsed.visualContextSummary === "string"
             ? parsed.visualContextSummary
-            : fallback.visualContextSummary,
+            : fallback.userState.visualContextSummary,
         situationalSignals:
           Array.isArray(parsed.situationalSignals) &&
           parsed.situationalSignals.every((value) => typeof value === "string")
             ? parsed.situationalSignals
-            : fallback.situationalSignals,
+            : fallback.userState.situationalSignals,
         environmentPressure:
           typeof parsed.environmentPressure === "number"
             ? parsed.environmentPressure
-            : fallback.environmentPressure,
+            : fallback.userState.environmentPressure,
         taskContext:
-          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.taskContext,
+          typeof parsed.taskContext === "string" ? parsed.taskContext : fallback.userState.taskContext,
         attentionTarget:
           typeof parsed.attentionTarget === "string"
             ? parsed.attentionTarget
-            : fallback.attentionTarget,
+            : fallback.userState.attentionTarget,
       });
 
-      return candidate.success ? candidate.data : fallback;
+      const userState = candidate.success ? candidate.data : fallback.userState;
+      return { userState, recommendedProcess: parseRecommendedProcess(parsed) };
     } catch (error) {
       logProviderFailure("anthropic", "inferUserState", error);
       return fallback;

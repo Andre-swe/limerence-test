@@ -15,7 +15,7 @@ import { buildPersonaLivePrompt, createPersonaLiveSession } from "@/lib/hume-evi
 import {
   createInitialMindState,
   createRelationshipModel,
-  inferHeuristicUserState,
+  inferProsodyUserState,
 } from "@/lib/mind-runtime";
 import { getReadyScheduledPerceptions } from "@/lib/soul-kernel";
 import { buildSoulHarness, buildStableSystemPrompt, renderLiveContextOverlay, renderSoulHarnessContext } from "@/lib/soul-harness";
@@ -1591,8 +1591,7 @@ describe("persona workflows", () => {
 
     const messageBody =
       "i'm nervous about the interview tomorrow. tell me what to do, and can you stay with me a minute?";
-    const userState = inferHeuristicUserState({
-      text: messageBody,
+    const userState = inferProsodyUserState({
       channel: "web",
       createdAt: "2026-03-12T12:00:00.000Z",
     });
