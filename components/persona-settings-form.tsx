@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 
 type PersonaSettingsView = {
@@ -77,8 +77,19 @@ export function PersonaSettingsForm({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const submit = async () => {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsSaving(true);
     setError(null);
 
@@ -95,6 +106,7 @@ export function PersonaSettingsForm({
           quietHoursEnd,
           preferredMode,
         }),
+        signal: controller.signal,
       });
 
       const body = (await response.json().catch(() => ({}))) as {
@@ -114,6 +126,9 @@ export function PersonaSettingsForm({
       setPreferredMode(body.persona.heartbeatPolicy.preferredMode);
       setSavedAt(new Date().toISOString());
     } catch (submitError) {
+      if (submitError instanceof DOMException && submitError.name === "AbortError") {
+        return;
+      }
       setError(
         submitError instanceof Error ? submitError.message : "Unable to save persona settings.",
       );

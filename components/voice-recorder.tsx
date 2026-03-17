@@ -20,6 +20,10 @@ export function VoiceRecorder({
 
   useEffect(() => {
     return () => {
+      if (recorderRef.current) {
+        recorderRef.current.ondataavailable = null;
+        recorderRef.current.onstop = null;
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };

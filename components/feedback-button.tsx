@@ -19,6 +19,7 @@ export function FeedbackButton({
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}
+        aria-expanded={isOpen}
         aria-label="Correct this reply"
         title="Correct this reply"
         className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border)] text-[var(--sage-deep)] transition hover:bg-[rgba(255,255,255,0.68)]"
