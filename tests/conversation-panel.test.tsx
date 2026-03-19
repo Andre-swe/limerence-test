@@ -9,6 +9,7 @@ const {
   disconnectMock,
   sendSessionSettingsMock,
   voiceHarness,
+  mockMarkCallMade,
 } = vi.hoisted(() => ({
   connectMock: vi.fn(),
   disconnectMock: vi.fn(),
@@ -17,6 +18,17 @@ const {
     latestProps: null as null | Record<string, unknown>,
     setStatus: null as null | ((value: "connected" | "connecting" | "disconnected") => void),
   },
+  mockMarkCallMade: vi.fn(),
+}));
+
+vi.mock("@/components/onboarding", () => ({
+  useOnboardingActions: () => ({
+    markPersonaCreated: vi.fn(),
+    markMessageSent: vi.fn(),
+    markCallMade: mockMarkCallMade,
+    completedSteps: [],
+    isComplete: false,
+  }),
 }));
 
 vi.mock("@humeai/voice-react", async () => {
@@ -384,10 +396,9 @@ describe("ConversationPanel", () => {
 
     expect(track.stop).toHaveBeenCalled();
 
-    expect(screen.getByText("Socket dropped")).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([input]) =>
-      String(input).endsWith("/live/end"),
-    )).toBe(true);
+    // With reconnection logic, 1006 errors trigger reconnection mode instead of showing error immediately
+    // The "Connection lost" UI should be shown instead of the raw error message
+    expect(screen.getByText("Connection lost")).toBeTruthy();
   });
 
   it("surfaces visual perception errors without crashing the live session", async () => {

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { Check, CheckCheck, ImagePlus, Loader2, SendHorizontal } from "lucide-react";
 import { FeedbackButton } from "@/components/feedback-button";
+import { useOnboardingActions } from "@/components/onboarding";
 import { VoiceRecorder } from "@/components/voice-recorder";
 import { formatDateTime } from "@/lib/utils";
 import type { MessageAttachment, MessageEntry, PersonaStatus } from "@/lib/types";
@@ -249,6 +250,7 @@ export function MessagesPanel({
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const sendingRef = useRef(false);
   const isLocked = personaStatus !== "active";
+  const { markMessageSent } = useOnboardingActions();
 
   async function submit(payload: { text?: string; file?: File; images?: File[] }) {
     if (isSending || sendingRef.current) {
@@ -349,6 +351,7 @@ export function MessagesPanel({
       setMessages(data.messages);
       optimisticAudio.dispose();
       optimisticImages.dispose();
+      markMessageSent();
     } catch (error) {
       optimisticAudio.dispose();
       optimisticImages.dispose();

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Trash2, Wand2 } from "lucide-react";
+import { useOnboardingActions } from "@/components/onboarding";
 import { VoiceRecorder } from "@/components/voice-recorder";
 import { interviewPrompts } from "@/lib/types";
 import { houseVoicePresets } from "@/lib/voice-presets";
@@ -15,6 +16,7 @@ type RecordedSample = {
 
 export function CreatePersonaForm() {
   const router = useRouter();
+  const { markPersonaCreated } = useOnboardingActions();
   const [presencePreset, setPresencePreset] = useState<"soft" | "steady" | "close">("steady");
   const [modePreset, setModePreset] = useState<"mixed" | "text" | "voice_note">("mixed");
   const [starterVoiceId, setStarterVoiceId] = useState<string>(houseVoicePresets[0]?.id ?? "");
@@ -101,6 +103,7 @@ export function CreatePersonaForm() {
             throw new Error(body.error ?? "Unable to create persona.");
           }
           const payload = (await response.json()) as { personaId: string };
+          markPersonaCreated();
           router.push(`/personas/${payload.personaId}`);
         } catch (error) {
           setCreateError(error instanceof Error ? error.message : "Something went wrong.");

@@ -35,6 +35,7 @@ import {
   type VoiceEvent,
 } from "@/components/conversation-panel-live-utils";
 import { useConversationPanelLive } from "@/components/use-conversation-panel-live";
+import { useOnboardingActions } from "@/components/onboarding";
 import { friendlyErrors, parseErrorType } from "@/components/thinking-indicator";
 import type { LiveSessionMode, PersonaStatus, SoulSessionFrame } from "@/lib/types";
 
@@ -56,6 +57,7 @@ export function ConversationPanel({
   personaName,
   personaStatus,
 }: ConversationPanelProps) {
+  const { markCallMade } = useOnboardingActions();
   const [isPreparingLive, setIsPreparingLive] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [visualError, setVisualError] = useState<string | null>(null);
@@ -235,6 +237,8 @@ export function ConversationPanel({
         setReconnectionState("connected");
         setReconnectAttempt(0);
         setNextRetryIn(null);
+        // Mark call made for onboarding
+        markCallMade();
       }}
       onClose={(event) => {
         const closingSessionId = sessionId;

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
+import { HomeOnboarding } from "@/components/home-client";
 import { LogoMark } from "@/components/logo-mark";
 import { PersonaListCard, PersonaListEmpty } from "@/components/persona-list-card";
 import { UserMenu } from "@/components/user-menu";
@@ -48,6 +49,12 @@ export default async function Home() {
             {user && <UserMenu email={user.email ?? "User"} />}
           </div>
         </header>
+
+        {/* Onboarding for new users */}
+        <HomeOnboarding 
+          hasPersonas={hasPersonas} 
+          firstPersonaId={personasWithMeta[0]?.persona.id} 
+        />
 
         {hasPersonas ? (
           <>
