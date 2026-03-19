@@ -22,6 +22,7 @@ export function CreatePersonaForm() {
   const [recorderError, setRecorderError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const sampleUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
@@ -42,9 +43,52 @@ export function CreatePersonaForm() {
       onSubmit={async (event) => {
         event.preventDefault();
         if (isSubmitting) return;
+
+        // Client-side validation
+        const form = event.currentTarget;
+        const formData = new FormData(form);
+        const errors: Record<string, string> = {};
+
+        const name = (formData.get("name") as string)?.trim();
+        const relationship = (formData.get("relationship") as string)?.trim();
+        const description = (formData.get("description") as string)?.trim();
+        const attestedRights = formData.get("attestedRights");
+
+        if (!name || name.length < 1) {
+          errors.name = "Name is required";
+        } else if (name.length > 50) {
+          errors.name = "Name must be 50 characters or less";
+        }
+
+        if (!relationship || relationship.length < 1) {
+          errors.relationship = "Relationship is required";
+        } else if (relationship.length > 50) {
+          errors.relationship = "Relationship must be 50 characters or less";
+        }
+
+        if (!description || description.length < 10) {
+          errors.description = "Please provide at least 10 characters describing them";
+        } else if (description.length > 2000) {
+          errors.description = "Description must be 2000 characters or less";
+        }
+
+        if (!attestedRights) {
+          errors.attestedRights = "You must confirm you have the rights to this material";
+        }
+
+        if (!starterVoiceId) {
+          errors.voice = "Please select a starting voice";
+        }
+
+        if (Object.keys(errors).length > 0) {
+          setFieldErrors(errors);
+          setCreateError("Please fix the errors above");
+          return;
+        }
+
+        setFieldErrors({});
         setIsSubmitting(true);
         try {
-          const formData = new FormData(event.currentTarget);
           recordedSamples.forEach((sample) => {
             formData.append("voiceSamples", sample.file);
           });
@@ -91,18 +135,28 @@ export function CreatePersonaForm() {
             <input
               name="name"
               required
-              className="input-quiet w-full"
+              maxLength={50}
+              className={`input-quiet w-full ${fieldErrors.name ? "border-[var(--danger)]" : ""}`}
               placeholder="Mom"
+              onChange={() => setFieldErrors((prev) => ({ ...prev, name: "" }))}
             />
+            {fieldErrors.name && (
+              <p className="text-xs text-[var(--danger)]">{fieldErrors.name}</p>
+            )}
           </label>
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--sage-deep)]">Relationship</span>
             <input
               name="relationship"
               required
-              className="input-quiet w-full"
+              maxLength={50}
+              className={`input-quiet w-full ${fieldErrors.relationship ? "border-[var(--danger)]" : ""}`}
               placeholder="Mother"
+              onChange={() => setFieldErrors((prev) => ({ ...prev, relationship: "" }))}
             />
+            {fieldErrors.relationship && (
+              <p className="text-xs text-[var(--danger)]">{fieldErrors.relationship}</p>
+            )}
           </label>
           <label className="space-y-2">
             <span className="text-sm font-medium text-[var(--sage-deep)]">Avatar</span>
@@ -121,9 +175,14 @@ export function CreatePersonaForm() {
             name="description"
             required
             rows={4}
-            className="input-quiet w-full"
+            maxLength={2000}
+            className={`input-quiet w-full ${fieldErrors.description ? "border-[var(--danger)]" : ""}`}
             placeholder="How they sounded, what made them distinct, what kind of emotional weather they carried."
+            onChange={() => setFieldErrors((prev) => ({ ...prev, description: "" }))}
           />
+          {fieldErrors.description && (
+            <p className="text-xs text-[var(--danger)]">{fieldErrors.description}</p>
+          )}
         </label>
       </section>
 
