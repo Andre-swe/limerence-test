@@ -7,11 +7,20 @@ const {
   getProviderStatusMock,
   getSupabaseStatusMock,
   listPersonasForUserMock,
+  getLastMessageMock,
+  getUnreadCountMock,
 } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   getProviderStatusMock: vi.fn(),
   getSupabaseStatusMock: vi.fn(),
   listPersonasForUserMock: vi.fn(),
+  getLastMessageMock: vi.fn(),
+  getUnreadCountMock: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn(),
+  useRouter: vi.fn(() => ({ push: vi.fn(), refresh: vi.fn() })),
 }));
 
 vi.mock("next/link", () => ({
@@ -38,6 +47,11 @@ vi.mock("@/components/persona-card", () => ({
   PersonaCard: ({ persona }: { persona: { name: string } }) => <article>{persona.name}</article>,
 }));
 
+vi.mock("@/components/persona-list-card", () => ({
+  PersonaListCard: ({ persona }: { persona: { name: string } }) => <article>{persona.name}</article>,
+  PersonaListEmpty: () => <div>No personas</div>,
+}));
+
 vi.mock("@/components/user-menu", () => ({
   UserMenu: ({ email }: { email: string }) => <span>{email}</span>,
 }));
@@ -46,8 +60,14 @@ vi.mock("@/components/create-persona-form", () => ({
   CreatePersonaForm: () => <form>CreatePersonaForm</form>,
 }));
 
+vi.mock("@/app/settings/settings-client", () => ({
+  SettingsClient: ({ user }: { user: { email: string } }) => <div>Settings {user.email}</div>,
+}));
+
 vi.mock("@/lib/store", () => ({
   listPersonasForUser: listPersonasForUserMock,
+  getLastMessage: getLastMessageMock,
+  getUnreadCount: getUnreadCountMock,
 }));
 
 vi.mock("@/lib/supabase-server", () => ({
@@ -73,8 +93,11 @@ describe("app pages", () => {
       {
         id: "persona-1",
         name: "Mira",
+        createdAt: "2026-03-16T12:00:00.000Z",
       },
     ]);
+    getLastMessageMock.mockResolvedValue(null);
+    getUnreadCountMock.mockResolvedValue(0);
     createClientMock.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
@@ -105,7 +128,7 @@ describe("app pages", () => {
   it("renders the home page with the authenticated persona grid", async () => {
     const markup = renderToStaticMarkup(await Home());
 
-    expect(markup).toContain("Choose someone.");
+    expect(markup).toContain("Your Personas");
     expect(markup).toContain("Mira");
     expect(markup).toContain("user@example.com");
     expect(listPersonasForUserMock).toHaveBeenCalledWith("user-1");
@@ -118,11 +141,10 @@ describe("app pages", () => {
     expect(markup).toContain("CreatePersonaForm");
   });
 
-  it("renders the settings diagnostics surface", () => {
-    const markup = renderToStaticMarkup(SettingsPage());
+  it("renders the settings page for authenticated users", async () => {
+    const markup = renderToStaticMarkup(await SettingsPage());
 
-    expect(markup).toContain("Call-first, quiet on the surface");
-    expect(markup).toContain("Reasoning: mock");
-    expect(markup).toContain("Runtime table: runtime_store");
+    expect(markup).toContain("Settings");
+    expect(markup).toContain("user@example.com");
   });
 });
