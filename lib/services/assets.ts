@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { savePublicFile } from "@/lib/store";
-import type { MessageAttachment, MessageEntry, StoredAsset } from "@/lib/types";
+import type {
+  MessageAttachment,
+  MessageEntry,
+  StoredAsset,
+  VoiceCloneConsent,
+  VoiceCloneProfile,
+} from "@/lib/types";
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -106,4 +112,39 @@ export async function persistMessageAttachment(
     extractedText: options?.extractedText,
     visualSummary: options?.visualSummary,
   } satisfies MessageAttachment;
+}
+
+export async function persistVoiceCloneReference(
+  file: File,
+  personaId: string,
+  consent: VoiceCloneConsent,
+  options: {
+    duration: number;
+    qualityScore: number;
+  },
+): Promise<VoiceCloneProfile> {
+  validateUpload(file);
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const { fileName, url } = await savePublicFile(
+    buffer,
+    `voice-clone-${personaId}-${Date.now()}.webm`,
+    file.type || "audio/webm",
+  );
+
+  const now = new Date().toISOString();
+  const profileId = randomUUID();
+
+  return {
+    id: profileId,
+    personaId,
+    status: "pending",
+    referenceAudioUrl: url,
+    referenceAudioFileName: fileName,
+    referenceAudioDuration: options.duration,
+    qualityScore: options.qualityScore,
+    consent,
+    createdAt: now,
+    updatedAt: now,
+  };
 }

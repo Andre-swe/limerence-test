@@ -699,13 +699,36 @@ export const soulSessionFrameSchema = z.object({
 
 export const storedAssetSchema = z.object({
   id: z.string(),
-  kind: z.enum(["avatar", "voice_sample", "screenshot", "audio_note"]),
+  kind: z.enum(["avatar", "voice_sample", "screenshot", "audio_note", "voice_clone_reference"]),
   fileName: z.string(),
   originalName: z.string(),
   url: z.string(),
   mimeType: z.string(),
   size: z.number(),
   extractedText: z.string().optional(),
+});
+
+export const voiceCloneConsentSchema = z.object({
+  granted: z.boolean(),
+  timestamp: z.string(),
+  ipAddress: z.string().optional(),
+  userAgent: z.string(),
+  consentText: z.string(),
+});
+
+export const voiceCloneProfileSchema = z.object({
+  id: z.string(),
+  personaId: z.string(),
+  status: z.enum(["pending", "processing", "ready", "failed"]),
+  referenceAudioUrl: z.string(),
+  referenceAudioFileName: z.string(),
+  referenceAudioDuration: z.number(),
+  qualityScore: z.number().min(0).max(100),
+  humeVoiceId: z.string().optional(),
+  consent: voiceCloneConsentSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  errorMessage: z.string().optional(),
 });
 
 export const messageAttachmentSchema = z.object({
@@ -748,8 +771,9 @@ export const voiceProfileSchema = z.object({
   provider: z.enum(["mock", "hume"]),
   voiceId: z.string().optional(),
   status: z.enum(["ready", "preview_only", "unavailable"]),
-  cloneState: z.enum(["none", "pending_mockup", "ready"]).default("none"),
+  cloneState: z.enum(["none", "pending_mockup", "processing", "ready", "failed"]).default("none"),
   cloneRequestedAt: z.string().optional(),
+  cloneProfileId: z.string().optional(),
   watermarkApplied: z.boolean().default(false),
 });
 
@@ -884,6 +908,8 @@ export type MessageAttachment = z.infer<typeof messageAttachmentSchema>;
 export type KnowledgeProfile = z.infer<typeof knowledgeProfileSchema>;
 export type PersonaDossier = z.infer<typeof personaDossierSchema>;
 export type VoiceProfile = z.infer<typeof voiceProfileSchema>;
+export type VoiceCloneConsent = z.infer<typeof voiceCloneConsentSchema>;
+export type VoiceCloneProfile = z.infer<typeof voiceCloneProfileSchema>;
 export type ConsentRecord = z.infer<typeof consentRecordSchema>;
 export type PreferenceSignal = z.infer<typeof preferenceSignalSchema>;
 export type MindProcess = z.infer<typeof soulProcessSchema>;
