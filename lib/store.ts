@@ -1126,6 +1126,30 @@ export async function listMessages(personaId: string) {
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
+/** Get the last message for a persona. */
+export async function getLastMessage(personaId: string): Promise<MessageEntry | null> {
+  const store = await readStore();
+  const messages = store.messages
+    .filter((message) => message.personaId === personaId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return messages[0] ?? null;
+}
+
+/** Get unread message count for a persona (messages from assistant since last user message). */
+export async function getUnreadCount(personaId: string): Promise<number> {
+  const store = await readStore();
+  const messages = store.messages
+    .filter((message) => message.personaId === personaId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  
+  let count = 0;
+  for (const message of messages) {
+    if (message.role === "user") break;
+    if (message.role === "assistant") count++;
+  }
+  return count;
+}
+
 export async function appendMessages(messages: MessageEntry[]) {
   return mutateStore(async (store) => {
     for (const message of messages) {
