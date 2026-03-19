@@ -23,6 +23,21 @@ const jetBrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Limerence",
   description: "AI personas with memory, personality, and voice.",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+    viewportFit: "cover",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Limerence",
+  },
+  formatDetection: {
+    telephone: false,
+  },
 };
 
 export default function RootLayout({

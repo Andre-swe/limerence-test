@@ -40,7 +40,11 @@ body {
   min-height: 100vh;
   background-image:
     radial-gradient(circle at 0 0, rgba(223, 228, 209, 0.48), transparent 24%),
-    radial-gradient(circle at 100% 0, rgba(255, 255, 255, 0.7), transparent 28%),
+    radial-gradient(
+      circle at 100% 0,
+      rgba(255, 255, 255, 0.7),
+      transparent 28%
+    ),
     linear-gradient(180deg, #f7f6f2 0%, #f0eee8 100%);
 }
 
@@ -72,12 +76,20 @@ select {
   pointer-events: none;
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.46), transparent 42%),
-    radial-gradient(circle at bottom left, rgba(103, 112, 100, 0.06), transparent 32%);
+    radial-gradient(
+      circle at bottom left,
+      rgba(103, 112, 100, 0.06),
+      transparent 32%
+    );
   z-index: -1;
 }
 
 .paper-panel {
-  background: linear-gradient(180deg, rgba(251, 250, 244, 0.94), rgba(248, 248, 241, 0.92));
+  background: linear-gradient(
+    180deg,
+    rgba(251, 250, 244, 0.94),
+    rgba(248, 248, 241, 0.92)
+  );
   border: 1px solid var(--border);
   box-shadow: var(--card-shadow);
   backdrop-filter: blur(10px);
@@ -103,8 +115,13 @@ select {
 .presence-orb {
   position: relative;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.8), rgba(190, 160, 108, 0.24) 34%, rgba(103, 112, 100, 0.2) 68%, rgba(63, 74, 66, 0.94));
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(255, 255, 255, 0.8),
+    rgba(190, 160, 108, 0.24) 34%,
+    rgba(103, 112, 100, 0.2) 68%,
+    rgba(63, 74, 66, 0.94)
+  );
   box-shadow:
     inset 0 1px 16px rgba(255, 255, 255, 0.28),
     0 24px 50px rgba(63, 74, 66, 0.16);
@@ -145,8 +162,13 @@ select {
   height: 7.75rem;
   width: 7.75rem;
   border-radius: 999px;
-  background:
-    radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.72), rgba(219, 224, 189, 0.94) 30%, rgba(196, 205, 159, 0.98) 62%, rgba(164, 173, 124, 0.96));
+  background: radial-gradient(
+    circle at 35% 35%,
+    rgba(255, 255, 255, 0.72),
+    rgba(219, 224, 189, 0.94) 30%,
+    rgba(196, 205, 159, 0.98) 62%,
+    rgba(164, 173, 124, 0.96)
+  );
   box-shadow:
     inset 0 1px 12px rgba(255, 255, 255, 0.22),
     0 18px 36px rgba(75, 85, 67, 0.12);
@@ -185,7 +207,11 @@ select {
 }
 
 .message-sheet {
-  background: linear-gradient(180deg, rgba(252, 250, 244, 0.88), rgba(245, 240, 230, 0.88));
+  background: linear-gradient(
+    180deg,
+    rgba(252, 250, 244, 0.88),
+    rgba(245, 240, 230, 0.88)
+  );
   border: 1px solid var(--line);
 }
 
@@ -283,10 +309,18 @@ textarea:focus-visible {
 }
 
 /* Stagger children on grid pages */
-.soft-panel:nth-child(2) { animation-delay: 60ms; }
-.soft-panel:nth-child(3) { animation-delay: 120ms; }
-.soft-panel:nth-child(4) { animation-delay: 180ms; }
-.soft-panel:nth-child(5) { animation-delay: 240ms; }
+.soft-panel:nth-child(2) {
+  animation-delay: 60ms;
+}
+.soft-panel:nth-child(3) {
+  animation-delay: 120ms;
+}
+.soft-panel:nth-child(4) {
+  animation-delay: 180ms;
+}
+.soft-panel:nth-child(5) {
+  animation-delay: 240ms;
+}
 
 /* Soft panel hover lift refinement */
 .soft-panel {
@@ -480,8 +514,13 @@ button:active:not(:disabled) {
 
 /* Status dot — alive, pulsing gently */
 @keyframes status-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .status-dot {
@@ -498,7 +537,8 @@ button:active:not(:disabled) {
 
 /* Voice recording pulse */
 @keyframes rec-pulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 0 0 rgba(122, 63, 58, 0.2);
   }
   50% {
@@ -550,7 +590,8 @@ main {
 
 /* Orb listening state — subtle outer glow */
 @keyframes orb-listen {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow:
       inset 0 1px 12px rgba(255, 255, 255, 0.22),
       0 18px 36px rgba(75, 85, 67, 0.12),
@@ -570,7 +611,8 @@ main {
 
 /* Speaking state — slightly more alive */
 @keyframes orb-speak {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
   }
   25% {
@@ -607,4 +649,200 @@ main {
   padding: 3rem 1.5rem;
   color: rgba(29, 38, 34, 0.4);
   font-size: 0.9375rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mobile Responsiveness                                               */
+/* ------------------------------------------------------------------ */
+
+/* Safe area insets for iOS notch/home indicator */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Minimum touch target size (44px per Apple HIG) */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Mobile-optimized buttons */
+@media (max-width: 640px) {
+  .btn-pill,
+  .btn-solid,
+  .btn-gold,
+  .call-control {
+    min-height: 44px;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .call-control {
+    min-height: 52px;
+    font-size: 0.8125rem;
+  }
+
+  /* Larger tap targets for mobile */
+  button,
+  a,
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-height: 44px;
+  }
+
+  /* Message bubbles - full width on mobile */
+  .msg-bubble {
+    max-width: 85%;
+  }
+
+  /* Reduce padding on mobile */
+  .paper-panel,
+  .soft-panel {
+    padding: 1rem;
+  }
+
+  /* Smaller orb on mobile */
+  .call-orb-shell {
+    height: 14rem;
+    width: 14rem;
+  }
+
+  .call-orb-core {
+    height: 5.5rem;
+    width: 5.5rem;
+  }
+
+  /* Smaller titles on mobile */
+  .serif-title {
+    font-size: 1.75rem;
+  }
+}
+
+/* Prevent iOS zoom on input focus */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Keyboard-aware input positioning */
+.keyboard-aware {
+  position: sticky;
+  bottom: 0;
+  background: var(--background);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Message input container - fixed at bottom on mobile */
+@media (max-width: 640px) {
+  .message-input-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, var(--background) 90%, transparent);
+    padding: 0.75rem 1rem;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0));
+    z-index: 30;
+  }
+
+  /* Add bottom padding to message list to account for fixed input */
+  .message-list-mobile {
+    padding-bottom: 5rem;
+  }
+}
+
+/* Smooth scrolling for message lists */
+.scroll-smooth {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbar on mobile but keep functionality */
+@media (max-width: 640px) {
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Prevent text selection on interactive elements */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Active state for touch devices */
+@media (hover: none) {
+  .btn-pill:active,
+  .btn-solid:active,
+  .btn-gold:active {
+    transform: scale(0.96);
+    opacity: 0.9;
+  }
+
+  .call-control:active:not(:disabled) {
+    transform: scale(0.95);
+    opacity: 0.85;
+  }
+
+  /* Remove hover effects on touch devices */
+  .soft-panel:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Landscape mode adjustments */
+@media (max-height: 500px) and (orientation: landscape) {
+  .call-orb-shell {
+    height: 10rem;
+    width: 10rem;
+  }
+
+  .call-orb-core {
+    height: 4rem;
+    width: 4rem;
+  }
+}
+
+/* Full-height mobile layout */
+.mobile-full-height {
+  min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height for mobile browsers */
+}
+
+/* Prevent body scroll when modal/overlay is open */
+.body-scroll-lock {
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+/* iOS-specific fixes */
+@supports (-webkit-touch-callout: none) {
+  /* Fix for iOS rubber-banding */
+  .ios-scroll-fix {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* Fix for iOS input zoom */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  textarea {
+    font-size: 16px;
+  }
 }

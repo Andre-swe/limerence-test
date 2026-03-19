@@ -468,29 +468,30 @@ export function MessagesPanel({
             This person is not available yet.
           </div>
         ) : (
-          <div className="mt-6 border-t border-[var(--line)] pt-5">
+          <div className="message-input-container mt-4 border-t border-[var(--line)] bg-[var(--background)] pt-4 sm:mt-6 sm:pt-5">
             <textarea
               value={text}
               onChange={(event) => setText(event.target.value)}
-              rows={3}
+              rows={2}
               placeholder={`Message ${personaName}`}
-              className="input-quiet w-full text-sm"
+              className="input-quiet w-full text-base sm:text-sm"
+              style={{ fontSize: "16px" }}
             />
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-3">
               <button
                 type="button"
                 disabled={isSending || text.trim().length === 0}
                 onClick={() => {
                   void submit({ text });
                 }}
-                className="btn-solid"
+                className="btn-solid touch-target flex-1 justify-center sm:flex-none"
               >
                 {isSending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <SendHorizontal className="h-4 w-4" />
                 )}
-                Send
+                <span className="sm:inline">Send</span>
               </button>
 
               <VoiceRecorder
@@ -506,10 +507,10 @@ export function MessagesPanel({
               <button
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
-                className="btn-pill"
+                className="btn-pill touch-target"
               >
                 <ImagePlus className="h-4 w-4" />
-                Image
+                <span className="hidden sm:inline">Image</span>
               </button>
 
 
