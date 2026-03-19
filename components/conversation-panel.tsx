@@ -2,6 +2,8 @@
 
 import { VoiceProvider } from "@humeai/voice-react";
 import {
+  useCallback,
+  useEffect,
   useRef,
   useState,
   type Dispatch,
@@ -14,9 +16,11 @@ import {
   Mic,
   MicOff,
   MonitorUp,
+  RefreshCw,
   Square,
   Volume2,
   VolumeX,
+  WifiOff,
 } from "lucide-react";
 import {
   isAssistantMessageEvent,
@@ -33,6 +37,8 @@ import {
 import { useConversationPanelLive } from "@/components/use-conversation-panel-live";
 import { friendlyErrors, parseErrorType } from "@/components/thinking-indicator";
 import type { LiveSessionMode, PersonaStatus, SoulSessionFrame } from "@/lib/types";
+
+type ReconnectionState = "connected" | "reconnecting" | "failed" | "idle";
 
 type LiveTranscriptResponse = {
   contextualUpdate?: string;
@@ -63,14 +69,35 @@ export function ConversationPanel({
     LiveSessionMode,
     "screen" | "camera"
   > | null>(null);
+  const [reconnectionState, setReconnectionState] = useState<ReconnectionState>("idle");
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [nextRetryIn, setNextRetryIn] = useState<number | null>(null);
   const persistedLiveEventsRef = useRef(new Set<string>());
   const userEndedLiveRef = useRef(false);
   const activeModeRef = useRef(activeMode);
   const sessionIdRef = useRef(sessionId);
+  const lastSessionStateRef = useRef<{
+    mode: LiveSessionMode;
+    sessionId: string | null;
+    contextText: string;
+    contextVersion: number;
+  } | null>(null);
   activeModeRef.current = activeMode;
   sessionIdRef.current = sessionId;
 
   const isLocked = personaStatus !== "active";
+
+  // Store session state for potential reconnection
+  const saveSessionState = useCallback(() => {
+    if (sessionId) {
+      lastSessionStateRef.current = {
+        mode: activeMode,
+        sessionId,
+        contextText: sessionContextText,
+        contextVersion: sessionContextVersion,
+      };
+    }
+  }, [activeMode, sessionId, sessionContextText, sessionContextVersion]);
 
   function resetLiveSessionArtifacts() {
     persistedLiveEventsRef.current.clear();
@@ -205,14 +232,30 @@ export function ConversationPanel({
         userEndedLiveRef.current = false;
         setLiveError(null);
         setLiveState("listening");
+        setReconnectionState("connected");
+        setReconnectAttempt(0);
+        setNextRetryIn(null);
       }}
       onClose={(event) => {
         const closingSessionId = sessionId;
         const closingMode = activeMode;
         const endedByUser = userEndedLiveRef.current;
 
+        // Save session state before clearing for potential reconnection
+        saveSessionState();
+
         if (!endedByUser) {
           const reason = event.reason?.trim();
+          const isNetworkError = event.code === 1006 || event.code === 1001;
+          
+          if (isNetworkError && lastSessionStateRef.current) {
+            // Network disconnection - attempt reconnection
+            setReconnectionState("reconnecting");
+            setLiveState("idle");
+            // Don't clear session state yet - we'll try to reconnect
+            return;
+          }
+
           const message =
             reason ||
             (event.code
@@ -242,7 +285,9 @@ export function ConversationPanel({
         setSessionId(null);
         setActiveMode("voice");
         setActiveVisualMode(null);
+        setReconnectionState("idle");
         userEndedLiveRef.current = false;
+        lastSessionStateRef.current = null;
       }}
     >
       <ConversationPanelInner
@@ -255,6 +300,13 @@ export function ConversationPanel({
         pendingSessionFrame={pendingSessionFrame}
         personaId={personaId}
         personaName={personaName}
+        reconnectionState={reconnectionState}
+        reconnectAttempt={reconnectAttempt}
+        nextRetryIn={nextRetryIn}
+        setReconnectionState={setReconnectionState}
+        setReconnectAttempt={setReconnectAttempt}
+        setNextRetryIn={setNextRetryIn}
+        lastSessionStateRef={lastSessionStateRef}
         resetLiveSessionArtifacts={resetLiveSessionArtifacts}
         sessionContextText={sessionContextText}
         sessionContextVersion={sessionContextVersion}
@@ -286,6 +338,18 @@ type ConversationPanelInnerProps = {
   pendingSessionFrame: SoulSessionFrame | null;
   personaId: string;
   personaName: string;
+  reconnectionState: ReconnectionState;
+  reconnectAttempt: number;
+  nextRetryIn: number | null;
+  setReconnectionState: Dispatch<SetStateAction<ReconnectionState>>;
+  setReconnectAttempt: Dispatch<SetStateAction<number>>;
+  setNextRetryIn: Dispatch<SetStateAction<number | null>>;
+  lastSessionStateRef: MutableRefObject<{
+    mode: LiveSessionMode;
+    sessionId: string | null;
+    contextText: string;
+    contextVersion: number;
+  } | null>;
   resetLiveSessionArtifacts: () => void;
   sessionContextText: string;
   sessionContextVersion: number;
@@ -326,7 +390,81 @@ function ConversationPanelInner(props: ConversationPanelInnerProps) {
     unmuteAudio,
   } = useConversationPanelLive(props);
 
-  const { activeMode, activeVisualMode, isLocked, liveState, personaName } = props;
+  const { 
+    activeMode, 
+    activeVisualMode, 
+    isLocked, 
+    liveState, 
+    personaName,
+    reconnectionState,
+    reconnectAttempt,
+    nextRetryIn,
+    setReconnectionState,
+    setReconnectAttempt,
+    setNextRetryIn,
+    lastSessionStateRef,
+  } = props;
+
+  const isReconnecting = reconnectionState === "reconnecting";
+
+  // Handle reconnection with exponential backoff
+  const attemptReconnect = useCallback(async () => {
+    if (!lastSessionStateRef.current) {
+      setReconnectionState("failed");
+      return;
+    }
+
+    const savedState = lastSessionStateRef.current;
+    setReconnectAttempt((prev) => prev + 1);
+
+    try {
+      // Try to start a new session with the saved mode
+      await startLiveSession(savedState.mode);
+      setReconnectionState("connected");
+      setReconnectAttempt(0);
+      setNextRetryIn(null);
+    } catch {
+      // Will be handled by the backoff logic
+    }
+  }, [lastSessionStateRef, setReconnectionState, setReconnectAttempt, setNextRetryIn, startLiveSession]);
+
+  // Exponential backoff reconnection effect
+  useEffect(() => {
+    if (reconnectionState !== "reconnecting") return;
+
+    const maxAttempts = 5;
+    const baseDelay = 1000;
+    const maxDelay = 30000;
+
+    if (reconnectAttempt >= maxAttempts) {
+      setReconnectionState("failed");
+      lastSessionStateRef.current = null;
+      return;
+    }
+
+    const delay = Math.min(maxDelay, baseDelay * Math.pow(2, reconnectAttempt) + Math.random() * 1000);
+    setNextRetryIn(Math.ceil(delay / 1000));
+
+    const countdownInterval = setInterval(() => {
+      setNextRetryIn((prev) => (prev && prev > 1 ? prev - 1 : null));
+    }, 1000);
+
+    const reconnectTimeout = setTimeout(() => {
+      void attemptReconnect();
+    }, delay);
+
+    return () => {
+      clearInterval(countdownInterval);
+      clearTimeout(reconnectTimeout);
+    };
+  }, [reconnectionState, reconnectAttempt, attemptReconnect, setReconnectionState, setNextRetryIn, lastSessionStateRef]);
+
+  const cancelReconnection = useCallback(() => {
+    setReconnectionState("idle");
+    setReconnectAttempt(0);
+    setNextRetryIn(null);
+    lastSessionStateRef.current = null;
+  }, [setReconnectionState, setReconnectAttempt, setNextRetryIn, lastSessionStateRef]);
 
   return (
     <section className="paper-panel mx-auto max-w-3xl rounded-[42px] px-4 py-4 sm:px-6 sm:py-6">
@@ -363,18 +501,73 @@ function ConversationPanelInner(props: ConversationPanelInnerProps) {
           </div>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.78)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--sage-deep)]">
-              {liveState === "thinking" && (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              )}
-              {liveState === "thinking" ? `${personaName} is thinking...` : minimalStatus}
-            </div>
+            {isReconnecting ? (
+              <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(190,160,108,0.3)] bg-[rgba(190,160,108,0.12)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--gold)]">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Reconnecting{nextRetryIn ? ` in ${nextRetryIn}s` : "..."}
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.78)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--sage-deep)]">
+                {liveState === "thinking" && (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                )}
+                {liveState === "thinking" ? `${personaName} is thinking...` : minimalStatus}
+              </div>
+            )}
             {liveConnected ? (
               <div className="inline-flex items-center rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.54)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--sage)]">
                 {activeVisualMode ? `${modeLabel(activeVisualMode)} active` : "Talk only"}
               </div>
             ) : null}
           </div>
+
+          {/* Reconnection UI */}
+          {isReconnecting && (
+            <div className="mt-5 max-w-sm space-y-3">
+              <div className="flex items-center justify-center gap-2 text-[var(--gold)]">
+                <WifiOff className="h-5 w-5" />
+                <p className="text-lg font-semibold tracking-[-0.02em]">
+                  Connection lost
+                </p>
+              </div>
+              <p className="meta-quiet leading-6">
+                Attempting to reconnect (attempt {reconnectAttempt + 1} of 5)...
+              </p>
+              <button
+                type="button"
+                onClick={cancelReconnection}
+                className="btn-pill mx-auto"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {/* Reconnection failed UI */}
+          {reconnectionState === "failed" && (
+            <div className="mt-5 max-w-sm space-y-3">
+              <div className="flex items-center justify-center gap-2 text-[var(--danger)]">
+                <WifiOff className="h-5 w-5" />
+                <p className="text-lg font-semibold tracking-[-0.02em]">
+                  Unable to reconnect
+                </p>
+              </div>
+              <p className="meta-quiet leading-6">
+                The connection could not be restored. Please try starting a new call.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setReconnectionState("idle");
+                  void startLiveSession("voice");
+                }}
+                className="btn-solid mx-auto"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Try again
+              </button>
+            </div>
+          )}
 
           {callIssue || isLocked ? (
             <div className="mt-5 max-w-sm space-y-3">
