@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { ALLOWED_ORIGINS } from "@/lib/proxy-config";
+import { isAllowedOrigin } from "@/lib/proxy-config";
 
 export async function POST(request: Request) {
   let body: { email?: string; password?: string };
@@ -39,9 +39,14 @@ export async function POST(request: Request) {
   );
 
   const rawOrigin = request.headers.get("origin");
-  const origin = rawOrigin && ALLOWED_ORIGINS.includes(rawOrigin)
-    ? rawOrigin
-    : ALLOWED_ORIGINS[0];
+  const referer = request.headers.get("referer");
+  const refererOrigin = referer ? new URL(referer).origin : null;
+  
+  // Use origin header, or extract from referer, or fall back to request URL
+  let origin = rawOrigin;
+  if (!origin || !isAllowedOrigin(origin)) {
+    origin = refererOrigin && isAllowedOrigin(refererOrigin) ? refererOrigin : new URL(request.url).origin;
+  }
 
   const { data, error } = await supabase.auth.signUp({
     email,

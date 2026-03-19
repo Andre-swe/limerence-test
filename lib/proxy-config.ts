@@ -1,14 +1,28 @@
 import type { NextResponse } from "next/server";
 
 export const ALLOWED_ORIGINS = [
-  "https://limerance.vercel.app",
   ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
 ];
+
+export function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+  
+  // Allow any vercel.app subdomain for preview deployments
+  if (origin.endsWith(".vercel.app")) return true;
+  
+  // Allow localhost in development
+  if (process.env.NODE_ENV !== "production" && origin === "http://localhost:3000") {
+    return true;
+  }
+  
+  return ALLOWED_ORIGINS.includes(origin);
+}
 
 export const PUBLIC_PATHS = [
   "/login",
   "/auth/callback",
   "/api/auth",
+  "/setup-password",
 ];
 
 export const PROTECTED_PAGES = [
