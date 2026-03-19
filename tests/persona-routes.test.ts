@@ -428,7 +428,7 @@ describe("persona routes", () => {
 
     const body = await expectJsonResponse<{ accessToken: string }>(response);
     expect(body.accessToken).toBe("live-token");
-    expect(createPersonaLiveSessionMock).toHaveBeenCalledWith(activePersona, "camera");
+    expect(createPersonaLiveSessionMock).toHaveBeenCalledWith(activePersona, "camera", { isPremium: false });
   });
 
   it("normalizes message attachments and channel values", async () => {
