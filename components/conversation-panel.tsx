@@ -31,6 +31,7 @@ import {
   type VoiceEvent,
 } from "@/components/conversation-panel-live-utils";
 import { useConversationPanelLive } from "@/components/use-conversation-panel-live";
+import { friendlyErrors, parseErrorType } from "@/components/thinking-indicator";
 import type { LiveSessionMode, PersonaStatus, SoulSessionFrame } from "@/lib/types";
 
 type LiveTranscriptResponse = {
@@ -113,7 +114,9 @@ export function ConversationPanel({
       }
     } catch (error) {
       persistedLiveEventsRef.current.delete(input.eventId);
-      setLiveError(resolveErrorMessage(error));
+      const errorType = parseErrorType(error);
+      const friendly = friendlyErrors[errorType];
+      setLiveError(friendly.message);
     }
   }
 
@@ -360,8 +363,11 @@ function ConversationPanelInner(props: ConversationPanelInnerProps) {
           </div>
 
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
-            <div className="inline-flex items-center rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.78)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--sage-deep)]">
-              {minimalStatus}
+            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.78)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--sage-deep)]">
+              {liveState === "thinking" && (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              )}
+              {liveState === "thinking" ? `${personaName} is thinking...` : minimalStatus}
             </div>
             {liveConnected ? (
               <div className="inline-flex items-center rounded-full border border-[var(--line)] bg-[rgba(255,255,255,0.54)] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-[var(--sage)]">
