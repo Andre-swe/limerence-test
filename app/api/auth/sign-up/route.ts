@@ -42,10 +42,19 @@ export async function POST(request: Request) {
   const referer = request.headers.get("referer");
   const refererOrigin = referer ? new URL(referer).origin : null;
   
-  // Use origin header, or extract from referer, or fall back to request URL
+  // Vercel provides the actual host in x-forwarded-host header
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+  const vercelOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
+  
+  // Use origin header, referer, Vercel forwarded host, or fall back to request URL
   let origin = rawOrigin;
   if (!origin || !isAllowedOrigin(origin)) {
-    origin = refererOrigin && isAllowedOrigin(refererOrigin) ? refererOrigin : new URL(request.url).origin;
+    origin = refererOrigin && isAllowedOrigin(refererOrigin) 
+      ? refererOrigin 
+      : vercelOrigin && isAllowedOrigin(vercelOrigin)
+        ? vercelOrigin
+        : new URL(request.url).origin;
   }
 
   const { data, error } = await supabase.auth.signUp({
