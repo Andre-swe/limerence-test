@@ -22,6 +22,19 @@ interface AudioQualityMetrics {
   qualityScore: number;
 }
 
+export interface VoiceCloneConsent {
+  /** Whether consent was given */
+  granted: boolean;
+  /** ISO timestamp when consent was granted */
+  timestamp: string;
+  /** Client IP address (captured server-side) */
+  ipAddress?: string;
+  /** User agent string */
+  userAgent: string;
+  /** The specific consent text the user agreed to */
+  consentText: string;
+}
+
 type RecordingState = "idle" | "recording" | "paused" | "recorded";
 
 interface VoiceCloneRecorderProps {
@@ -30,11 +43,17 @@ interface VoiceCloneRecorderProps {
   /** Maximum recording duration in seconds (default: 60) */
   maxDuration?: number;
   /** Called when recording is complete and ready for upload */
-  onRecordingComplete: (file: File, metrics: AudioQualityMetrics) => Promise<void> | void;
+  onRecordingComplete: (
+    file: File,
+    metrics: AudioQualityMetrics,
+    consent: VoiceCloneConsent,
+  ) => Promise<void> | void;
   /** Called on error */
   onError?: (message: string) => void;
   /** Whether the component is disabled */
   disabled?: boolean;
+  /** Whether consent has already been given (skip consent gate) */
+  consentAlreadyGiven?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +65,95 @@ const DEFAULT_MAX_DURATION = 60;
 const VOLUME_QUIET_THRESHOLD = 0.05;
 const VOLUME_CLIPPING_THRESHOLD = 0.95;
 const FFT_SIZE = 256;
+
+const CONSENT_TEXT = `I confirm that:
+• I am the person speaking in this recording, OR
+• I have explicit permission from the person whose voice is being recorded
+• I understand this voice sample will be used to create a synthetic voice clone
+• I have the legal right to authorize this voice cloning`;
+
+// ---------------------------------------------------------------------------
+// Consent Gate Component
+// ---------------------------------------------------------------------------
+
+function ConsentGate({
+  onConsentGranted,
+  onCancel,
+}: {
+  onConsentGranted: (consent: VoiceCloneConsent) => void;
+  onCancel: () => void;
+}) {
+  const [agreed, setAgreed] = useState(false);
+
+  const handleConfirm = () => {
+    if (!agreed) return;
+
+    const consent: VoiceCloneConsent = {
+      granted: true,
+      timestamp: new Date().toISOString(),
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+      consentText: CONSENT_TEXT,
+    };
+
+    onConsentGranted(consent);
+  };
+
+  return (
+    <div className="space-y-4 rounded-xl border border-[var(--border)] bg-white p-6">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-full bg-amber-100 p-2">
+          <AlertCircle className="h-5 w-5 text-amber-600" />
+        </div>
+        <div>
+          <h3 className="text-lg font-medium text-[var(--sage-deep)]">
+            Voice Cloning Consent Required
+          </h3>
+          <p className="mt-1 text-sm text-[var(--sage-muted)]">
+            Before recording, please confirm you have the rights to clone this voice.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-[var(--sage-light)] p-4">
+        <p className="whitespace-pre-line text-sm text-[var(--sage-deep)]">{CONSENT_TEXT}</p>
+      </div>
+
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={agreed}
+          onChange={(e) => setAgreed(e.target.checked)}
+          className="mt-1 h-4 w-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+        />
+        <span className="text-sm text-[var(--sage-deep)]">
+          I have read and agree to the above consent terms
+        </span>
+      </label>
+
+      <div className="flex items-center justify-end gap-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border border-[var(--border)] bg-white px-4 py-2 text-sm text-[var(--sage-deep)] transition-colors hover:bg-[var(--sage-light)]"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={!agreed}
+          className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
+        >
+          I Confirm & Agree
+        </button>
+      </div>
+
+      <p className="text-xs text-[var(--sage-muted)]">
+        Your consent will be recorded with a timestamp for our audit trail.
+      </p>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Quality Assessment
@@ -315,6 +423,7 @@ export function VoiceCloneRecorder({
   onRecordingComplete,
   onError,
   disabled = false,
+  consentAlreadyGiven = false,
 }: VoiceCloneRecorderProps) {
   const [state, setState] = useState<RecordingState>("idle");
   const [duration, setDuration] = useState(0);
@@ -322,6 +431,17 @@ export function VoiceCloneRecorder({
   const [waveformData, setWaveformData] = useState<number[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [consent, setConsent] = useState<VoiceCloneConsent | null>(
+    consentAlreadyGiven
+      ? {
+          granted: true,
+          timestamp: new Date().toISOString(),
+          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+          consentText: CONSENT_TEXT,
+        }
+      : null,
+  );
+  const [showConsentGate, setShowConsentGate] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -480,22 +600,52 @@ export function VoiceCloneRecorder({
   }, [cleanup]);
 
   const submitRecording = useCallback(async () => {
-    if (!recordedBlob || !metrics) return;
+    if (!recordedBlob || !metrics || !consent) return;
 
     setIsUploading(true);
     try {
       const file = new File([recordedBlob], `voice-clone-${Date.now()}.webm`, {
         type: "audio/webm",
       });
-      await onRecordingComplete(file, metrics);
+      await onRecordingComplete(file, metrics, consent);
     } catch (error) {
       onError?.(error instanceof Error ? error.message : "Failed to upload recording.");
     } finally {
       setIsUploading(false);
     }
-  }, [recordedBlob, metrics, onRecordingComplete, onError]);
+  }, [recordedBlob, metrics, consent, onRecordingComplete, onError]);
 
-  const canSubmit = metrics && metrics.duration >= minDuration && metrics.qualityScore >= 40;
+  const canSubmit = metrics && metrics.duration >= minDuration && metrics.qualityScore >= 40 && consent;
+
+  // Handle consent flow
+  const handleStartRecording = useCallback(() => {
+    if (!consent) {
+      setShowConsentGate(true);
+    } else {
+      startRecording();
+    }
+  }, [consent, startRecording]);
+
+  const handleConsentGranted = useCallback((grantedConsent: VoiceCloneConsent) => {
+    setConsent(grantedConsent);
+    setShowConsentGate(false);
+    // Automatically start recording after consent
+    startRecording();
+  }, [startRecording]);
+
+  const handleConsentCancel = useCallback(() => {
+    setShowConsentGate(false);
+  }, []);
+
+  // Show consent gate if needed
+  if (showConsentGate) {
+    return (
+      <ConsentGate
+        onConsentGranted={handleConsentGranted}
+        onCancel={handleConsentCancel}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4 rounded-xl border border-[var(--border)] bg-white p-6">
@@ -534,7 +684,7 @@ export function VoiceCloneRecorder({
         {state === "idle" && (
           <button
             type="button"
-            onClick={startRecording}
+            onClick={handleStartRecording}
             disabled={disabled}
             className="flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
@@ -558,7 +708,7 @@ export function VoiceCloneRecorder({
           <>
             <button
               type="button"
-              onClick={startRecording}
+              onClick={handleStartRecording}
               disabled={isUploading}
               className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-6 py-3 text-[var(--sage-deep)] transition-colors hover:bg-[var(--sage-light)] disabled:opacity-50"
             >
