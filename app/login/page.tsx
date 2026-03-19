@@ -33,14 +33,14 @@ export default function LoginPage() {
         if (!res.ok) throw new Error(data.error);
         setMessage(data.message);
       } else if (mode === "sign-up") {
-        const res = await fetch("/api/auth/sign-up", {
+        const res = await fetch("/api/auth/magic-link", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        setMessage(data.message);
+        setMessage("Check your email for a link to create your account!");
       } else {
         const res = await fetch("/api/auth/sign-in", {
           method: "POST",
@@ -94,7 +94,7 @@ export default function LoginPage() {
             />
           </div>
 
-          {mode !== "magic-link" && (
+          {mode === "sign-in" && (
             <div>
               <label htmlFor="password" className="eyebrow mb-1.5 block">
                 Password
@@ -134,7 +134,7 @@ export default function LoginPage() {
               : mode === "magic-link"
                 ? "Send magic link"
                 : mode === "sign-up"
-                  ? "Create account"
+                  ? "Send sign-up link"
                   : "Sign in"}
           </button>
         </form>
