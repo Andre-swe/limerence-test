@@ -47,11 +47,34 @@ export function buildPersonaLivePrompt(input: {
   return [buildSoulSystemPrompt(snapshot), snapshot.sessionFrame.contextText].join("\n\n");
 }
 
-function buildLiveVoiceId(persona: Persona) {
+/**
+ * Resolve the voice ID for a live EVI session.
+ * Priority:
+ *   1. Cloned voice (if ready and user is premium)
+ *   2. Persona's configured voice ID
+ *   3. Default house voice from environment
+ */
+function buildLiveVoiceId(persona: Persona, options?: { isPremium?: boolean }) {
+  // Check for ready cloned voice (premium users only)
+  if (
+    options?.isPremium &&
+    persona.voice.cloneState === "ready" &&
+    persona.voice.cloneProfileId
+  ) {
+    // The cloneProfileId references a VoiceCloneProfile which has humeVoiceId
+    // For now, we check if voiceId was updated to the cloned voice
+    // In production, the cloning process updates voiceId when clone is ready
+    if (persona.voice.voiceId?.trim()) {
+      return persona.voice.voiceId.trim();
+    }
+  }
+
+  // Fall back to configured voice ID
   if (persona.voice.provider === "hume" && persona.voice.voiceId?.trim()) {
     return persona.voice.voiceId.trim();
   }
 
+  // Fall back to default house voice
   return process.env.HUME_DEFAULT_VOICE_ID?.trim() || undefined;
 }
 
@@ -83,6 +106,7 @@ async function resolveAccessToken() {
 export async function createPersonaLiveSession(
   persona: Persona,
   mode: LiveSessionMode = "voice",
+  options?: { isPremium?: boolean },
 ): Promise<HumeLiveSession> {
   const [messages, feedbackNotes, accessToken] = await Promise.all([
     listMessages(persona.id),
@@ -128,7 +152,7 @@ export async function createPersonaLiveSession(
         ...snapshot.sessionFrame.variables,
         live_mode: mode,
       },
-      voiceId: buildLiveVoiceId(persona),
+      voiceId: buildLiveVoiceId(persona, options),
     },
     soulFrame: snapshot.sessionFrame,
     voiceStatus: persona.voice.status,

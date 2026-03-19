@@ -39,15 +39,22 @@ async function handleSessionRequest(
     }
 
     let mode: LiveSessionMode = "voice";
+    let isPremium = false;
     if (request.method === "POST") {
-      const payload = (await request.json().catch(() => ({}))) as { mode?: LiveSessionMode };
+      const payload = (await request.json().catch(() => ({}))) as {
+        mode?: LiveSessionMode;
+        isPremium?: boolean;
+      };
       if (payload.mode === "screen" || payload.mode === "camera" || payload.mode === "voice") {
         mode = payload.mode;
       }
+      // Premium status should be verified server-side in production
+      // For now, accept from client but this should check user subscription
+      isPremium = payload.isPremium === true;
     }
 
     const session = await withUserStore(ownership.userId, () =>
-      createPersonaLiveSession(persona, mode)
+      createPersonaLiveSession(persona, mode, { isPremium })
     );
     return NextResponse.json(session);
   } catch (error) {
