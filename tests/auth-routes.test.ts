@@ -107,7 +107,7 @@ describe("auth routes", () => {
     });
   });
 
-  it("falls back to default origin when Origin header is not in allowlist", async () => {
+  it("falls back to request URL origin when Origin header is not in allowlist", async () => {
     const response = await signUpPost(
       jsonRequest(
         "http://localhost/api/auth/sign-up",
@@ -122,7 +122,7 @@ describe("auth routes", () => {
       email: "user@example.com",
       password: "secret",
       options: {
-        emailRedirectTo: "https://limerance.vercel.app/auth/callback",
+        emailRedirectTo: "http://localhost/auth/callback",
       },
     });
   });
@@ -212,7 +212,7 @@ describe("auth routes", () => {
     expect(createServerClientMock).not.toHaveBeenCalled();
   });
 
-  it("requests a magic link and falls back to default allowed origin", async () => {
+  it("requests a magic link and falls back to request URL origin", async () => {
     const response = await magicLinkPost(
       jsonRequest(
         "http://localhost/api/auth/magic-link",
@@ -226,7 +226,7 @@ describe("auth routes", () => {
     expect(signInWithOtpMock).toHaveBeenCalledWith({
       email: "user@example.com",
       options: {
-        emailRedirectTo: "https://limerance.vercel.app/auth/callback",
+        emailRedirectTo: "http://localhost/auth/callback",
       },
     });
   });
@@ -247,7 +247,43 @@ describe("auth routes", () => {
     await expectJsonError(response, 400, "send failed");
   });
 
-  it("redirects auth callbacks with a valid code to the requested next path", async () => {
+  it("redirects auth callbacks with a valid code to setup-password for new users", async () => {
+    exchangeCodeForSessionMock.mockResolvedValueOnce({
+      error: null,
+      data: {
+        user: {
+          id: "user-1",
+          created_at: new Date().toISOString(),
+          identities: [],
+        },
+      },
+    });
+
+    const response = await authCallbackGet(
+      new Request(
+        "https://app.example/auth/callback?code=test-code&next=%2Fsettings",
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://app.example/setup-password");
+    expect(exchangeCodeForSessionMock).toHaveBeenCalledWith("test-code");
+  });
+
+  it("redirects existing users with password to requested next path", async () => {
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 30);
+    exchangeCodeForSessionMock.mockResolvedValueOnce({
+      error: null,
+      data: {
+        user: {
+          id: "user-1",
+          created_at: oldDate.toISOString(),
+          identities: [{ provider: "email" }],
+        },
+      },
+    });
+
     const response = await authCallbackGet(
       new Request(
         "https://app.example/auth/callback?code=test-code&next=%2Fsettings",
