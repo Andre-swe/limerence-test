@@ -35,23 +35,29 @@ export async function POST(request: Request) {
     },
   );
 
+  // Vercel automatically sets VERCEL_URL for deployments (without protocol)
+  const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null;
+  
   const rawOrigin = request.headers.get("origin");
   const referer = request.headers.get("referer");
   const refererOrigin = referer ? new URL(referer).origin : null;
-  
-  // Vercel provides the actual host in x-forwarded-host header
   const forwardedHost = request.headers.get("x-forwarded-host");
   const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
-  const vercelOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
+  const forwardedOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : null;
   
-  // Use origin header, referer, Vercel forwarded host, or fall back to request URL
-  let origin = rawOrigin;
-  if (!origin || !isAllowedOrigin(origin)) {
-    origin = refererOrigin && isAllowedOrigin(refererOrigin) 
-      ? refererOrigin 
-      : vercelOrigin && isAllowedOrigin(vercelOrigin)
-        ? vercelOrigin
-        : new URL(request.url).origin;
+  // Priority: origin header > referer > x-forwarded-host > VERCEL_URL > request URL
+  let origin = rawOrigin && isAllowedOrigin(rawOrigin) ? rawOrigin : null;
+  if (!origin) {
+    origin = refererOrigin && isAllowedOrigin(refererOrigin) ? refererOrigin : null;
+  }
+  if (!origin) {
+    origin = forwardedOrigin && isAllowedOrigin(forwardedOrigin) ? forwardedOrigin : null;
+  }
+  if (!origin) {
+    origin = vercelUrl && isAllowedOrigin(vercelUrl) ? vercelUrl : null;
+  }
+  if (!origin) {
+    origin = new URL(request.url).origin;
   }
 
   const { error } = await supabase.auth.signInWithOtp({
