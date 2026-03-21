@@ -310,7 +310,7 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://app.example/login?error=auth_callback_error",
+      "https://app.example/login?error=invalid%20code",
     );
   });
 });

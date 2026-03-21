@@ -8,8 +8,21 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
+  const error_param = searchParams.get("error");
+  const error_description = searchParams.get("error_description");
   const rawNext = searchParams.get("next") ?? "/";
   const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+
+  // If Supabase returned an error in the URL, redirect to login with that error
+  if (error_param) {
+    const errorMsg = error_description || error_param;
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(errorMsg)}`);
+  }
+
+  // If no code or token_hash, redirect to login
+  if (!code && !token_hash) {
+    return NextResponse.redirect(`${origin}/login?error=missing_auth_params`);
+  }
 
   const cookieStore = await cookies();
   const supabase = createServerClient(
@@ -45,7 +58,11 @@ export async function GET(request: Request) {
     data = result.data;
   }
 
-  if (!error && data.user) {
+  if (error) {
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (data.user) {
     // Check if user has set up a password using our custom metadata flag
     const hasPasswordSet = data.user.user_metadata?.password_set === true;
     
