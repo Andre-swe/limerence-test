@@ -63,15 +63,8 @@ export async function GET(request: Request) {
   }
 
   if (data.user) {
-    // Check if user has set up a password using our custom metadata flag
-    const hasPasswordSet = data.user.user_metadata?.password_set === true;
-    
-    // If user hasn't set a password yet, redirect to setup-password
-    if (!hasPasswordSet) {
-      return NextResponse.redirect(`${origin}/setup-password`);
-    }
-    
-    return NextResponse.redirect(`${origin}${next}`);
+    // Always redirect to setup-password after email link verification
+    return NextResponse.redirect(`${origin}/setup-password`);
   }
 
   return NextResponse.redirect(`${origin}/login?error=auth_callback_error`);

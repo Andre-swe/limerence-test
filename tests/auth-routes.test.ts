@@ -249,7 +249,7 @@ describe("auth routes", () => {
     await expectJsonError(response, 400, "send failed");
   });
 
-  it("redirects auth callbacks with a valid code to setup-password for users without password_set", async () => {
+  it("always redirects successful auth callbacks to setup-password", async () => {
     exchangeCodeForSessionMock.mockResolvedValueOnce({
       error: null,
       data: {
@@ -270,32 +270,6 @@ describe("auth routes", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://app.example/setup-password");
-    expect(exchangeCodeForSessionMock).toHaveBeenCalledWith("test-code");
-  });
-
-  it("redirects existing users with password_set to requested next path", async () => {
-    const oldDate = new Date();
-    oldDate.setDate(oldDate.getDate() - 30);
-    exchangeCodeForSessionMock.mockResolvedValueOnce({
-      error: null,
-      data: {
-        user: {
-          id: "user-1",
-          created_at: oldDate.toISOString(),
-          identities: [{ provider: "email" }],
-          user_metadata: { password_set: true },
-        },
-      },
-    });
-
-    const response = await authCallbackGet(
-      new Request(
-        "https://app.example/auth/callback?code=test-code&next=%2Fsettings",
-      ),
-    );
-
-    expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://app.example/settings");
     expect(exchangeCodeForSessionMock).toHaveBeenCalledWith("test-code");
   });
 
