@@ -47,10 +47,22 @@ export async function GET(request: Request) {
 
   if (!error && data.user) {
     // Magic link flow (type=magiclink or type=email) should always go to setup-password
-    // so users can set a password for future logins
     const isMagicLinkFlow = type === "magiclink" || type === "email";
     
     if (isMagicLinkFlow) {
+      return NextResponse.redirect(`${origin}/setup-password`);
+    }
+    
+    // For PKCE flow, check if user needs to set up password
+    const hasPasswordIdentity = data.user.identities?.some(
+      (identity) => identity.provider === "email"
+    );
+    
+    const createdAt = new Date(data.user.created_at);
+    const now = new Date();
+    const isNewUser = (now.getTime() - createdAt.getTime()) < 5 * 60 * 1000;
+    
+    if (isNewUser || !hasPasswordIdentity) {
       return NextResponse.redirect(`${origin}/setup-password`);
     }
     
