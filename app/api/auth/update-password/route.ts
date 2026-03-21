@@ -60,8 +60,11 @@ export async function POST(request: Request) {
     );
   }
 
-  // Update the user's password
-  const { error } = await supabase.auth.updateUser({ password });
+  // Update the user's password and set the password_set flag in user metadata
+  const { error } = await supabase.auth.updateUser({ 
+    password,
+    data: { password_set: true }
+  });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });

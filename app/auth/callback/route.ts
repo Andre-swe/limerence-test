@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   );
 
   let error = null;
-  let data: { user: { created_at: string; identities?: Array<{ provider: string }> } | null } = { user: null };
+  let data: { user: { created_at: string; identities?: Array<{ provider: string; identity_data?: { password_set?: boolean } }> | null; user_metadata?: { password_set?: boolean } } | null } = { user: null };
 
   // Handle PKCE flow (code parameter)
   if (code) {
@@ -46,14 +46,11 @@ export async function GET(request: Request) {
   }
 
   if (!error && data.user) {
-    // Check if user has set up a password
-    // Magic link users won't have a password set, so redirect them to setup-password
-    const hasPasswordIdentity = data.user.identities?.some(
-      (identity) => identity.provider === "email"
-    );
+    // Check if user has set up a password using our custom metadata flag
+    const hasPasswordSet = data.user.user_metadata?.password_set === true;
     
-    // If user doesn't have a password identity, they need to set one up
-    if (!hasPasswordIdentity) {
+    // If user hasn't set a password yet, redirect to setup-password
+    if (!hasPasswordSet) {
       return NextResponse.redirect(`${origin}/setup-password`);
     }
     

@@ -68,6 +68,7 @@ export async function POST(request: Request) {
     password,
     options: {
       emailRedirectTo: `${origin}/auth/callback`,
+      data: { password_set: true },
     },
   });
 

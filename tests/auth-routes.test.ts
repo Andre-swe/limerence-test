@@ -103,6 +103,7 @@ describe("auth routes", () => {
       password: "secret",
       options: {
         emailRedirectTo: "http://localhost:3000/auth/callback",
+        data: { password_set: true },
       },
     });
   });
@@ -123,6 +124,7 @@ describe("auth routes", () => {
       password: "secret",
       options: {
         emailRedirectTo: "http://localhost/auth/callback",
+        data: { password_set: true },
       },
     });
   });
@@ -247,7 +249,7 @@ describe("auth routes", () => {
     await expectJsonError(response, 400, "send failed");
   });
 
-  it("redirects auth callbacks with a valid code to setup-password for new users", async () => {
+  it("redirects auth callbacks with a valid code to setup-password for users without password_set", async () => {
     exchangeCodeForSessionMock.mockResolvedValueOnce({
       error: null,
       data: {
@@ -255,6 +257,7 @@ describe("auth routes", () => {
           id: "user-1",
           created_at: new Date().toISOString(),
           identities: [],
+          user_metadata: {},
         },
       },
     });
@@ -270,7 +273,7 @@ describe("auth routes", () => {
     expect(exchangeCodeForSessionMock).toHaveBeenCalledWith("test-code");
   });
 
-  it("redirects existing users with password to requested next path", async () => {
+  it("redirects existing users with password_set to requested next path", async () => {
     const oldDate = new Date();
     oldDate.setDate(oldDate.getDate() - 30);
     exchangeCodeForSessionMock.mockResolvedValueOnce({
@@ -280,6 +283,7 @@ describe("auth routes", () => {
           id: "user-1",
           created_at: oldDate.toISOString(),
           identities: [{ provider: "email" }],
+          user_metadata: { password_set: true },
         },
       },
     });
