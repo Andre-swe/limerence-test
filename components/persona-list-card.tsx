@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { MessageCircle, Mic, Volume2 } from "lucide-react";
 import type { MessageEntry, Persona } from "@/lib/types";
@@ -122,6 +123,38 @@ interface PersonaListEmptyProps {
 }
 
 export function PersonaListEmpty({ hasUser }: PersonaListEmptyProps) {
+  const [isCreatingTate, setIsCreatingTate] = useState(false);
+
+  const handleCreateAndrewTate = async () => {
+    setIsCreatingTate(true);
+    try {
+      const formData = new FormData();
+      formData.append('name', 'Andrew Tate');
+      formData.append('relationship', 'Mentor');
+      formData.append('description', 'Andrew Tate is a former kickboxing world champion turned entrepreneur and self-improvement influencer. Known for his ultra-confident, no-nonsense approach to life, business, and masculinity. He speaks with absolute certainty, uses direct and often provocative language, and emphasizes personal responsibility, discipline, and financial success. His communication style is bold, unapologetic, and designed to challenge conventional thinking. He frequently uses metaphors from combat sports and chess, and has a distinctive way of breaking down complex topics into simple, actionable principles.');
+      formData.append('starterVoiceId', 'aura-asteria-en');
+      formData.append('heartbeatIntervalHours', '4');
+      formData.append('preferredMode', 'voice_note');
+      formData.append('attestedRights', 'on');
+      formData.append('pastedText', 'Key Andrew Tate communication patterns:\n- Always speaks with absolute confidence and authority\n- Uses direct, sometimes harsh language to make points\n- Frequently references his kickboxing background and business success\n- Emphasizes personal responsibility and self-improvement\n- Challenges victim mentality and excuses\n- Uses metaphors from chess, combat sports, and business\n- Speaks in a rapid, energetic manner\n- Often asks rhetorical questions to make points\n- Uses phrases like "the matrix", "escape the matrix", "level up"\n- Emphasizes the importance of discipline, hard work, and financial freedom\n- Not afraid to be controversial or politically incorrect\n- Values loyalty, respect, and competence\n- Believes in traditional masculine values and roles');
+      
+      const response = await fetch('/api/personas', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create persona');
+      }
+
+      const { personaId } = await response.json();
+      window.location.href = `/personas/${personaId}`;
+    } catch (error) {
+      console.error('Error creating Andrew Tate persona:', error);
+      setIsCreatingTate(false);
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--border)] bg-white/50 px-6 py-12 text-center">
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--sage-light)]">
@@ -136,12 +169,21 @@ export function PersonaListEmpty({ hasUser }: PersonaListEmptyProps) {
           : "Sign in to create personas and start meaningful conversations."}
       </p>
       {hasUser && (
-        <Link
-          href="/create"
-          className="mt-6 inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
-        >
-          Create your first persona
-        </Link>
+        <div className="mt-6 flex gap-3">
+          <button
+            onClick={handleCreateAndrewTate}
+            disabled={isCreatingTate}
+            className="inline-flex items-center gap-2 rounded-full bg-black px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-black/90 disabled:opacity-50"
+          >
+            {isCreatingTate ? 'Creating...' : 'Talk to Andrew Tate'}
+          </button>
+          <Link
+            href="/create"
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
+          >
+            Create your own persona
+          </Link>
+        </div>
       )}
     </div>
   );
