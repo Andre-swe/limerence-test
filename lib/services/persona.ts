@@ -64,6 +64,7 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
   const description = String(formData.get("description") ?? "").trim();
   const pastedText = String(formData.get("pastedText") ?? "").trim();
   const existingVoiceId = String(formData.get("existingVoiceId") ?? "").trim();
+  const preclonedVoiceId = String(formData.get("preclonedVoiceId") ?? "").trim();
   const starterVoiceId = String(formData.get("starterVoiceId") ?? "").trim();
   const attestedRights = formData.get("attestedRights") === "on";
   const heartbeatIntervalHours = Number(formData.get("heartbeatIntervalHours") ?? 4);
@@ -138,8 +139,15 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
   };
 
   const dossier = await providers.reasoning.buildPersonaDossier(assemblyInput);
-  const voice =
-    existingVoiceId
+  const voice = preclonedVoiceId
+    ? {
+        provider: "hume" as const,
+        voiceId: preclonedVoiceId,
+        status: "ready" as const,
+        cloneState: "completed" as const,
+        watermarkApplied: false,
+      }
+    : existingVoiceId
       ? await providers.voice.cloneVoice({
           personaName: name,
           voiceSamples,
