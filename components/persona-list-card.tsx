@@ -132,7 +132,7 @@ export function PersonaListEmpty({ hasUser }: PersonaListEmptyProps) {
       formData.append('name', 'Andrew Tate');
       formData.append('relationship', 'Mentor');
       formData.append('description', 'Andrew Tate is a former kickboxing world champion turned entrepreneur and self-improvement influencer. Known for his ultra-confident, no-nonsense approach to life, business, and masculinity. He speaks with absolute certainty, uses direct and often provocative language, and emphasizes personal responsibility, discipline, and financial success. His communication style is bold, unapologetic, and designed to challenge conventional thinking. He frequently uses metaphors from combat sports and chess, and has a distinctive way of breaking down complex topics into simple, actionable principles.');
-      formData.append('preclonedVoiceId', '22ad6028-4f91-46a9-8f39-483925e21e87');
+      formData.append('starterVoiceId', 'f60ecf9e-ff1e-4bae-9206-dba7c653a69e');
       formData.append('heartbeatIntervalHours', '4');
       formData.append('preferredMode', 'voice_note');
       formData.append('attestedRights', 'on');
