@@ -136,6 +136,10 @@ export async function createPersonaLiveSession(
 
   const configId = process.env.HUME_CONFIG_ID?.trim() || undefined;
 
+  console.log('[createPersonaLiveSession] Config ID:', configId);
+  console.log('[createPersonaLiveSession] Voice ID:', buildLiveVoiceId(persona, options));
+  console.log('[createPersonaLiveSession] Hostname:', humeHostname);
+
   return {
     accessToken,
     configId,
