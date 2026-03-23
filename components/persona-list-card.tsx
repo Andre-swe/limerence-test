@@ -136,7 +136,7 @@ export function PersonaListEmpty({ hasUser }: PersonaListEmptyProps) {
       formData.append('heartbeatIntervalHours', '4');
       formData.append('preferredMode', 'voice_note');
       formData.append('attestedRights', 'on');
-      formData.append('pastedText', 'Key Andrew Tate communication patterns:\n- Always speaks with absolute confidence and authority\n- Uses direct, sometimes harsh language to make points\n- Frequently references his kickboxing background and business success\n- Emphasizes personal responsibility and self-improvement\n- Challenges victim mentality and excuses\n- Uses metaphors from chess, combat sports, and business\n- Speaks in a rapid, energetic manner\n- Often asks rhetorical questions to make points\n- Uses phrases like "the matrix", "escape the matrix", "level up"\n- Emphasizes the importance of discipline, hard work, and financial freedom\n- Not afraid to be controversial or politically incorrect\n- Values loyalty, respect, and competence\n- Believes in traditional masculine values and roles');
+      formData.append('pastedText', 'Andrew Tate communication style: confident, direct, motivational. Uses metaphors from combat sports and chess. Emphasizes discipline and success.');
       
       const response = await fetch('/api/personas', {
         method: 'POST',
