@@ -21,6 +21,7 @@ import {
 
 type LiveSessionResponse = {
   accessToken: string;
+  configId?: string;
   hostname: string;
   mode: LiveSessionMode;
   soulFrame: SoulSessionFrame;
@@ -531,6 +532,7 @@ export function useConversationPanelLive({
           value: session.accessToken,
         },
         hostname: session.hostname,
+        configId: session.configId,
         verboseTranscription: false,
       });
 

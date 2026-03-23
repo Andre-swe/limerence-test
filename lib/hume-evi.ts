@@ -5,6 +5,7 @@ import type { LiveSessionMode, MessageEntry, Persona, SoulSessionFrame } from "@
 
 export type HumeLiveSession = {
   accessToken: string;
+  configId?: string;
   hostname: string;
   mode: LiveSessionMode;
   sessionSettings: {
@@ -133,8 +134,11 @@ export async function createPersonaLiveSession(
   });
   const sessionId = `${persona.id}-${mode}-${Date.now()}`;
 
+  const configId = process.env.HUME_CONFIG_ID?.trim() || undefined;
+
   return {
     accessToken,
+    configId,
     hostname: humeHostname,
     mode,
     sessionSettings: {
