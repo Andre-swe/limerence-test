@@ -112,6 +112,7 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
     voiceFiles.map((file) => persistFileAsset(file, "voice_sample")),
   );
 
+
   const screenshots = await Promise.all(
     screenshotFiles.map(async (file) => {
       const asset = await persistFileAsset(file, "screenshot");
@@ -144,7 +145,7 @@ export async function createPersonaFromForm(formData: FormData, userId: string) 
         provider: "hume" as const,
         voiceId: preclonedVoiceId,
         status: "ready" as const,
-        cloneState: "completed" as const,
+        cloneState: "ready" as const,
         watermarkApplied: false,
       }
     : existingVoiceId
