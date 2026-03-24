@@ -521,6 +521,9 @@ export function useConversationPanelLive({
       }
 
       const session = payload as LiveSessionResponse;
+      console.log('[Client] Config ID from server:', session.configId);
+      console.log('[Client] Voice ID from server:', session.sessionSettings.voiceId);
+      
       setActiveMode(preparedVisualStream && session.mode !== "voice" ? session.mode : "voice");
       setSessionId(session.sessionSettings.customSessionId);
       setSessionContextText(session.sessionSettings.context?.text ?? "");
