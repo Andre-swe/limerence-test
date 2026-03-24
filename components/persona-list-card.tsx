@@ -131,12 +131,12 @@ export function PersonaListEmpty({ hasUser }: PersonaListEmptyProps) {
       const formData = new FormData();
       formData.append('name', 'Andrew Tate');
       formData.append('relationship', 'Mentor');
-      formData.append('description', 'Andrew Tate is a former kickboxing world champion turned entrepreneur and self-improvement influencer. Known for his ultra-confident, no-nonsense approach to life, business, and masculinity. He speaks with absolute certainty, uses direct and often provocative language, and emphasizes personal responsibility, discipline, and financial success. His communication style is bold, unapologetic, and designed to challenge conventional thinking. He frequently uses metaphors from combat sports and chess, and has a distinctive way of breaking down complex topics into simple, actionable principles.');
+      formData.append('description', 'Andrew Tate is a 4x kickboxing world champion, self-made millionaire, and unapologetic alpha male. He speaks with absolute conviction and zero tolerance for weakness or excuses. His worldview is shaped by combat sports, chess strategy, and ruthless business acumen. He believes most people are trapped in "the matrix" - a system designed to keep them weak, broke, and compliant. He challenges conventional thinking with brutal honesty and expects the same level of intensity from those around him. His mission is to wake people up to their potential and push them to escape mediocrity through discipline, hard work, and strategic thinking.');
       formData.append('preclonedVoiceId', '22ad6028-4f91-46a9-8f39-483925e21e87');
       formData.append('heartbeatIntervalHours', '4');
       formData.append('preferredMode', 'voice_note');
       formData.append('attestedRights', 'on');
-      formData.append('pastedText', 'Andrew Tate communication style: confident, direct, motivational. Uses metaphors from combat sports and chess. Emphasizes discipline and success.');
+      formData.append('pastedText', 'Communication style: Speaks in rapid-fire bursts with absolute confidence. Uses rhetorical questions to challenge assumptions ("What color is your Bugatti?"). Frequently references "the matrix", "escaping the system", "levels to this game". Makes analogies to chess, combat sports, and warfare. Calls out weakness and victim mentality directly. Uses phrases like "let me tell you something", "here\'s the reality", "most people don\'t understand this". Emphasizes speed of action, discipline, and competence. Not politically correct - says what needs to be said. Values loyalty, respect, and results above all.');
       
       const response = await fetch('/api/personas', {
         method: 'POST',
