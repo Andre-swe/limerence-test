@@ -54,14 +54,14 @@ export default function LoginPage() {
         if (!res.ok) throw new Error(data.error);
         setMessage(data.message);
       } else if (mode === "sign-up") {
-        const res = await fetch("/api/auth/magic-link", {
+        const res = await fetch("/api/auth/sign-up", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, password }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        setMessage("Check your email for a link to create your account!");
+        setMessage(data.message ?? "Check your email for the confirmation link.");
       } else {
         const res = await fetch("/api/auth/sign-in", {
           method: "POST",
@@ -153,7 +153,7 @@ export default function LoginPage() {
             />
           </div>
 
-          {mode === "sign-in" && (
+          {mode !== "magic-link" && (
             <div>
               <label htmlFor="password" className="eyebrow mb-1.5 block">
                 Password
@@ -168,6 +168,11 @@ export default function LoginPage() {
                 className="w-full rounded-xl border border-[rgba(29,38,34,0.12)] bg-white px-4 py-3 text-[var(--foreground)] placeholder:text-[rgba(29,38,34,0.32)] focus:border-[var(--sage-deep)] focus:outline-none focus:ring-1 focus:ring-[var(--sage-deep)]"
                 placeholder="••••••••"
               />
+              {mode === "sign-up" && (
+                <p className="mt-2 text-xs text-[rgba(29,38,34,0.48)]">
+                  Choose a password for account access and keep it safe.
+                </p>
+              )}
             </div>
           )}
 

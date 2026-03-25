@@ -70,6 +70,19 @@ describe("proxy", () => {
     expect(getUserMock).not.toHaveBeenCalled();
   });
 
+  it("allows preview deployment origins through CORS", async () => {
+    const response = await proxy(
+      new NextRequest("http://localhost/api/auth/sign-in", {
+        headers: { origin: "https://feature-branch.vercel.app" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe(
+      "https://feature-branch.vercel.app",
+    );
+  });
+
   it("redirects unauthenticated users away from protected pages", async () => {
     const response = await proxy(new NextRequest("http://localhost/settings"));
 

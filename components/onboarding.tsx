@@ -1,20 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import {
-  CheckCircle2,
-  ChevronRight,
-  MessageSquare,
-  Phone,
-  Sparkles,
-  UserPlus,
-  X,
-} from "lucide-react";
+import { MessageSquare, Phone, Sparkles, UserPlus, X } from "lucide-react";
+import { OnboardingProgress } from "@/components/onboarding-progress";
+import { OnboardingStepCard } from "@/components/onboarding-step-card";
 
 // Onboarding steps definition
-const ONBOARDING_STEPS = [
+export const ONBOARDING_STEPS = [
   {
     id: "create-persona",
     title: "Create your first persona",
@@ -41,7 +33,8 @@ const ONBOARDING_STEPS = [
   },
 ] as const;
 
-type OnboardingStep = (typeof ONBOARDING_STEPS)[number]["id"];
+export type OnboardingStepDefinition = (typeof ONBOARDING_STEPS)[number];
+type OnboardingStep = OnboardingStepDefinition["id"];
 
 type OnboardingState = {
   dismissed: boolean;
@@ -134,157 +127,6 @@ export function useOnboarding() {
     currentStepIndex: state.currentStep,
     completedSteps: state.completedSteps,
   };
-}
-
-// Progress indicator component
-function OnboardingProgress({ 
-  completedCount, 
-  totalCount 
-}: { 
-  completedCount: number; 
-  totalCount: number;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex gap-1">
-        {Array.from({ length: totalCount }).map((_, i) => (
-          <div
-            key={i}
-            className={`h-1.5 w-6 rounded-full transition-colors ${
-              i < completedCount
-                ? "bg-[var(--sage-deep)]"
-                : "bg-[var(--sage-soft)]"
-            }`}
-          />
-        ))}
-      </div>
-      <span className="text-xs text-[var(--sage)]">
-        {completedCount}/{totalCount}
-      </span>
-    </div>
-  );
-}
-
-// Individual step card
-function OnboardingStepCard({
-  step,
-  index,
-  isCompleted,
-  isCurrent,
-  personaId,
-}: {
-  step: (typeof ONBOARDING_STEPS)[number];
-  index: number;
-  isCompleted: boolean;
-  isCurrent: boolean;
-  personaId?: string;
-}) {
-  const router = useRouter();
-  const Icon = step.icon;
-
-  const getHref = () => {
-    if (step.href) return step.href;
-    if (!personaId) return null;
-    
-    if (step.id === "send-message") {
-      return `/personas/${personaId}/messages`;
-    }
-    if (step.id === "make-call") {
-      return `/personas/${personaId}`;
-    }
-    return null;
-  };
-
-  const href = getHref();
-  const isDisabled = !href && !step.href;
-
-  const handleClick = () => {
-    if (isCompleted) return;
-    
-    if (href) {
-      router.push(href);
-    }
-  };
-
-  return (
-    <div
-      className={`relative flex items-start gap-4 rounded-2xl border p-4 transition-all ${
-        isCompleted
-          ? "border-[var(--sage-soft)] bg-[var(--sage-soft)]/30"
-          : isCurrent
-            ? "border-[var(--sage)] bg-white shadow-sm"
-            : "border-[var(--border)] bg-white/50"
-      }`}
-    >
-      {/* Step number / check */}
-      <div
-        className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
-          isCompleted
-            ? "bg-[var(--sage-deep)] text-white"
-            : isCurrent
-              ? "bg-[var(--sage-soft)] text-[var(--sage-deep)]"
-              : "bg-[var(--paper-strong)] text-[var(--sage)]"
-        }`}
-      >
-        {isCompleted ? (
-          <CheckCircle2 className="h-5 w-5" />
-        ) : (
-          <span className="text-sm font-semibold">{index + 1}</span>
-        )}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 space-y-1">
-        <h3
-          className={`font-semibold ${
-            isCompleted
-              ? "text-[var(--sage)]"
-              : "text-[var(--sage-deep)]"
-          }`}
-        >
-          {step.title}
-        </h3>
-        <p className="text-sm text-[var(--sage)]">{step.description}</p>
-
-        {/* Action button */}
-        {!isCompleted && isCurrent && (
-          <div className="pt-2">
-            {href ? (
-              <Link
-                href={href}
-                className="btn-solid inline-flex items-center gap-1.5 text-sm"
-              >
-                {step.action}
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            ) : (
-              <button
-                type="button"
-                disabled={isDisabled}
-                onClick={handleClick}
-                className="btn-pill inline-flex items-center gap-1.5 text-sm opacity-50"
-              >
-                {step.id === "send-message" || step.id === "make-call"
-                  ? "Create a persona first"
-                  : step.action}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Icon */}
-      <Icon
-        className={`h-5 w-5 flex-shrink-0 ${
-          isCompleted
-            ? "text-[var(--sage)]"
-            : isCurrent
-              ? "text-[var(--sage-deep)]"
-              : "text-[var(--sage-soft)]"
-        }`}
-      />
-    </div>
-  );
 }
 
 // Main onboarding banner component

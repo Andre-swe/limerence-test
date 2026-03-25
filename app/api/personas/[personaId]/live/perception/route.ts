@@ -1,24 +1,12 @@
 import { NextResponse } from "next/server";
-import { verifyPersonaOwnership } from "@/lib/auth";
+import { withPersonaRoute } from "@/lib/persona-route";
 import { observeLiveVisualPerception } from "@/lib/services";
-import { withUserStore } from "@/lib/store-context";
 import type { LiveSessionMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 
 /** Processes a visual perception frame (screen or camera image) during a live session and returns the updated session frame. */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ personaId: string }> },
-) {
-  try {
-    const { personaId } = await params;
-
-    const ownership = await verifyPersonaOwnership(request, personaId);
-    if (!ownership.authorized) {
-      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
-    }
-
+export const POST = withPersonaRoute(async ({ request, params }) => {
     const formData = await request.formData();
     const mode = String(formData.get("mode") ?? "voice") as LiveSessionMode;
     const sessionId = String(formData.get("sessionId") ?? "").trim() || undefined;
@@ -30,25 +18,15 @@ export async function POST(
       return NextResponse.json({ error: "Unsupported live mode." }, { status: 400 });
     }
 
-    const result = await withUserStore(ownership.userId, () =>
-      observeLiveVisualPerception(personaId, {
-        mode,
-        sessionId,
-        event,
-        imageFile: image instanceof File ? image : null,
-        timestamp,
-      })
-    );
+    const result = await observeLiveVisualPerception(params.personaId, {
+      mode,
+      sessionId,
+      event,
+      imageFile: image instanceof File ? image : null,
+      timestamp,
+    });
 
     return NextResponse.json({
       sessionFrame: result.sessionFrame,
     });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unable to process visual perception.",
-      },
-      { status: 400 },
-    );
-  }
-}
+  }, { errorMessage: "Unable to process visual perception." });

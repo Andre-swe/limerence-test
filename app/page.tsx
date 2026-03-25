@@ -5,30 +5,16 @@ import { LogoMark } from "@/components/logo-mark";
 import { PersonaListCard, PersonaListEmpty } from "@/components/persona-list-card";
 import { UserMenu } from "@/components/user-menu";
 import { createClient } from "@/lib/supabase-server";
-import { getLastMessage, getUnreadCount, listPersonasForUser } from "@/lib/store";
+import { listPersonaDirectoryEntriesForUser } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const personas = user ? await listPersonasForUser(user.id) : [];
-
-  // Fetch last message and unread count for each persona
-  const personasWithMeta = await Promise.all(
-    personas.map(async (persona) => ({
-      persona,
-      lastMessage: await getLastMessage(persona.id),
-      unreadCount: await getUnreadCount(persona.id),
-    }))
-  );
-
-  // Sort by most recent activity
-  personasWithMeta.sort((a, b) => {
-    const aTime = a.lastMessage?.createdAt ?? a.persona.createdAt;
-    const bTime = b.lastMessage?.createdAt ?? b.persona.createdAt;
-    return bTime.localeCompare(aTime);
-  });
+  const personasWithMeta = user
+    ? await listPersonaDirectoryEntriesForUser(user.id)
+    : [];
 
   const hasPersonas = personasWithMeta.length > 0;
 

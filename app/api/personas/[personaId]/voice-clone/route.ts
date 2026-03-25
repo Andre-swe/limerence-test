@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getPersona, updatePersona } from "@/lib/store";
-import { savePublicFile } from "@/lib/store";
+import { withPersonaRoute } from "@/lib/persona-route";
+import { savePublicFile, updatePersona } from "@/lib/store";
 import type { VoiceCloneConsent, VoiceCloneProfile } from "@/lib/types";
 
 const voiceCloneUploadSchema = z.object({
@@ -17,7 +16,7 @@ const voiceCloneUploadSchema = z.object({
   duration: z.number().min(1),
 });
 
-function getClientIp(headersList: Headers): string {
+function getClientIp(headersList: Headers) {
   return (
     headersList.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     headersList.get("x-real-ip") ||
@@ -25,18 +24,8 @@ function getClientIp(headersList: Headers): string {
   );
 }
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ personaId: string }> },
-) {
+export const POST = withPersonaRoute(async ({ request, params }) => {
   try {
-    const { personaId } = await params;
-    const persona = await getPersona(personaId);
-
-    if (!persona) {
-      return NextResponse.json({ error: "Persona not found" }, { status: 404 });
-    }
-
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File | null;
     const metadataJson = formData.get("metadata") as string | null;
@@ -55,30 +44,23 @@ export async function POST(
       return NextResponse.json({ error: "Consent is required" }, { status: 400 });
     }
 
-    // Capture client IP for audit trail
-    const headersList = await headers();
-    const clientIp = getClientIp(headersList);
-
     const consentWithIp: VoiceCloneConsent = {
       ...metadata.consent,
-      ipAddress: clientIp,
+      ipAddress: getClientIp(request.headers),
     };
 
-    // Upload reference audio to Supabase Storage
     const buffer = Buffer.from(await audioFile.arrayBuffer());
     const { fileName, url } = await savePublicFile(
       buffer,
-      `voice-clone-${personaId}-${Date.now()}.webm`,
+      `voice-clone-${params.personaId}-${Date.now()}.webm`,
       audioFile.type || "audio/webm",
     );
 
     const now = new Date().toISOString();
     const profileId = randomUUID();
-
-    // Create voice clone profile
     const voiceCloneProfile: VoiceCloneProfile = {
       id: profileId,
-      personaId,
+      personaId: params.personaId,
       status: "pending",
       referenceAudioUrl: url,
       referenceAudioFileName: fileName,
@@ -89,8 +71,7 @@ export async function POST(
       updatedAt: now,
     };
 
-    // Update persona with voice clone profile reference
-    await updatePersona(personaId, (current) => ({
+    await updatePersona(params.personaId, (current) => ({
       ...current,
       updatedAt: now,
       voice: {
@@ -113,36 +94,14 @@ export async function POST(
       );
     }
 
-    console.error("Voice clone upload error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Upload failed" },
-      { status: 500 },
-    );
+    throw error;
   }
-}
+}, { errorMessage: "Upload failed" });
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ personaId: string }> },
-) {
-  try {
-    const { personaId } = await params;
-    const persona = await getPersona(personaId);
-
-    if (!persona) {
-      return NextResponse.json({ error: "Persona not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({
-      voiceProfile: persona.voice,
-      cloneProfileId: persona.voice.cloneProfileId,
-      cloneState: persona.voice.cloneState,
-    });
-  } catch (error) {
-    console.error("Voice clone status error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to get status" },
-      { status: 500 },
-    );
-  }
-}
+export const GET = withPersonaRoute(async ({ persona }) => {
+  return NextResponse.json({
+    voiceProfile: persona.voice,
+    cloneProfileId: persona.voice.cloneProfileId,
+    cloneState: persona.voice.cloneState,
+  });
+}, { errorMessage: "Failed to get status" });

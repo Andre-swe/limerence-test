@@ -6,16 +6,12 @@ const {
   createClientMock,
   getProviderStatusMock,
   getSupabaseStatusMock,
-  listPersonasForUserMock,
-  getLastMessageMock,
-  getUnreadCountMock,
+  listPersonaDirectoryEntriesForUserMock,
 } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   getProviderStatusMock: vi.fn(),
   getSupabaseStatusMock: vi.fn(),
-  listPersonasForUserMock: vi.fn(),
-  getLastMessageMock: vi.fn(),
-  getUnreadCountMock: vi.fn(),
+  listPersonaDirectoryEntriesForUserMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -65,9 +61,7 @@ vi.mock("@/app/settings/settings-client", () => ({
 }));
 
 vi.mock("@/lib/store", () => ({
-  listPersonasForUser: listPersonasForUserMock,
-  getLastMessage: getLastMessageMock,
-  getUnreadCount: getUnreadCountMock,
+  listPersonaDirectoryEntriesForUser: listPersonaDirectoryEntriesForUserMock,
 }));
 
 vi.mock("@/lib/supabase-server", () => ({
@@ -89,15 +83,17 @@ import SettingsPage from "@/app/settings/page";
 describe("app pages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listPersonasForUserMock.mockResolvedValue([
+    listPersonaDirectoryEntriesForUserMock.mockResolvedValue([
       {
-        id: "persona-1",
-        name: "Mira",
-        createdAt: "2026-03-16T12:00:00.000Z",
+        persona: {
+          id: "persona-1",
+          name: "Mira",
+          createdAt: "2026-03-16T12:00:00.000Z",
+        },
+        lastMessage: null,
+        unreadCount: 0,
       },
     ]);
-    getLastMessageMock.mockResolvedValue(null);
-    getUnreadCountMock.mockResolvedValue(0);
     createClientMock.mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
@@ -131,7 +127,7 @@ describe("app pages", () => {
     expect(markup).toContain("Your Personas");
     expect(markup).toContain("Mira");
     expect(markup).toContain("user@example.com");
-    expect(listPersonasForUserMock).toHaveBeenCalledWith("user-1");
+    expect(listPersonaDirectoryEntriesForUserMock).toHaveBeenCalledWith("user-1");
   });
 
   it("renders the create page shell", () => {

@@ -10,8 +10,6 @@ export async function GET(request: Request) {
   const type = searchParams.get("type") as EmailOtpType | null;
   const error_param = searchParams.get("error");
   const error_description = searchParams.get("error_description");
-  const rawNext = searchParams.get("next") ?? "/";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
 
   // If Supabase returned an error in the URL, redirect to login with that error
   if (error_param) {

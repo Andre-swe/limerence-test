@@ -33,9 +33,6 @@ import type { ReasoningProvider } from "@/lib/providers";
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Minimum number of new memory items to justify a creative dream pass. */
-const _MIN_DREAM_MATERIAL = 3;
-
 /** Maximum age (in ms) for a dream cycle — don't re-dream within 18 hours. */
 const DREAM_CYCLE_COOLDOWN_MS = 18 * 60 * 60 * 1000;
 

@@ -71,4 +71,14 @@ describe("LoginPage", () => {
     expect(screen.queryByLabelText("Password")).toBeNull();
     expect(screen.getByRole("button", { name: "Send magic link" })).toBeTruthy();
   });
+
+  it("shows password entry in sign-up mode", () => {
+    render(<LoginPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign up" }));
+
+    expect(screen.getByRole("heading", { name: "Create account" })).toBeTruthy();
+    expect(screen.getByLabelText("Password")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send sign-up link" })).toBeTruthy();
+  });
 });

@@ -1,20 +1,47 @@
 import type { NextResponse } from "next/server";
 
-export const ALLOWED_ORIGINS = [
-  ...(process.env.NODE_ENV !== "production" ? ["http://localhost:3000"] : []),
-];
+function normalizeOrigin(origin: string | undefined) {
+  if (!origin) {
+    return null;
+  }
+
+  try {
+    return new URL(origin).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isVercelPreviewOrigin(origin: string) {
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+}
+
+export const ALLOWED_ORIGINS = Array.from(
+  new Set(
+    [
+      process.env.NODE_ENV !== "production" ? "http://localhost:3000" : null,
+      process.env.NODE_ENV !== "production" ? "http://127.0.0.1:3000" : null,
+      normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL),
+      normalizeOrigin(process.env.NEXT_PUBLIC_SITE_URL),
+      normalizeOrigin(
+        process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+      ),
+    ].filter((origin): origin is string => Boolean(origin)),
+  ),
+);
 
 export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
-  
-  // Allow any vercel.app subdomain for preview deployments
-  if (origin.endsWith(".vercel.app")) return true;
-  
-  // Allow localhost in development
-  if (process.env.NODE_ENV !== "production" && origin === "http://localhost:3000") {
+
+  if (isVercelPreviewOrigin(origin)) {
     return true;
   }
-  
+
   return ALLOWED_ORIGINS.includes(origin);
 }
 
@@ -30,11 +57,10 @@ export const PROTECTED_PAGES = [
   "/create",
   "/personas",
   "/settings",
-  "/review",
 ];
 
 export function getCorsHeaders(origin: string | null): Record<string, string> {
-  const isAllowed = origin !== null && ALLOWED_ORIGINS.includes(origin);
+  const isAllowed = origin !== null && isAllowedOrigin(origin);
   const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",

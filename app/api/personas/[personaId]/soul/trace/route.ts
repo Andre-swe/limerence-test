@@ -1,20 +1,9 @@
 import { NextResponse } from "next/server";
-import { verifyPersonaOwnership } from "@/lib/auth";
+import { withPersonaRoute } from "@/lib/persona-route";
 import { buildMemoryRetrievalPack } from "@/lib/memory-v2";
 
 /** Debug route: returns the persona's cognitive state, memory claims, and trace. */
-export async function GET(
-  request: Request,
-  context: { params: Promise<{ personaId: string }> },
-) {
-  try {
-    const { personaId } = await context.params;
-    const ownership = await verifyPersonaOwnership(request, personaId);
-    if (!ownership.authorized) {
-      return NextResponse.json({ error: ownership.error }, { status: ownership.status });
-    }
-    const persona = ownership.persona;
-
+export const GET = withPersonaRoute(async ({ persona }) => {
     return NextResponse.json({
       personaId: persona.id,
       personaName: persona.name,
@@ -41,10 +30,4 @@ export async function GET(
       recentEvents: persona.mindState.recentEvents,
       traceHead: persona.mindState.traceHead,
     });
-  } catch {
-    return NextResponse.json(
-      { error: "Unable to load soul trace." },
-      { status: 500 },
-    );
-  }
-}
+  }, { errorMessage: "Unable to load soul trace." });

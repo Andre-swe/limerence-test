@@ -6,6 +6,7 @@ import {
 import {
   getPersona,
   getPersonaForUser,
+  listPersonaDirectoryEntriesForUser,
   listPersonasForUser,
   resetStoreForTests,
   savePersona,
@@ -112,6 +113,16 @@ describe("auth store integration", () => {
 
     expect(personas.map((persona) => persona.userId)).toEqual(["user-demo", "user-demo"]);
     expect(personas.map((persona) => persona.name)).not.toContain("Other User Persona");
+  });
+
+  it("builds directory metadata only for personas owned by the requested user", async () => {
+    const entries = await listPersonaDirectoryEntriesForUser("user-demo");
+
+    expect(entries.map((entry) => entry.persona.id)).toEqual(["persona-mom", "persona-alex"]);
+    expect(entries[0]?.lastMessage?.id).toBe("msg-3");
+    expect(entries[0]?.unreadCount).toBe(1);
+    expect(entries[1]?.lastMessage).toBeNull();
+    expect(entries[1]?.unreadCount).toBe(0);
   });
 
   it("does not return a persona owned by a different user", async () => {

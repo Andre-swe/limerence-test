@@ -1,12 +1,9 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, ImagePlus, Loader2, SendHorizontal } from "lucide-react";
-import { FeedbackButton } from "@/components/feedback-button";
+import { useRef, useState } from "react";
+import { MessagesPanelComposer } from "@/components/messages-panel-composer";
+import { MessagesPanelThread, type DisplayMessage } from "@/components/messages-panel-thread";
 import { useOnboardingActions } from "@/components/onboarding";
-import { VoiceRecorder } from "@/components/voice-recorder";
-import { formatDateTime } from "@/lib/utils";
 import type { MessageAttachment, MessageEntry, PersonaStatus } from "@/lib/types";
 
 type ConversationResponse = {
@@ -15,87 +12,12 @@ type ConversationResponse = {
   error?: string;
 };
 
-type DisplayMessage = MessageEntry & {
-  optimistic?: boolean;
-};
-
 type MessagesPanelProps = {
   initialMessages: MessageEntry[];
   personaId: string;
   personaName: string;
   personaStatus: PersonaStatus;
 };
-
-function TypingIndicator() {
-  return (
-    <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[rgba(111,123,105,0.08)] px-3 py-2">
-      {[0, 1, 2].map((index) => (
-        <span
-          key={index}
-          className="typing-dot h-2 w-2 rounded-full bg-[rgba(75,85,67,0.62)]"
-          style={{ animationDelay: `${index * 140}ms` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/**
- * Receipt lifecycle that mirrors how a real person receives a message:
- * Sent → Delivered (1-2s) → Read (2-4s more) → persona decides to type.
- *
- * The "typing" phase renders as a separate assistant bubble at the bottom
- * of the thread. The receipt text appears under the user's last message.
- * This component only controls the receipt text — the parent checks
- * the phase to decide when to show the typing bubble.
- */
-/**
- * Tracks the Sent → Delivered → Read → Typing receipt lifecycle.
- * Each receipt state advances via a separate timer. Resets when
- * the sendKey changes (new message sent).
- */
-function ReceiptLifecycle({
-  onPhaseChange,
-}: {
-  onPhaseChange: (phase: "sent" | "delivered" | "read" | "typing") => void;
-}) {
-  useEffect(() => {
-    onPhaseChange("sent");
-
-    const deliveredDelay = 800 + Math.random() * 1200;
-    const readDelay = deliveredDelay + 1500 + Math.random() * 2500;
-    const typingDelay = readDelay + 1000 + Math.random() * 2000;
-
-    const t1 = setTimeout(() => onPhaseChange("delivered"), deliveredDelay);
-    const t2 = setTimeout(() => onPhaseChange("read"), readDelay);
-    const t3 = setTimeout(() => onPhaseChange("typing"), typingDelay);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-    // onPhaseChange is stable (from parent useState setter)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return null;
-}
-
-function ReceiptIndicator({ phase }: { phase: "sent" | "delivered" | "read" | "typing" }) {
-  // WhatsApp-style: single check = sent, double check = delivered, blue double check = read
-  return (
-    <div className="mt-0.5 flex items-center justify-end gap-1 pr-0.5">
-      {phase === "sent" ? (
-        <Check className="h-3.5 w-3.5 text-[rgba(29,38,34,0.3)]" />
-      ) : phase === "delivered" ? (
-        <CheckCheck className="h-3.5 w-3.5 text-[rgba(29,38,34,0.3)]" />
-      ) : (
-        <CheckCheck className="h-3.5 w-3.5 text-[rgba(110,140,90,0.7)]" />
-      )}
-    </div>
-  );
-}
 
 function summarizeImageShare(count: number) {
   return count === 1 ? "Shared an image." : `Shared ${count} images.`;
@@ -141,99 +63,10 @@ function revealFloorMs(input: {
   const base = 900;
   const lengthWeight = Math.min(220, input.text.trim().length * 6);
   const modalityWeight = input.hasAudio ? 180 : input.imageCount > 0 ? 140 : 0;
-  const deterministicJitter = (input.text.length + input.imageCount * 31 + (input.hasAudio ? 17 : 0)) % 260;
+  const deterministicJitter =
+    (input.text.length + input.imageCount * 31 + (input.hasAudio ? 17 : 0)) % 260;
 
   return Math.min(1600, base + lengthWeight + modalityWeight + deterministicJitter);
-}
-
-function visibleMessages(messages: DisplayMessage[]) {
-  return messages.filter((message) => message.channel !== "live" && message.role !== "system");
-}
-
-function bodyIsJustImagePlaceholder(message: MessageEntry) {
-  return (
-    message.kind === "image" &&
-    /^shared( \d+)? images?\.$/i.test(message.body.trim())
-  );
-}
-
-function imageAttachments(message: MessageEntry) {
-  return message.attachments.filter((attachment) => attachment.type === "image");
-}
-
-/** Returns true if two messages are more than 5 minutes apart. */
-function isTimeGap(a: string, b: string) {
-  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) > 5 * 60 * 1000;
-}
-
-/** Format a timestamp as a short time like "7:42 PM" or include the date if older than today. */
-function shortTime(iso: string) {
-  const date = new Date(iso);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  if (isToday) {
-    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  }
-  return formatDateTime(iso);
-}
-
-function audioAttachments(message: MessageEntry) {
-  return message.attachments.filter((attachment) => attachment.type === "audio");
-}
-
-function AttachmentStrip({ attachments }: { attachments: MessageAttachment[] }) {
-  if (attachments.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-3 grid gap-3">
-      {attachments.map((attachment) => (
-        <figure key={attachment.id} className="overflow-hidden rounded-[18px] border border-[var(--line)] bg-[rgba(255,255,255,0.45)]">
-          <Image
-            src={attachment.url}
-            alt={attachment.originalName}
-            width={1200}
-            height={900}
-            className="block max-h-[22rem] w-full object-cover"
-            unoptimized
-          />
-        </figure>
-      ))}
-    </div>
-  );
-}
-
-function AudioStrip({ message }: { message: MessageEntry }) {
-  const attachmentAudio = audioAttachments(message);
-  const assistantAudio = message.audioUrl
-    ? [
-        {
-          id: `${message.id}-generated`,
-          url: message.audioUrl,
-          originalName: "voice-note.mp3",
-        },
-      ]
-    : [];
-  const audioItems = attachmentAudio.length > 0 ? attachmentAudio : assistantAudio;
-
-  if (audioItems.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-3 space-y-2">
-      {audioItems.map((attachment) => (
-        <audio
-          key={attachment.id}
-          controls
-          preload="none"
-          src={attachment.url}
-          className="w-full"
-        />
-      ))}
-    </div>
-  );
 }
 
 export function MessagesPanel({
@@ -245,9 +78,10 @@ export function MessagesPanel({
   const [messages, setMessages] = useState<DisplayMessage[]>(initialMessages);
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [sendKey, setSendKey] = useState(0);
-  const [receiptPhase, setReceiptPhase] = useState<"sent" | "delivered" | "read" | "typing">("sent");
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const [receiptKey, setReceiptKey] = useState(0);
+  const [receiptPhase, setReceiptPhase] = useState<"sent" | "delivered" | "read" | "typing">(
+    "sent",
+  );
   const sendingRef = useRef(false);
   const isLocked = personaStatus !== "active";
   const { markMessageSent } = useOnboardingActions();
@@ -267,23 +101,23 @@ export function MessagesPanel({
     const optimisticAudio = payload.file
       ? buildOptimisticAttachments([payload.file], "audio")
       : { attachments: [] as MessageAttachment[], dispose() {} };
-    const optimisticImages = imageFiles.length > 0
-      ? buildOptimisticAttachments(imageFiles, "image")
-      : { attachments: [] as MessageAttachment[], dispose() {} };
+    const optimisticImages =
+      imageFiles.length > 0
+        ? buildOptimisticAttachments(imageFiles, "image")
+        : { attachments: [] as MessageAttachment[], dispose() {} };
     const optimisticBody =
       trimmedText ||
-      (imageFiles.length > 0 ? summarizeImageShare(imageFiles.length) : payload.file ? "Sent a voice note." : "");
+      (imageFiles.length > 0
+        ? summarizeImageShare(imageFiles.length)
+        : payload.file
+          ? "Sent a voice note."
+          : "");
 
     const optimisticUserMessage: DisplayMessage = {
       id: optimisticUserId,
       personaId,
       role: "user",
-      kind:
-        payload.file
-          ? "audio"
-          : imageFiles.length > 0 && !trimmedText
-            ? "image"
-            : "text",
+      kind: payload.file ? "audio" : imageFiles.length > 0 && !trimmedText ? "image" : "text",
       channel: "web",
       body: optimisticBody,
       attachments: [...optimisticAudio.attachments, ...optimisticImages.attachments],
@@ -298,9 +132,8 @@ export function MessagesPanel({
     };
 
     setIsSending(true);
-    setSendKey((k) => k + 1);
+    setReceiptKey((key) => key + 1);
     setText("");
-    // Only add the user message — the typing indicator appears later via receipt phase
     setMessages((current) => [...current, optimisticUserMessage]);
 
     try {
@@ -330,7 +163,6 @@ export function MessagesPanel({
       }
 
       if (data.leftOnRead) {
-        // Persona read the message but chose not to reply — keep the "Read" receipt
         setMessages(data.messages);
         optimisticAudio.dispose();
         optimisticImages.dispose();
@@ -355,11 +187,8 @@ export function MessagesPanel({
     } catch (error) {
       optimisticAudio.dispose();
       optimisticImages.dispose();
-      setMessages((current) =>
-        current.filter((message) => message.id !== optimisticUserId),
-      );
-      // Only restore original text if the user hasn't typed something new
-      setText((current) => current.trim() ? current : draftText);
+      setMessages((current) => current.filter((message) => message.id !== optimisticUserId));
+      setText((current) => (current.trim() ? current : draftText));
       console.error(error);
     } finally {
       sendingRef.current = false;
@@ -367,174 +196,25 @@ export function MessagesPanel({
     }
   }
 
-  const visible = visibleMessages(messages);
-  // Find the last user message index for receipt placement
-  const lastUserIndex = visible.reduce(
-    (last, msg, i) => (msg.role === "user" ? i : last),
-    -1,
-  );
-  // Check if the persona has "read" (replied after) the last user message
-  const lastUserRead = lastUserIndex >= 0 && visible.slice(lastUserIndex + 1).some(
-    (m) => m.role === "assistant" && !m.optimistic,
-  );
   return (
     <section className="soft-panel mx-auto flex max-w-3xl flex-col rounded-[36px] px-4 py-4 sm:px-5 sm:py-5">
-      <div className="flex min-h-[32rem] flex-col">
-        <div className="flex-1 space-y-0.5 pb-2">
-          {visible.map((message, index) => {
-            const images = imageAttachments(message);
-            const showBody = message.body.trim().length > 0 && !bodyIsJustImagePlaceholder(message);
-            const isUser = message.role === "user";
-            const prev = visible[index - 1];
-            const next = visible[index + 1];
-            const sameSenderAsPrev = prev && prev.role === message.role;
-            const sameSenderAsNext = next && next.role === message.role;
-            const showTimeGap = !prev || isTimeGap(prev.createdAt, message.createdAt);
-            const isLastUser = index === lastUserIndex;
+      <MessagesPanelThread
+        messages={messages}
+        isSending={isSending}
+        receiptPhase={receiptPhase}
+        receiptKey={receiptKey}
+        personaId={personaId}
+        onReceiptPhaseChange={setReceiptPhase}
+      />
 
-            return (
-              <div key={message.id}>
-                {/* Time separator — only shown between messages >5min apart */}
-                {showTimeGap ? (
-                  <p className="py-3 text-center text-[11px] text-[rgba(29,38,34,0.36)]">
-                    {shortTime(message.createdAt)}
-                  </p>
-                ) : null}
-
-                <div
-                  className={`flex ${isUser ? "justify-end" : "justify-start"} ${
-                    sameSenderAsPrev && !showTimeGap ? "mt-0.5" : "mt-2"
-                  }`}
-                >
-                  <article
-                    className={`msg-bubble ${
-                      isUser ? "msg-bubble-user" : "msg-bubble-assistant"
-                    }`}
-                    style={{
-                      // Tighter corners between consecutive same-sender messages
-                      borderTopLeftRadius: !isUser && sameSenderAsPrev && !showTimeGap ? "6px" : undefined,
-                      borderTopRightRadius: isUser && sameSenderAsPrev && !showTimeGap ? "6px" : undefined,
-                      borderBottomLeftRadius: !isUser && sameSenderAsNext ? "6px" : undefined,
-                      borderBottomRightRadius: isUser && sameSenderAsNext ? "6px" : undefined,
-                    }}
-                  >
-                    {showBody ? (
-                      <p
-                        className={`text-[0.9375rem] leading-relaxed ${
-                          message.optimistic && !isUser ? "animate-pulse opacity-70" : ""
-                        }`}
-                      >
-                        {message.body}
-                      </p>
-                    ) : null}
-                    <AttachmentStrip attachments={images} />
-                    <AudioStrip message={message} />
-                  </article>
-                </div>
-
-                {/* Receipt — live phase when sending, static when settled */}
-                {isLastUser ? (
-                  isSending ? (
-                    <ReceiptIndicator phase={receiptPhase} />
-                  ) : lastUserRead ? (
-                    <ReceiptIndicator phase="read" />
-                  ) : null
-                ) : null}
-
-                {/* Feedback flag — only on real assistant messages */}
-                {!isUser && !message.optimistic ? (
-                  <div className="mt-0.5">
-                    <FeedbackButton personaId={personaId} messageId={message.id} />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-
-          {/* Receipt lifecycle — remounted on each send via key. Drives the Sent → Delivered → Read → Typing flow. */}
-          {isSending ? (
-            <ReceiptLifecycle key={sendKey} onPhaseChange={setReceiptPhase} />
-          ) : null}
-
-          {/* Typing bubble — appears when the receipt phase reaches "typing" */}
-          {isSending && receiptPhase === "typing" ? (
-            <div className="mt-2 flex justify-start">
-              <div className="msg-bubble msg-bubble-assistant">
-                <TypingIndicator />
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {isLocked ? (
-          <div className="mt-5 rounded-[24px] border border-[rgba(199,161,101,0.22)] bg-[rgba(199,161,101,0.12)] px-4 py-4 text-sm leading-6 text-[var(--sage-deep)]">
-            This person is not available yet.
-          </div>
-        ) : (
-          <div className="message-input-container mt-4 border-t border-[var(--line)] bg-[var(--background)] pt-4 sm:mt-6 sm:pt-5">
-            <textarea
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              rows={2}
-              placeholder={`Message ${personaName}`}
-              className="input-quiet w-full text-base sm:text-sm"
-              style={{ fontSize: "16px" }}
-            />
-            <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-4 sm:gap-3">
-              <button
-                type="button"
-                disabled={isSending || text.trim().length === 0}
-                onClick={() => {
-                  void submit({ text });
-                }}
-                className="btn-solid touch-target flex-1 justify-center sm:flex-none"
-              >
-                {isSending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <SendHorizontal className="h-4 w-4" />
-                )}
-                <span className="sm:inline">Send</span>
-              </button>
-
-              <VoiceRecorder
-                disabled={isSending}
-                onRecorded={async (file) => {
-                  await submit({ file, text });
-                }}
-                onError={(message) => {
-                  console.error("Voice recording error:", message);
-                }}
-              />
-
-              <button
-                type="button"
-                onClick={() => imageInputRef.current?.click()}
-                className="btn-pill touch-target"
-              >
-                <ImagePlus className="h-4 w-4" />
-                <span className="hidden sm:inline">Image</span>
-              </button>
-
-
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={async (event) => {
-                  const files = Array.from(event.target.files ?? []);
-                  if (files.length > 0) {
-                    await submit({ images: files, text });
-                    event.target.value = "";
-                  }
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
+      <MessagesPanelComposer
+        personaName={personaName}
+        text={text}
+        setText={setText}
+        isSending={isSending}
+        isLocked={isLocked}
+        submit={submit}
+      />
     </section>
   );
 }

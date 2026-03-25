@@ -5,6 +5,7 @@ import type { Persona } from "@/lib/types";
 
 type PersonaRouteParams = {
   personaId: string;
+  [key: string]: string;
 };
 
 type PersonaRouteContext<TParams extends PersonaRouteParams> = {

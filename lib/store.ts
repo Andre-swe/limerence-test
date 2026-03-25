@@ -37,6 +37,13 @@ type StoreSnapshot = {
   revision: number;
 };
 
+export type PersonaDirectoryEntry = {
+  persona: Persona;
+  lastMessage: MessageEntry | null;
+  unreadCount: number;
+  lastActivityAt: string;
+};
+
 const remoteStoreRetryLimit = 6;
 const seededHouseVoiceMap = {
   "persona-mom": houseVoicePresets[0].id,
@@ -751,6 +758,54 @@ function sortPersonasByUpdatedAt(personas: Persona[]) {
   return [...personas].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
+function buildPersonaDirectoryEntries(
+  personas: Persona[],
+  messages: MessageEntry[],
+) {
+  const ownedPersonaIds = new Set(personas.map((persona) => persona.id));
+  const lastMessageByPersona = new Map<string, MessageEntry>();
+  const unreadCountByPersona = new Map<string, number>();
+  const seenUserByPersona = new Set<string>();
+
+  const relevantMessages = messages
+    .filter((message) => ownedPersonaIds.has(message.personaId))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  for (const message of relevantMessages) {
+    if (!lastMessageByPersona.has(message.personaId)) {
+      lastMessageByPersona.set(message.personaId, message);
+    }
+
+    if (seenUserByPersona.has(message.personaId)) {
+      continue;
+    }
+
+    if (message.role === "user") {
+      seenUserByPersona.add(message.personaId);
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      unreadCountByPersona.set(
+        message.personaId,
+        (unreadCountByPersona.get(message.personaId) ?? 0) + 1,
+      );
+    }
+  }
+
+  return personas
+    .map((persona) => {
+      const lastMessage = lastMessageByPersona.get(persona.id) ?? null;
+      return {
+        persona,
+        lastMessage,
+        unreadCount: unreadCountByPersona.get(persona.id) ?? 0,
+        lastActivityAt: lastMessage?.createdAt ?? persona.createdAt,
+      } satisfies PersonaDirectoryEntry;
+    })
+    .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt));
+}
+
 /** List all personas sorted by most recently updated. */
 export async function listPersonas() {
   const store = await readStore();
@@ -774,6 +829,24 @@ export async function listPersonasForUser(userId: string) {
   }
 
   return loadOwnedPersonas();
+}
+
+export async function listPersonaDirectoryEntriesForUser(userId: string) {
+  const loadOwnedDirectory = async () => {
+    const store = await readStore();
+    return buildPersonaDirectoryEntries(
+      sortPersonasByUpdatedAt(
+        store.personas.filter((persona) => persona.userId === userId),
+      ),
+      store.messages,
+    );
+  };
+
+  if (isSupabaseRuntimeStoreEnabled()) {
+    return withUserStore(userId, loadOwnedDirectory);
+  }
+
+  return loadOwnedDirectory();
 }
 
 /** Get a persona only if it belongs to the requested user. */
