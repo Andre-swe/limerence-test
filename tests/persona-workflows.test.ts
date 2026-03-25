@@ -1730,7 +1730,9 @@ describe("persona workflows", () => {
 
   it("builds a live session from the soul frame instead of ad hoc context", async () => {
     const previousAccessToken = process.env.HUME_ACCESS_TOKEN;
+    const previousDefaultVoiceId = process.env.HUME_DEFAULT_VOICE_ID;
     process.env.HUME_ACCESS_TOKEN = "test-access-token";
+    process.env.HUME_DEFAULT_VOICE_ID = "test-default-voice";
 
     try {
       const persona = await getPersona("persona-mom");
@@ -1743,6 +1745,7 @@ describe("persona workflows", () => {
       expect(session.sessionSettings.systemPrompt).toContain("Durable context");
       expect(session.soulFrame.readyEvents.length).toBeGreaterThanOrEqual(0);
       expect(session.sessionSettings.metadata).toBeTruthy();
+      expect(session.sessionSettings.voiceId).toBe("test-default-voice");
 
       // Version variables must be present so mid-call updates keep them current
       expect(session.sessionSettings.variables?.soul_context_version).toBeGreaterThanOrEqual(1);
@@ -1754,12 +1757,20 @@ describe("persona workflows", () => {
       } else {
         process.env.HUME_ACCESS_TOKEN = previousAccessToken;
       }
+
+      if (previousDefaultVoiceId === undefined) {
+        delete process.env.HUME_DEFAULT_VOICE_ID;
+      } else {
+        process.env.HUME_DEFAULT_VOICE_ID = previousDefaultVoiceId;
+      }
     }
   });
 
   it("builds mode-aware live sessions for visual calls", async () => {
     const previousAccessToken = process.env.HUME_ACCESS_TOKEN;
+    const previousDefaultVoiceId = process.env.HUME_DEFAULT_VOICE_ID;
     process.env.HUME_ACCESS_TOKEN = "test-access-token";
+    process.env.HUME_DEFAULT_VOICE_ID = "test-default-voice";
 
     try {
       const persona = await getPersona("persona-mom");
@@ -1771,11 +1782,62 @@ describe("persona workflows", () => {
       expect(session.sessionSettings.metadata?.liveMode).toBe("screen");
       expect(session.sessionSettings.variables?.live_mode).toBe("screen");
       expect(session.sessionSettings.context?.text).toBe(session.soulFrame.contextText);
+      expect(session.sessionSettings.voiceId).toBe("test-default-voice");
     } finally {
       if (previousAccessToken === undefined) {
         delete process.env.HUME_ACCESS_TOKEN;
       } else {
         process.env.HUME_ACCESS_TOKEN = previousAccessToken;
+      }
+
+      if (previousDefaultVoiceId === undefined) {
+        delete process.env.HUME_DEFAULT_VOICE_ID;
+      } else {
+        process.env.HUME_DEFAULT_VOICE_ID = previousDefaultVoiceId;
+      }
+    }
+  });
+
+  it("rejects configless live sessions when no Hume voice is available", async () => {
+    const previousAccessToken = process.env.HUME_ACCESS_TOKEN;
+    const previousConfigId = process.env.HUME_CONFIG_ID;
+    const previousDefaultVoiceId = process.env.HUME_DEFAULT_VOICE_ID;
+    process.env.HUME_ACCESS_TOKEN = "test-access-token";
+    delete process.env.HUME_CONFIG_ID;
+    delete process.env.HUME_DEFAULT_VOICE_ID;
+
+    try {
+      const persona = await getPersona("persona-mom");
+      expect(persona).toBeTruthy();
+
+      await expect(
+        createPersonaLiveSession({
+          ...persona!,
+          voice: {
+            ...persona!.voice,
+            provider: "mock",
+            status: "unavailable",
+            voiceId: undefined,
+          },
+        }),
+      ).rejects.toThrow("No Hume voice is configured for live calls");
+    } finally {
+      if (previousAccessToken === undefined) {
+        delete process.env.HUME_ACCESS_TOKEN;
+      } else {
+        process.env.HUME_ACCESS_TOKEN = previousAccessToken;
+      }
+
+      if (previousConfigId === undefined) {
+        delete process.env.HUME_CONFIG_ID;
+      } else {
+        process.env.HUME_CONFIG_ID = previousConfigId;
+      }
+
+      if (previousDefaultVoiceId === undefined) {
+        delete process.env.HUME_DEFAULT_VOICE_ID;
+      } else {
+        process.env.HUME_DEFAULT_VOICE_ID = previousDefaultVoiceId;
       }
     }
   });

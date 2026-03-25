@@ -536,6 +536,11 @@ export function useConversationPanelLive({
         },
         hostname: session.hostname,
         configId: session.configId,
+        sessionSettings: {
+          customSessionId: session.sessionSettings.customSessionId,
+          type: "session_settings",
+          voiceId: session.sessionSettings.voiceId,
+        },
         verboseTranscription: false,
       });
 

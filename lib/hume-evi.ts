@@ -135,9 +135,16 @@ export async function createPersonaLiveSession(
   const sessionId = `${persona.id}-${mode}-${Date.now()}`;
 
   const configId = process.env.HUME_CONFIG_ID?.trim() || undefined;
+  const liveVoiceId = buildLiveVoiceId(persona, options);
+
+  if (!configId && !liveVoiceId) {
+    throw new Error(
+      "No Hume voice is configured for live calls. Set a persona voice or configure a shared Hume config.",
+    );
+  }
 
   console.log('[createPersonaLiveSession] Config ID:', configId);
-  console.log('[createPersonaLiveSession] Voice ID:', buildLiveVoiceId(persona, options));
+  console.log('[createPersonaLiveSession] Voice ID:', liveVoiceId);
   console.log('[createPersonaLiveSession] Hostname:', humeHostname);
 
   return {
@@ -167,7 +174,7 @@ export async function createPersonaLiveSession(
         ...snapshot.sessionFrame.variables,
         live_mode: mode,
       },
-      voiceId: buildLiveVoiceId(persona, options),
+      voiceId: liveVoiceId,
     },
     soulFrame: snapshot.sessionFrame,
     voiceStatus: persona.voice.status,

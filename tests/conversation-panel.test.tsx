@@ -259,6 +259,7 @@ describe("ConversationPanel", () => {
             variables: {
               soul_mode: "voice",
             },
+            voiceId: "voice-1",
           },
           voiceStatus: "ready",
         });
@@ -294,6 +295,17 @@ describe("ConversationPanel", () => {
       expect(connectMock).toHaveBeenCalledTimes(1);
       expect(sendSessionSettingsMock).toHaveBeenCalledTimes(2);
     });
+
+    expect(connectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configId: undefined,
+        hostname: "api.hume.ai",
+        sessionSettings: expect.objectContaining({
+          customSessionId: "sess-1",
+          voiceId: "voice-1",
+        }),
+      }),
+    );
 
     const contextCallsBeforeUnmount = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes("/live/context"),
@@ -344,6 +356,7 @@ describe("ConversationPanel", () => {
             variables: {
               soul_mode: "screen",
             },
+            voiceId: "voice-screen",
           },
           voiceStatus: "ready",
         });
@@ -421,6 +434,7 @@ describe("ConversationPanel", () => {
             customSessionId: "sess-screen-error",
             systemPrompt: "system prompt",
             type: "session_settings",
+            voiceId: "voice-screen",
           },
           voiceStatus: "ready",
         });
