@@ -21,9 +21,9 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Limerence | Creator iMessage Companions",
+  title: "Limerence | Private iMessage Memberships for Creators",
   description:
-    "Persistent iMessage companions for creator brands, spanning premium romantic experiences and affirmation or accountability memberships.",
+    "Persistent iMessage membership products for creator brands, built for private communities, ongoing support, and high-touch fan relationships.",
   viewport: {
     width: "device-width",
     initialScale: 1,
