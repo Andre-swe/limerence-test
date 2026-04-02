@@ -1,6 +1,39 @@
 # Limerence
 
-Limerence is a call-first personal-memory persona product. It lets someone create an AI persona with personality, memory, and voice — then talk to that persona live and continue the relationship asynchronously through messages, voice notes, and image sharing.
+Limerence is now being rebuilt as a Linq-powered iMessage agent runtime. Instead of centering a standalone end-user app, this repo is becoming the backend brain that receives Linq webhooks, runs the persona engine, and replies inside iMessage conversations.
+
+The existing persona, memory, soul, and voice systems are still here. What is changing is the surface: Linq provides the iMessage transport, and this codebase handles reasoning, persistence, and reply generation.
+
+## Current Direction
+
+- Linq sends signed `message.received` webhooks to `/api/linq/webhook`
+- The webhook handler verifies the signature, deduplicates retries, and routes the chat to a persona
+- The existing persona engine generates a response
+- The server sends the reply back through Linq’s `POST /v3/chats/{chatId}/messages` endpoint
+
+This is the current migration target. Some legacy web UI and live-call code still exists while the rebuild is in progress.
+
+## Linq Setup
+
+Required environment variables for the new iMessage flow:
+
+```bash
+LINQ_API_TOKEN=
+LINQ_WEBHOOK_SECRET=
+LINQ_API_BASE_URL=https://api.linqapp.com/api/partner
+LINQ_WEBHOOK_VERSION=2026-02-03
+LINQ_DEFAULT_PERSONA_ID=persona-mom
+LINQ_PHONE_TO_PERSONA_MAP=+12025550123=persona-mom,+12025550124=persona-alex
+NEXT_PUBLIC_APP_URL=https://your-deployment.example.com
+```
+
+Recommended webhook target:
+
+```text
+https://your-deployment.example.com/api/linq/webhook?version=2026-02-03
+```
+
+The Linq docs recommend verifying `X-Webhook-Signature` against `{timestamp}.{raw_body}` using HMAC-SHA256, rejecting requests older than five minutes, returning `200` quickly, and deduplicating by `event_id`. This repo follows that pattern.
 
 ## ✨ What It Is
 

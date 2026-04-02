@@ -789,6 +789,15 @@ export const messageMetadataSchema = z.object({
   liveMode: liveSessionModeSchema.optional(),
   sessionId: z.string().optional(),
   prosodyScores: z.record(z.string(), normalizedScoreSchema).optional(),
+  linqEventId: z.string().optional(),
+  linqMessageId: z.string().optional(),
+  linqChatId: z.string().optional(),
+  linqTraceId: z.string().optional(),
+  linqSenderHandle: z.string().optional(),
+  linqOwnerHandle: z.string().optional(),
+  linqService: z.string().optional(),
+  linqWebhookVersion: z.string().optional(),
+  linqDirection: z.enum(["inbound", "outbound"]).optional(),
 });
 
 export const perceptionObservationSchema = z.object({

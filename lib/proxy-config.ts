@@ -49,11 +49,11 @@ export const PUBLIC_PATHS = [
   "/login",
   "/auth/callback",
   "/api/auth",
+  "/api/linq",
   "/setup-password",
 ];
 
 export const PROTECTED_PAGES = [
-  "/",
   "/create",
   "/personas",
   "/settings",
@@ -85,6 +85,10 @@ export function applyHeaders(
 }
 
 export function isPublicPath(pathname: string) {
+  if (pathname === "/") {
+    return true;
+  }
+
   return PUBLIC_PATHS.some((path) => pathname.startsWith(path));
 }
 

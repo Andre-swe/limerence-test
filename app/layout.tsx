@@ -21,8 +21,9 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Limerence",
-  description: "AI personas with memory, personality, and voice.",
+  title: "Limerence | Creator iMessage Companions",
+  description:
+    "Persistent iMessage companions for creator brands, spanning premium romantic experiences and affirmation or accountability memberships.",
   viewport: {
     width: "device-width",
     initialScale: 1,
